@@ -37,6 +37,17 @@ bool FSTSPickupTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("Repeated samples cannot accumulate proof time"),P.StableTime,Before);
     for(int I=0;I<4;++I)Tick(false);
     TestTrue(TEXT("Stale sample faults rather than succeeds"),!P.Fault.IsEmpty()&&!P.EstimateValid);
+    // A 120 Hz controller consuming 20 Hz observations must count sensor time
+    // once, without stretching the configured trial hold by six times.
+    P=FSTSPickupController();P.Attached(FVector(0,0,154.5));
+    Now=0; O.Timestamp=0;
+    for(int I=1;I<=150;++I)
+    {
+        Now=I/120.;
+        if(I%6==0) O.Timestamp=Now;
+        P.Update(C,O,Now,1./120.,.5,FVector::ZeroVector,65000);
+    }
+    TestTrue(TEXT("20 Hz sensor hold completes on time with 120 Hz control"),P.EstimateValid&&P.Fault.IsEmpty());
     return true;
 }
 #endif

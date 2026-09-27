@@ -203,6 +203,17 @@ void APortWorkingCrane::Stop(const FString& Reason)
 
 void APortWorkingCrane::Advance(float Dt,bool bGlobalPaused)
 {
+    // Subdivide the complete feedback loop, not just the suspension plant.
+    // Sensors and pickup decisions must advance with the accelerated simulation.
+    if(!bSTS || !bConfigured || !bJobActive || bGlobalPaused || !bEnabled || !Fault.IsEmpty())
+    { AdvanceStep(Dt,bGlobalPaused); return; }
+    const int32 Steps=FMath::Max(1,FMath::CeilToInt(double(Dt)*60.));
+    const float Step=Dt/Steps;
+    for(int32 I=0;I<Steps;++I) AdvanceStep(Step,bGlobalPaused);
+}
+
+void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
+{
     if (!bConfigured) return;
     SimulationTime+=Dt;
     if(bJobActive) { JobSeconds+=Dt; if(bGlobalPaused || !bEnabled || !Fault.IsEmpty()) PausedSeconds+=Dt; }

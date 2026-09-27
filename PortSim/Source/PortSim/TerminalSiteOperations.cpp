@@ -64,7 +64,7 @@ void AQuayCrane::TickSiteTest(float Dt)
         const auto Current=SiteLogistics->Snapshot();
         if (Current.Num()!=SiteTestPositions.Num()) { Finish(false,TEXT("Pause changed actors")); return; }
         for (int32 I=0;I<Current.Num();++I)
-            if (!Current[I].Equals(SiteTestPositions[I],.1f)) { Finish(false,TEXT("Pause/E-stop moved AGV, crane or cargo")); return; }
+            if (!Current[I].Equals(SiteTestPositions[I],.1f)) { Finish(false,FString::Printf(TEXT("Pause/E-stop moved AGV, crane or cargo: index=%d before=%s after=%s"),I,*SiteTestPositions[I].ToString(),*Current[I].ToString())); return; }
         bAutoPaused=bEmergencyStop=false; ++SiteTestStage;
     }
     else if (SiteTestStage==2 && Moving) { Freeze(true); SiteTestStage=3; }
