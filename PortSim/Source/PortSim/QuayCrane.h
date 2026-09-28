@@ -16,6 +16,8 @@ class USpringArmComponent;
 class UCameraComponent;
 class UPortSimTimeStep;
 class UEngineCustomTimeStep;
+class UPortEnvironmentComponent;
+struct FPortWindInputTestState;
 
 enum class ETerminalStage : uint8
 {
@@ -41,6 +43,9 @@ class PORTSIM_API AQuayCrane : public APawn
 
 public:
     AQuayCrane();
+
+    UFUNCTION(BlueprintPure, Category="Environment")
+    UPortEnvironmentComponent* GetEnvironment() const { return Environment; }
 
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaSeconds) override;
@@ -122,6 +127,11 @@ public:
     double AutoElapsed = 0;
 
 private:
+    UPROPERTY(VisibleAnywhere, Category="Environment") TObjectPtr<UPortEnvironmentComponent> Environment;
+#if WITH_DEV_AUTOMATION_TESTS
+    TSharedPtr<FPortWindInputTestState> WindInputTestState;
+    void TickWindInputTest(float Dt);
+#endif
     FSTSOperatingProfile STSProfile;
     FSTSObservation STSObservation;
     double STSSimulationTime = 0;
@@ -322,4 +332,6 @@ class PORTSIM_API APortSimHUD : public AHUD
 public:
     virtual void DrawHUD() override;
     virtual void NotifyHitBoxClick(FName BoxName) override;
+private:
+    void DrawWindCompass(const UPortEnvironmentComponent& Environment,float Scale);
 };

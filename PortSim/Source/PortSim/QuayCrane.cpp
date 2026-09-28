@@ -1,6 +1,7 @@
 #include "QuayCrane.h"
 #include "PortSiteLogistics.h"
 #include "PortSimTimeStep.h"
+#include "PortEnvironmentComponent.h"
 #include "Misc/FileHelper.h"
 #include "HAL/PlatformTime.h"
 #include "HAL/PlatformProcess.h"
@@ -55,6 +56,7 @@ UStaticMeshComponent* AQuayCrane::MakeBox(const TCHAR* Name, USceneComponent* Pa
 
 AQuayCrane::AQuayCrane()
 {
+    Environment=CreateDefaultSubobject<UPortEnvironmentComponent>(TEXT("Environment"));
     PrimaryActorTick.bCanEverTick = true;
     PrimaryActorTick.TickGroup = TG_PrePhysics;
     RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
@@ -257,7 +259,7 @@ void AQuayCrane::BeginPlay()
     { SiteCameraIndex=FocusIndex-1; FocusNextSiteCrane(); }
     float RequestedPlayback=1.f;
     const bool ExplicitPlayback=FParse::Value(FCommandLine::Get(),TEXT("PortSimPlayback="),RequestedPlayback);
-    if ((!bSmokeTest && !bTerminalTest && !FParse::Param(FCommandLine::Get(),TEXT("PortSimSiteTest")) && !FParse::Param(FCommandLine::Get(),TEXT("PortSimFullUnloadTest"))) || ExplicitPlayback)
+    if ((!bSmokeTest && !bTerminalTest && !FParse::Param(FCommandLine::Get(),TEXT("PortSimSiteTest")) && !FParse::Param(FCommandLine::Get(),TEXT("PortSimFullUnloadTest")) && !FParse::Param(FCommandLine::Get(),TEXT("PortSimWindInputTest"))) || ExplicitPlayback)
     {
         InstallPlaybackClock();
         while (SimulationSpeed<RequestedPlayback && GetSimulationSpeedStep()<Crane::SpeedLevelCount-1) IncreaseSimulationSpeed();
@@ -391,6 +393,7 @@ void AQuayCrane::UpdateRopes()
 void AQuayCrane::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
+    Environment->AdvanceEnvironment(DeltaSeconds);
     if(bPickupTest){TickPickupTest(DeltaSeconds);return;}
     // World timers, control and Chaos consume the same accelerated delta.
     // Chaos subdivides the frame into small physics steps.
@@ -467,7 +470,9 @@ void AQuayCrane::Tick(float DeltaSeconds)
         auto Axis = [PC](FKey Positive, FKey Negative) { return float(PC->IsInputKeyDown(Positive)) - float(PC->IsInputKeyDown(Negative)); };
         if (PC->WasInputKeyJustPressed(EKeys::Add) || PC->WasInputKeyJustPressed(EKeys::Equals)) IncreaseSimulationSpeed();
         if (PC->WasInputKeyJustPressed(EKeys::Subtract) || PC->WasInputKeyJustPressed(EKeys::Hyphen)) DecreaseSimulationSpeed();
-        if (PC->WasInputKeyJustPressed(EKeys::Zero) || PC->WasInputKeyJustPressed(EKeys::NumPadZero)) ResetSimulationSpeed();
+        const bool Ctrl=PC->IsInputKeyDown(EKeys::LeftControl) || PC->IsInputKeyDown(EKeys::RightControl);
+        if (Ctrl && PC->WasInputKeyJustPressed(EKeys::Zero)) Environment->ToggleWind();
+        else if (PC->WasInputKeyJustPressed(EKeys::Zero) || PC->WasInputKeyJustPressed(EKeys::NumPadZero)) ResetSimulationSpeed();
         if (PC->WasInputKeyJustPressed(EKeys::U)) StartAutomatic(false);
         if (PC->WasInputKeyJustPressed(EKeys::L)) StartAutomatic(true);
         if (PC->WasInputKeyJustPressed(EKeys::P)) bAutoPaused=!bAutoPaused;
@@ -494,6 +499,9 @@ void AQuayCrane::Tick(float DeltaSeconds)
         CameraArm->TargetArmLength = FMath::Clamp(CameraArm->TargetArmLength + Axis(EKeys::PageDown, EKeys::PageUp) * FMath::Max(2500.f, CameraArm->TargetArmLength * .65f) * WallDt, 2500.f, bTerminalMode ? 220000.f : 42000.f);
         }
     }
+#if WITH_DEV_AUTOMATION_TESTS
+    if (FParse::Param(FCommandLine::Get(),TEXT("PortSimWindInputTest"))) TickWindInputTest(Dt);
+#endif
     if (bUnifiedTerminal)
     {
         if (FParse::Param(FCommandLine::Get(),TEXT("PortSimEquipmentTest"))) { TestEquipmentAndCamera(); return; }
@@ -735,6 +743,7 @@ void APortSimHUD::DrawHUD()
         TogglePosition.X+10.f*Scale,TogglePosition.Y+7.f*Scale,GEngine->GetSmallFont(),Scale);
     AddHitBox(TogglePosition,ToggleSize,TEXT("TogglePortHUD"),true,100);
     if (!CranePawn->bHUDVisible) return;
+    if (const auto* Environment=CranePawn->GetEnvironment()) DrawWindCompass(*Environment,Scale);
     DrawRect(FLinearColor(0.015f, 0.03f, 0.05f, 0.88f), 16.f, 16.f, 850.f * Scale, (CranePawn->bTerminalMode ? 310.f : 208.f) * Scale);
     float Y = 28.f;
     auto Line = [this, Scale, &Y](const FString& Text, FLinearColor Color, float FontScale = 1.f)
