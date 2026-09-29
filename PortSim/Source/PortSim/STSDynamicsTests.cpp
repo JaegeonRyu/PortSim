@@ -43,17 +43,22 @@ bool FSTSDynamicsTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Fixed internal steps are consistent across outer tick rates"),FMath::Abs(Fine.Angle.X-Coarse.Angle.X)<.0001);
     for(double Length:{12.,25.,40.})
     {
-        FSTSSuspension Travel; double X=0,Velocity=0,Peak=0;
+        FSTSSuspension Travel; double X=0,Velocity=0,Peak=0,LastOutsideTolerance=0;
         for(int32 I=0;I<36000;++I)
         {
             constexpr double H=1./120.;
-            const double Command=C.HorizontalAcceleration(40-X-Travel.Offset.X,Velocity,Length,Travel.Rate.X);
+            const double Command=C.HorizontalAcceleration(40-X,Velocity,Length,Travel.Rate.X);
             const double Next=FMath::Clamp(Velocity+FMath::Clamp(Command,-.8,.8)*H,-4.,4.);
             const double A=(Next-Velocity)/H;Velocity=Next;X+=Velocity*H;
             Travel.Step(C,H,Length,0,FVector(A,0,0),FVector(Velocity,0,0),17000,FVector::ZeroVector,P.HoistPowerW);
             Peak=FMath::Max(Peak,Travel.SwayDegrees());
+            const double SpreaderVelocity=Velocity+Length*FMath::Cos(Travel.Angle.X)*Travel.Rate.X;
+            if(FMath::Abs(40-X-Travel.Offset.X)>=.05 || FMath::Abs(SpreaderVelocity)>=.05 || Travel.SwayDegrees()>=1)
+                LastOutsideTolerance=(I+1)*H;
         }
-        TestTrue(FString::Printf(TEXT("40m closed-loop travel settles at rope length %.0fm"),Length),FMath::Abs(40-X-Travel.Offset.X)<.05 && FMath::Abs(Velocity)<.05 && Peak<20 && Travel.Fault.IsEmpty());
+        const double FinalSpreaderVelocity=Velocity+Length*FMath::Cos(Travel.Angle.X)*Travel.Rate.X;
+        TestTrue(FString::Printf(TEXT("40m closed-loop travel settles at rope length %.0fm"),Length),FMath::Abs(40-X-Travel.Offset.X)<.05 && FMath::Abs(FinalSpreaderVelocity)<.05 && Peak<20 && Travel.Fault.IsEmpty());
+        TestTrue(FString::Printf(TEXT("40m closed-loop travel remains settled after 90s at rope length %.0fm"),Length),LastOutsideTolerance<90);
     }
     auto WindConfig=C;WindConfig.Wind.X=5;FSTSSuspension WindState;
     for(int32 I=0;I<1200;++I)WindState.Step(WindConfig,1./120.,20,0,FVector::ZeroVector,FVector::ZeroVector,17000,FVector::ZeroVector,P.HoistPowerW);

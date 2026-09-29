@@ -91,7 +91,9 @@ bool FSTSOperatingProfile::Load(const FString& ReferenceFile, const FString& Set
         !Setting(TEXT("landing_speed_mps"),ApproachSpeed) ||
         !Setting(TEXT("landing_slowdown_distance_m"),ApproachDistance) ||
         !Setting(TEXT("stage_timeout_s"),StageTimeout) ||
-        !Setting(TEXT("landing_sway_limit_deg"),SwayLimitDegrees)) return false;
+        !Setting(TEXT("landing_sway_limit_deg"),SwayLimitDegrees) ||
+        !Setting(TEXT("precision_drive_position_tolerance_m"),PrecisionPositionTolerance) ||
+        !Setting(TEXT("precision_drive_velocity_tolerance_mps"),PrecisionVelocityTolerance)) return false;
     float CX=0,CY=0,CZ=0;
     if (!Setting(TEXT("container_cog_x_m"),CX,false) || !Setting(TEXT("container_cog_y_m"),CY,false) || !Setting(TEXT("container_cog_z_m"),CZ,false) ||
         !Settings->TryGetBoolField(TEXT("auto_start_unload"),bAutoStart))
@@ -103,9 +105,11 @@ bool FSTSOperatingProfile::Load(const FString& ReferenceFile, const FString& Set
     TrolleyAcceleration *= 100; GantryAcceleration *= 100; HoistAcceleration *= 100;
     SensorPeriod=1.f/Rate; PositionBias*=100; LandingTolerance*=100; SeatingTolerance*=100;
     SettleSpeed*=100; AGVTolerance*=100; SupportTolerance*=100; ApproachSpeed*=100; ApproachDistance*=100;
+    PrecisionPositionTolerance*=100; PrecisionVelocityTolerance*=100;
     if (LiftBelowRail<=0 || SafeHeight>=LiftAboveRail || SensorMaxAge<SensorPeriod ||
         FMath::Abs(CX)>=1.0f || FMath::Abs(CY)>=5.2f || FMath::Abs(CZ)>=1.295f ||
-        LandingTolerance>=100 || SeatingTolerance>=50 || SwayLimitDegrees>=90 || Rate>1000)
+        LandingTolerance>=100 || SeatingTolerance>=50 || PrecisionPositionTolerance>LandingTolerance ||
+        PrecisionVelocityTolerance>SettleSpeed || SwayLimitDegrees>=90 || Rate>1000)
     { Error=TEXT("Inconsistent STS geometry, timing or simulation tolerances"); return false; }
 
     const TArray<TSharedPtr<FJsonValue>>* Points=nullptr;

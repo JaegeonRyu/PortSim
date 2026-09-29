@@ -318,10 +318,19 @@ bool APortWorkingCrane::ValidateOperation(FString& Error) const
     if (!bConfigured || !IsValid(CargoActor) || (!bExternalJobs && CargoActor->GetOwner()!=this) || !Fault.IsEmpty())
     { Error=FString::Printf(TEXT("Crane %d: configuration/cargo/fault: %s"),CraneID,*Fault); return false; }
     const FVector A=Local(Slots[0]), B=Local(Slots[1]);
+    // The anti-sway controller moves the trolley against the pendulum. Validate
+    // the suspended working point against the reserved cargo corridor; checking
+    // the trolley alone rejects that corrective motion even while the spreader
+    // remains inside the reservation.
+    const FVector ControlledPosition=Head+SuspendedOffset;
     const double Margin=bSTS?STSProfile.Pickup.AcquisitionRadius:1;
-    if (Head.X<FMath::Min3(A.X,B.X,JobStartHead.X)-Margin || Head.X>FMath::Max3(A.X,B.X,JobStartHead.X)+Margin ||
-        Head.Y<FMath::Min3(A.Y,B.Y,JobStartHead.Y)-Margin || Head.Y>FMath::Max3(A.Y,B.Y,JobStartHead.Y)+Margin || Head.Z>SafeZ+1)
-    { Error=TEXT("Crane left its reserved envelope"); return false; }
+    if (ControlledPosition.X<FMath::Min3(A.X,B.X,JobStartHead.X)-Margin || ControlledPosition.X>FMath::Max3(A.X,B.X,JobStartHead.X)+Margin ||
+        ControlledPosition.Y<FMath::Min3(A.Y,B.Y,JobStartHead.Y)-Margin || ControlledPosition.Y>FMath::Max3(A.Y,B.Y,JobStartHead.Y)+Margin || Head.Z>SafeZ+1)
+    {
+        Error=FString::Printf(TEXT("Crane left its reserved envelope: stage=%d head=%s suspended=%s source=%s destination=%s start=%s margin=%.2f"),
+            Stage,*Head.ToCompactString(),*ControlledPosition.ToCompactString(),*A.ToCompactString(),*B.ToCompactString(),*JobStartHead.ToCompactString(),Margin);
+        return false;
+    }
     if (bCarrying && (CargoActor->GetAttachParentActor()!=this || CargoActor->GetBody()->IsSimulatingPhysics() ||
         (bSTS?!CargoActor->GetActorTransform().Equals(LockedCargoTransform*Spreader->GetComponentTransform(),1.f):
             !CargoActor->GetActorLocation().Equals(HeadPosition()-FVector(0,0,WorkingCrane::LiftOffset),1.f))))

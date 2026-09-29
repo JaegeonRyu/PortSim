@@ -281,6 +281,7 @@ void APortSiteLogistics::Dispatch(int32 Lane)
 bool APortSiteLogistics::ReserveYard(int32 Lane)
 {
     auto& Job=Jobs[Lane];
+    if (Job.Slot!=INDEX_NONE) return true;
     float BestDistance=TNumericLimits<float>::Max();
     int32 BestSlot=INDEX_NONE;
     for (int32 I=0;I<Yard.Num();++I)
@@ -592,6 +593,10 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
             Equipment[YardCraneCount+Job.STS]->SetDestinationReady(true);
             Job.Stage=1; break;
         case 1:
+            // Reserve the downstream crane while the STS makes its final transfer.
+            // This keeps a completed handover from occupying the quay lane while
+            // yard selection starts, without delaying the STS if none is free yet.
+            if (Job.Slot==INDEX_NONE && Equipment[YardCraneCount+Job.STS]->Stage>=4) ReserveYard(Lane);
             if (Equipment[YardCraneCount+Job.STS]->IsBusy()) break;
             if (!Cargo || !Cargo->GetActorLocation().Equals(Vehicle->CargoPosition(),10.f) || Vehicle->Speed>0)
             { Stop(TEXT("STS / AGV handover alignment")); return; }

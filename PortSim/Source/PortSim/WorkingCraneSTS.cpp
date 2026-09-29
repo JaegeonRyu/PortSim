@@ -131,7 +131,14 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
         const double Length=FMath::Max(.1,(BeamZ-Head.Z)*.01);
         for(int32 I=0;I<3;++I)
         {
-            const double Error=Target[I]-(MeasuredPosition[I]+MeasuredVelocity[I]*(Age+Substep*Step));
+            const double PredictionTime=Age+Substep*Step;
+            // Horizontal position feedback uses the trolley/gantry encoders.
+            // Feeding the suspended offset into this error and again through
+            // sway-rate feedback makes the trolley chase the pendulum forever.
+            const double FeedbackPosition=I<2
+                ? Observation.DrivePosition[I]+Observation.DriveVelocity[I]*PredictionTime
+                : MeasuredPosition[I]+MeasuredVelocity[I]*PredictionTime;
+            const double Error=Target[I]-FeedbackPosition;
             double Desired=.8*Error-.8*Observation.DriveVelocity[I];
 
             double Acceleration=Accelerations[I];
@@ -161,8 +168,10 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
     Head.X=FMath::Clamp(Head.X,double(STSProfile.MinTrolley()),double(STSProfile.MaxTrolley()));
     Head.Z=FMath::Clamp(Head.Z,-double(STSProfile.LiftBelowRail),double(STSProfile.LiftAboveRail));
     UpdateParts();
-    const float PositionTolerance=(Stage==2 || Stage==5)?.5f:5.f;
-    return MeasuredPosition.Equals(Target,PositionTolerance) && Observation.SpreaderVelocity.Size()<PositionTolerance &&
+    const bool bPrecisionStage=Stage==2 || Stage==5;
+    const float PositionTolerance=bPrecisionStage?STSProfile.PrecisionPositionTolerance:5.f;
+    const float VelocityTolerance=bPrecisionStage?STSProfile.PrecisionVelocityTolerance:5.f;
+    return MeasuredPosition.Equals(Target,PositionTolerance) && Observation.SpreaderVelocity.Size()<VelocityTolerance &&
         Observation.SwayDegrees<STSProfile.SwayLimitDegrees && FMath::Abs(Observation.SkewDegrees)<C.SkewLimit;
 }
 

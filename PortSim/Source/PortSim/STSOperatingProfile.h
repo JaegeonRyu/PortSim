@@ -25,6 +25,7 @@ struct FSTSOperatingProfile
     FVector ContainerCoG = FVector::ZeroVector;
     float SensorPeriod = 0, SensorMaxAge = 0, PositionBias = 0, MassBiasKg = 0;
     float LandingTolerance = 0, SeatingTolerance = 0, SettleSpeed = 0, SettleTime = 0;
+    float PrecisionPositionTolerance = 0, PrecisionVelocityTolerance = 0;
     float AGVTolerance = 0, AGVHeadingTolerance = 0, SupportTolerance = 0;
     float ApproachSpeed = 0, ApproachDistance = 0, StageTimeout = 0, SwayLimitDegrees = 0;
     bool bAutoStart = true;
