@@ -16,6 +16,16 @@ void APortWorkingCrane::SetHandoverVehicle(APortAGVActor* Vehicle)
 
 APortAGVActor* APortWorkingCrane::GetHandoverVehicle() const { return HandoverAGV.Get(); }
 
+void APortWorkingCrane::SetDestinationReady(bool Ready)
+{
+    if(bDestinationReady==Ready) return;
+    bDestinationReady=Ready;
+    // Logistics marks the destination ready immediately after the AGV snaps to
+    // its handover pose. Refresh the 20 Hz observation at that event so the
+    // 60 Hz interlock cannot consume the previous in-transit sample.
+    if(bSTS && bJobActive) SampleSTS(true);
+}
+
 void APortWorkingCrane::ClearSTSState()
 {
     AxisVelocity=PlantAcceleration=FVector::ZeroVector;

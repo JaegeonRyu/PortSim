@@ -55,15 +55,6 @@ FVector APortSiteLogistics::CargoQuay(int32 CargoIndex) const
     const auto& Cargo=Manifest[CargoIndex];
     return bCargoAlignedHandover?FVector(QuayPark(Cargo.STS).X,Cargo.Transform.GetLocation().Y,0):QuayPark(Cargo.STS);
 }
-FVector APortSiteLogistics::QueueQuay(int32 STS) const
-{
-    const FVector Next=CargoQuay(PreparedCargo[STS]);
-    const int32 CurrentVehicle=STSOwners[STS];
-    const double CurrentY=Jobs.IsValidIndex(CurrentVehicle)?CargoQuay(Jobs[CurrentVehicle].Cargo).Y:Next.Y;
-    // Queue beyond the new handover, away from the AGV still being loaded.
-    // This also handles the bay order wrapping back to the start of a row.
-    return Next+FVector(0,Next.Y<CurrentY?-2000:2000,0);
-}
 FVector APortSiteLogistics::YardHandover(const FSiteYardSlot& Slot) const
 { return Slot.Handover; }
 FVector APortSiteLogistics::FleetPark(int32 Vehicle) const
@@ -197,12 +188,8 @@ void APortSiteLogistics::ActivateVehicle(int32 Vehicle,int32 STS,bool FromQueue)
     Equipment[YardCraneCount+STS]->SetHandoverVehicle(Vehicles[Vehicle]);
     PreparedCargo[STS]=INDEX_NONE; PreparedStarted[STS]=false; STSOwners[STS]=Vehicle;
     const FVector Quay=CargoQuay(Job.Cargo);
-    if (FromQueue)
-    {
-        Job.Route={Quay};
-        NextVehicles[STS]=INDEX_NONE; ++QueuedHandoffs;
-    }
-    else if (!Vehicles[Vehicle]->GetActorLocation().Equals(Quay,1.f))
+    if (FromQueue) { NextVehicles[STS]=INDEX_NONE; ++QueuedHandoffs; }
+    if (!Vehicles[Vehicle]->GetActorLocation().Equals(Quay,1.f))
         Job.Route={FVector(6500,Vehicles[Vehicle]->GetActorLocation().Y,0),FVector(6500,Quay.Y,0),Quay};
     else Job.Route={Quay};
 }
@@ -240,12 +227,14 @@ void APortSiteLogistics::ScheduleFleet()
         PrepareNextCargo(S);
         if(!Fault.IsEmpty()) return;
         if (STSOwners[S]==INDEX_NONE || NextVehicles[S]!=INDEX_NONE || PreparedCargo[S]==INDEX_NONE) continue;
-        const FVector Buffer=QueueQuay(S);
-        const int32 V=Nearest(Buffer);
+        const int32 V=Nearest(CargoQuay(PreparedCargo[S]));
         if (V==INDEX_NONE) continue;
         NextVehicles[S]=V;
-        auto& Job=Jobs[V]; Job.STS=S; Job.Stage=7;
-        Job.Route={FVector(6500,Vehicles[V]->GetActorLocation().Y,0),FVector(6500,Buffer.Y,0),Buffer};
+        // Reserve the next AGV logically while it remains in the fleet park.
+        // A physical quay-side queue can block either the loaded exit aisle or
+        // an adjacent STS approach and create a terminal-wide wait chain.
+        auto& Job=Jobs[V]; Job.STS=S; Job.Stage=8; Job.Route.Reset(); Job.Waypoint=0;
+        Vehicles[V]->Speed=0;
     }
 }
 
@@ -601,6 +590,11 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
             if (!Cargo || !Cargo->GetActorLocation().Equals(Vehicle->CargoPosition(),10.f) || Vehicle->Speed>0)
             { Stop(TEXT("STS / AGV handover alignment")); return; }
             Cargo->GetBody()->SetSimulatePhysics(false);
+            // The physical landing check accepts up to 10 cm. Resolve that
+            // remaining contact offset onto the AGV deck datum before attaching,
+            // otherwise KeepWorldTransform preserves a mismatch that the 1 cm
+            // ownership invariant rejects on the same frame.
+            Cargo->SetActorLocationAndRotation(Vehicle->CargoPosition(),Vehicle->GetActorRotation(),false,nullptr,ETeleportType::TeleportPhysics);
             Cargo->AttachToComponent(Vehicle->GetRootComponent(),FAttachmentTransformRules::KeepWorldTransform);
             Cargo->LocationOwner=ECargoOwner::AGV;
             Manifest[Job.Cargo].HandoverMask|=1;
