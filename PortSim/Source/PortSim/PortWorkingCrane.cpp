@@ -227,7 +227,11 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
         if(bCarrying && (!Observation.AllLocked() || Observation.DynamicPayloadEstimateKg()>STSProfile.RatedPayloadKg))
         { Stop(TEXT("Loaded hoist interlock: locks/load observation invalid")); return; }
         if(((Stage==5 && bDestinationReady) || Stage==6 || Stage==7) && !Observation.bAGVAligned)
-        { Stop(TEXT("AGV alignment lost during STS handover")); return; }
+        {
+            UE_LOG(LogTemp,Error,TEXT("STS_ALIGNMENT_DETAIL: crane=%d stage=%d ready=%d agv=%s observed=%d destination=%s"),
+                CraneID,Stage,bDestinationReady,*GetNameSafe(HandoverAGV),Observation.bAGVAligned,*Slots[1-SourceSlot].ToString());
+            Stop(TEXT("AGV alignment lost during STS handover")); return;
+        }
     }
     // Pick and lift the next ship box while the vehicle is away; hold it safely
     // above the dock until the returning AGV is stopped beneath the spreader.
