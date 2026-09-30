@@ -30,6 +30,17 @@ bool FPortWindStateTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("Sector boundary"),FPortWindState::DirectionName(11.25),FString(TEXT("NNE")));
     TestTrue(TEXT("North wind travels south"),FPortWindState::FlowDirection(0).Equals(FVector(-1,0,0),.0001));
     TestTrue(TEXT("East wind travels west"),FPortWindState::FlowDirection(90).Equals(FVector(0,-1,0),.0001));
+    const FVector Dimensions(2.44,12.2,2.59);
+    const FVector Broadside=FPortWindAerodynamics::DragForceNewtons(FVector(5,0,0),FVector::ZeroVector,
+        FQuat::Identity,Dimensions,1.2);
+    const FVector EndOn=FPortWindAerodynamics::DragForceNewtons(FVector(0,5,0),FVector::ZeroVector,
+        FQuat::Identity,Dimensions,1.2);
+    const double ExpectedBroadside=.5*FPortWindAerodynamics::AirDensityKgPerCubicMeter*1.2*(12.2*2.59)*25.;
+    TestTrue(TEXT("Container drag uses SI force and projected broadside area"),
+        FMath::Abs(Broadside.X-ExpectedBroadside)<.01 && Broadside.Y==0 && Broadside.Z==0);
+    TestTrue(TEXT("Container broadside drag exceeds end-on drag"),Broadside.Size()>EndOn.Size()*4.9);
+    TestTrue(TEXT("No drag at zero relative air speed"),FPortWindAerodynamics::DragForceNewtons(FVector(5,0,0),
+        FVector(500,0,0),FQuat::Identity,Dimensions,1.2).IsNearlyZero());
     const float Forward=FPortWindState::InterpolateDirection(359,1,1);
     const float Reverse=FPortWindState::InterpolateDirection(1,359,1);
     TestTrue(TEXT("359 to 1 takes positive short arc"),Forward>359 && Forward<360);

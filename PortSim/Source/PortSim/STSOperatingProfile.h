@@ -46,6 +46,7 @@ struct FSTSObservation
     double Timestamp = -1;
     FVector DrivePosition = FVector::ZeroVector; // trolley, gantry, suspended length
     FVector DriveVelocity = FVector::ZeroVector;
+    FVector WindVelocityMetersPerSecond = FVector::ZeroVector;
     FVector SpreaderPosition = FVector::ZeroVector, SpreaderVelocity = FVector::ZeroVector;
     FVector CargoPosition = FVector::ZeroVector, CargoVelocity = FVector::ZeroVector;
     float SwayDegrees = 0;
@@ -55,6 +56,7 @@ struct FSTSObservation
     bool bTargetVisible=false, CornerSeated[4]={false,false,false,false};
     FVector CornerError[4]={FVector::ZeroVector,FVector::ZeroVector,FVector::ZeroVector,FVector::ZeroVector};
     FVector2D SwayRate=FVector2D::ZeroVector;
+    FVector2D SwayAngle=FVector2D::ZeroVector;
     float RelativeYawDegrees=0, TargetTiltDegrees=0, SkewDegrees=0, HoistAcceleration=0;
 
     bool IsFresh(double Now, float MaxAge) const { return bValid && Now >= Timestamp && Now - Timestamp <= MaxAge; }

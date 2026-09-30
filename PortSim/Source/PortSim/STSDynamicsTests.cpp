@@ -63,6 +63,29 @@ bool FSTSDynamicsTest::RunTest(const FString& Parameters)
     auto WindConfig=C;WindConfig.Wind.X=5;FSTSSuspension WindState;
     for(int32 I=0;I<1200;++I)WindState.Step(WindConfig,1./120.,20,0,FVector::ZeroVector,FVector::ZeroVector,17000,FVector::ZeroVector,P.HoistPowerW);
     TestTrue(TEXT("Crosswind changes suspended position"),WindState.Offset.X>.001);
+    const FVector WindEquilibrium=WindConfig.WindEquilibriumOffset(20,17000);
+    TestTrue(TEXT("Wind feed-forward predicts the downwind equilibrium"),WindEquilibrium.X>.05 && WindEquilibrium.Y==0);
+    auto HoldUnderWind=[&](bool Compensate)
+    {
+        FSTSSuspension S; double Trolley=0,Velocity=0;
+        constexpr double H=1./120.,Length=20.,Mass=17000.;
+        for(int32 I=0;I<7200;++I)
+        {
+            const double Target=Compensate?-WindConfig.WindEquilibriumOffset(Length,Mass).X:0.;
+            const double Command=WindConfig.HorizontalAcceleration(Target-Trolley,Velocity,Length,S.Rate.X);
+            const double Next=FMath::Clamp(Velocity+FMath::Clamp(Command,-1.5,1.5)*H,-4.,4.);
+            const double Acceleration=(Next-Velocity)/H; Velocity=Next; Trolley+=Velocity*H;
+            S.Step(WindConfig,H,Length,0,FVector(Acceleration,0,0),FVector(Velocity,0,0),Mass,FVector::ZeroVector,P.HoistPowerW);
+        }
+        return Trolley+S.Offset.X;
+    };
+    TestTrue(TEXT("Wind feed-forward holds the suspended load over its target"),
+        FMath::Abs(HoldUnderWind(true))<.02 && FMath::Abs(HoldUnderWind(false))>.05);
+    const double EquilibriumAngle=FMath::Asin(WindEquilibrium.X/20.);
+    TestTrue(TEXT("Anti-sway angle feedback rejects lag from a changing wind equilibrium"),
+        WindConfig.HorizontalAcceleration(0,0,20,0,EquilibriumAngle+.01,EquilibriumAngle,4)>0);
+    TestTrue(TEXT("Anti-sway adds no angle correction at the measured wind equilibrium"),
+        FMath::IsNearlyZero(WindConfig.HorizontalAcceleration(0,0,20,0,EquilibriumAngle,EquilibriumAngle,4)));
     auto LimitedMotor=C;LimitedMotor.MotorMaxTorque=1;FSTSSuspension MotorState;
     MotorState.Step(LimitedMotor,.05,20,0,FVector::ZeroVector,FVector::ZeroVector,17000,FVector::ZeroVector,P.HoistPowerW);
     TestTrue(TEXT("Motor saturation is exposed independently of rope limits"),MotorState.Saturated);

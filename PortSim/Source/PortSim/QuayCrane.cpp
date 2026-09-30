@@ -2,6 +2,7 @@
 #include "PortSiteLogistics.h"
 #include "PortSimTimeStep.h"
 #include "PortEnvironmentComponent.h"
+#include "PortContainerActor.h"
 #include "Misc/FileHelper.h"
 #include "HAL/PlatformTime.h"
 #include "HAL/PlatformProcess.h"
@@ -397,6 +398,9 @@ void AQuayCrane::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
     Environment->AdvanceEnvironment(DeltaSeconds);
+    const FVector WindVelocity=Environment->GetEffectiveWindVelocity();
+    if(SiteLogistics) SiteLogistics->SetWindVelocity(WindVelocity);
+    for(const auto& Container:ContainerActors) if(IsValid(Container)) Container->ApplyWind(WindVelocity);
     if(bPickupTest){TickPickupTest(DeltaSeconds);return;}
     // World timers, control and Chaos consume the same accelerated delta.
     // Chaos subdivides the frame into small physics steps.

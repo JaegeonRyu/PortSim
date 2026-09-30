@@ -16,6 +16,12 @@ void APortWorkingCrane::SetHandoverVehicle(APortAGVActor* Vehicle)
 
 APortAGVActor* APortWorkingCrane::GetHandoverVehicle() const { return HandoverAGV.Get(); }
 
+void APortWorkingCrane::SetWindVelocity(FVector WorldVelocityMetersPerSecond)
+{
+    WindVelocityMetersPerSecond=WorldVelocityMetersPerSecond.ContainsNaN()?FVector::ZeroVector:
+        WorldVelocityMetersPerSecond.GetClampedToMaxSize(50.f);
+}
+
 void APortWorkingCrane::SetDestinationReady(bool Ready)
 {
     if(bDestinationReady==Ready) return;
@@ -68,6 +74,7 @@ void APortWorkingCrane::SampleSTS(bool Force)
     auto& S=Observation; S.Timestamp=SimulationTime; S.bValid=!bSensorFault;
     S.DrivePosition=Head+FVector(STSProfile.PositionBias);
     S.DriveVelocity=AxisVelocity;
+    S.WindVelocityMetersPerSecond=Orientation.UnrotateVector(WindVelocityMetersPerSecond);
     S.SpreaderPosition=HeadPosition()+Orientation.RotateVector(FVector(STSProfile.PositionBias));
     S.SpreaderVelocity=SpreaderVelocity();
     S.CargoPosition=CargoActor->GetActorLocation()+Orientation.RotateVector(STSProfile.Pickup.PoseBias);
@@ -89,7 +96,7 @@ void APortWorkingCrane::SampleSTS(bool Force)
         S.CornerLoadsN[I]=FMath::Max(0.,Weight*(.5+((I&1)?1:-1)*EX/200.)*(.5+((I&2)?1:-1)*EY/1040.)+(bCarrying?STSProfile.MassBiasKg*9.80665/4:0));
     }
     S.bAGVAligned=AGVAligned(); S.bCargoSupported=CargoSupported(); S.SwayDegrees=SuspensionState.SwayDegrees();
-    S.SwayRate=SuspensionState.Rate; S.SkewDegrees=FMath::RadiansToDegrees(SuspensionState.Yaw);
+    S.SwayAngle=SuspensionState.Angle; S.SwayRate=SuspensionState.Rate; S.SkewDegrees=FMath::RadiansToDegrees(SuspensionState.Yaw);
     S.HoistAcceleration=PlantAcceleration.Z;
     SamplePickupGeometry();
     for(const auto& Mount:STSProfile.Dynamics.Mounts)
@@ -102,6 +109,7 @@ void APortWorkingCrane::SampleSTS(bool Force)
             if(Mount.MaxTraversingSpeed>0 && FMath::Abs(S.DriveVelocity.X)*.01>Mount.MaxTraversingSpeed) S.bValid=false;
         }
         else if(Mount.Key==TEXT("hoist_encoder")) Value=(BeamZ-Head.Z)*.01;
+        else if(Mount.Key==TEXT("wind")) Value=S.WindVelocityMetersPerSecond.Size();
         else if(Mount.Key==TEXT("twistlock_load")) for(double Load:S.CornerLoadsN) {if(Load<Mount.Minimum || Load>Mount.Maximum) S.bValid=false;}
         else Required=false;
         if(Required && Mount.Key!=TEXT("twistlock_load") && (Value<Mount.Minimum || Value>Mount.Maximum)) S.bValid=false;
@@ -120,7 +128,10 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
             2.f*STSProfile.HoistAcceleration*FMath::Max(0.f,Distance-STSProfile.ApproachDistance)));
     }
     if(Stage==2 && bCarrying) Hoist=FMath::Min(Hoist,STSProfile.ApproachSpeed);
-    const auto& C=STSProfile.Dynamics;
+    auto C=STSProfile.Dynamics;
+    // The plant receives the current environment. The controller receives the
+    // latest 20 Hz wind-sensor observation below, just like the other feedback.
+    C.Wind=Orientation.UnrotateVector(WindVelocityMetersPerSecond);
     Hoist=FMath::Min(Hoist,float(C.MotorMaxRPM*2*PI/60*C.DrumRadius/(C.Parts*C.GearRatio)*100));
     const FVector Limits(STSProfile.TrolleySpeed,STSProfile.GantrySpeed,Hoist);
     const FVector Accelerations(STSProfile.TrolleyAcceleration,STSProfile.GantryAcceleration,STSProfile.HoistAcceleration);
@@ -139,6 +150,9 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
     {
         const FVector Previous=AxisVelocity;
         const double Length=FMath::Max(.1,(BeamZ-Head.Z)*.01);
+        auto SensorConfig=C;
+        SensorConfig.Wind=Observation.WindVelocityMetersPerSecond;
+        const FVector WindOffset=SensorConfig.WindEquilibriumOffset(Length,Mass)*100.;
         for(int32 I=0;I<3;++I)
         {
             const double PredictionTime=Age+Substep*Step;
@@ -148,7 +162,10 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
             const double FeedbackPosition=I<2
                 ? Observation.DrivePosition[I]+Observation.DriveVelocity[I]*PredictionTime
                 : MeasuredPosition[I]+MeasuredVelocity[I]*PredictionTime;
-            const double Error=Target[I]-FeedbackPosition;
+            // Hold the spreader over its target under a steady wind by parking
+            // the trolley/gantry upwind of the aerodynamic equilibrium offset.
+            const double ControlTarget=I<2?Target[I]-WindOffset[I]:Target[I];
+            const double Error=ControlTarget-FeedbackPosition;
             double Desired=.8*Error-.8*Observation.DriveVelocity[I];
 
             double Acceleration=Accelerations[I];
@@ -164,7 +181,16 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
             if(I<2)
             {
                 // Acceleration feedback damps the pendulum; velocity feedback here adds phase lag.
-                const double Command=C.HorizontalAcceleration(Error*.01,Observation.DriveVelocity[I]*.01,FMath::Max(.1,(BeamZ-Observation.DrivePosition.Z)*.01),Observation.SwayRate[I])*100;
+                // Wind feed-forward is smooth and does not chase instantaneous
+                // pendulum displacement. Track that moving equilibrium faster
+                // than an ordinary travel target. Angle error relative to the
+                // wind equilibrium rejects changing-wind lag without treating
+                // the normal downwind lean as unwanted sway.
+                const double WindTrackingGain=SensorConfig.Wind.IsNearlyZero()?1.:4.;
+                const double EquilibriumAngle=FMath::Asin(FMath::Clamp(WindOffset[I]*.01/Length,-1.,1.));
+                const double Command=C.HorizontalAcceleration(Error*.01,
+                    Observation.DriveVelocity[I]*.01,FMath::Max(.1,(BeamZ-Observation.DrivePosition.Z)*.01),
+                    Observation.SwayRate[I],Observation.SwayAngle[I],EquilibriumAngle,WindTrackingGain)*100;
                 AxisVelocity[I]=FMath::Clamp(AxisVelocity[I]+FMath::Clamp(Command,-Acceleration,Acceleration)*Step,-double(Limits[I]),double(Limits[I]));
             }
             else AxisVelocity[I]=FMath::FInterpConstantTo(AxisVelocity[I],FMath::Clamp(Desired,-double(Limits[I]),double(Limits[I])),Step,Acceleration);

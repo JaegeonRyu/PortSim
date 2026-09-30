@@ -96,3 +96,19 @@ FVector UPortEnvironmentComponent::GetEffectiveWindVelocity() const
 {
     return Wind.bWindEnabled?Wind.WindDirectionVector*Wind.WindSpeedMetersPerSecond:FVector::ZeroVector;
 }
+
+FVector FPortWindAerodynamics::DragForceNewtons(FVector WindVelocityMetersPerSecond,FVector BodyVelocityCentimetersPerSecond,
+    FQuat BodyRotation,FVector DimensionsMeters,double DragCoefficient)
+{
+    if(WindVelocityMetersPerSecond.ContainsNaN() || BodyVelocityCentimetersPerSecond.ContainsNaN() ||
+        DimensionsMeters.ContainsNaN() || !FMath::IsFinite(DragCoefficient) || DragCoefficient<=0) return FVector::ZeroVector;
+    const FVector RelativeWind=WindVelocityMetersPerSecond-BodyVelocityCentimetersPerSecond*.01;
+    const double Speed=RelativeWind.Size();
+    if(Speed<=KINDA_SMALL_NUMBER) return FVector::ZeroVector;
+    const FVector Direction=RelativeWind/Speed;
+    const FVector LocalDirection=BodyRotation.UnrotateVector(Direction).GetAbs();
+    const FVector Size=DimensionsMeters.GetAbs();
+    const double ProjectedArea=LocalDirection.X*Size.Y*Size.Z+
+        LocalDirection.Y*Size.X*Size.Z+LocalDirection.Z*Size.X*Size.Y;
+    return .5*AirDensityKgPerCubicMeter*DragCoefficient*ProjectedArea*Speed*RelativeWind;
+}

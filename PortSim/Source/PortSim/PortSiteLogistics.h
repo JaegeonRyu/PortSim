@@ -61,6 +61,7 @@ public:
     bool OwnsCentral(int32 Index) const { return CentralReservation==Index; }
     void RegisterBerthVehicles(const TArray<TObjectPtr<APortAGVActor>>& BerthVehicles);
     void BeginTrafficFrame();
+    void SetWindVelocity(FVector WorldVelocityMetersPerSecond);
     bool MoveVehicle(APortAGVActor* Vehicle,FVector Target,float Dt);
     void Advance(float Dt,bool Paused);
     void ResetLogistics();
@@ -126,6 +127,7 @@ private:
     int32 CentralCount=0, Dispatched=0, LaneCount=8, YardCraneCount=36;
     bool bReady=false, bWasPaused=false;
     bool bCargoAlignedHandover=true;
+    FVector WindVelocityMetersPerSecond=FVector::ZeroVector;
     void Dispatch(int32 Lane);
     void ScheduleFleet();
     void ActivateVehicle(int32 Vehicle,int32 STS,bool FromQueue);

@@ -4,7 +4,7 @@
 #include "Components/ActorComponent.h"
 #include "PortEnvironmentComponent.generated.h"
 
-/** Display-only weather model. Own random stream never perturbs logistics randomness. */
+/** Weather model. Own random stream never perturbs logistics randomness. */
 struct PORTSIM_API FPortWindState
 {
     static constexpr float MinimumSpeed=1.f;
@@ -33,7 +33,15 @@ private:
     void SelectTarget();
 };
 
-/** One environment owned by the terminal controller; no equipment/physics dependencies. */
+/** Shared aerodynamic helpers. Inputs and outputs use SI units. */
+struct PORTSIM_API FPortWindAerodynamics
+{
+    static constexpr double AirDensityKgPerCubicMeter=1.225;
+    static FVector DragForceNewtons(FVector WindVelocityMetersPerSecond,FVector BodyVelocityCentimetersPerSecond,
+        FQuat BodyRotation,FVector DimensionsMeters,double DragCoefficient);
+};
+
+/** One environment owned by the terminal controller and sampled by equipment. */
 UCLASS(ClassGroup=(PortSim), meta=(BlueprintSpawnableComponent))
 class PORTSIM_API UPortEnvironmentComponent : public UActorComponent
 {
@@ -50,7 +58,7 @@ public:
     UFUNCTION(BlueprintPure, Category="Environment|Wind") float GetWindDirectionDegrees() const { return Wind.WindDirectionDegrees; }
     /** Actual wind travel direction, opposite to meteorological wind-from degrees. */
     UFUNCTION(BlueprintPure, Category="Environment|Wind") FVector GetWindDirectionVector() const { return Wind.WindDirectionVector; }
-    /** Velocity in metres/second, NOT Unreal centimetres/second. OFF returns zero. No force is applied. */
+    /** Velocity in metres/second, NOT Unreal centimetres/second. OFF returns zero. */
     UFUNCTION(BlueprintPure, Category="Environment|Wind") FVector GetEffectiveWindVelocity() const;
     UFUNCTION(BlueprintPure, Category="Environment|Wind") FString GetWindDirectionName() const { return FPortWindState::DirectionName(Wind.WindDirectionDegrees); }
     UFUNCTION(BlueprintCallable, Category="Environment|Wind") void ToggleWind() { Wind.bWindEnabled=!Wind.bWindEnabled; }

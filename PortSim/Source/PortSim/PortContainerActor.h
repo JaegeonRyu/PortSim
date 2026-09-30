@@ -21,6 +21,7 @@ public:
     void ResetCargo(FVector Position);
     void ApplyContainerAppearance();
     void SetPhysicalParameters(float Mass, FVector CoGOffset);
+    void ApplyWind(FVector WindVelocityMetersPerSecond,float DragCoefficient=1.2f);
     UStaticMeshComponent* GetBody() const { return Body; }
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Container") FName ContainerID;

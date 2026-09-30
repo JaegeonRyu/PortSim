@@ -1,4 +1,5 @@
 #include "PortContainerActor.h"
+#include "PortEnvironmentComponent.h"
 #include "TerminalLayout.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
@@ -40,6 +41,16 @@ void APortContainerActor::SetPhysicalParameters(float Mass,FVector CoGOffset)
     MassKg=Mass; CoGOffsetCm=CoGOffset;
     Body->SetMassOverrideInKg(NAME_None,MassKg);
     Body->SetCenterOfMass(CoGOffsetCm);
+}
+
+void APortContainerActor::ApplyWind(FVector WindVelocityMetersPerSecond,float DragCoefficient)
+{
+    if(!Body->IsSimulatingPhysics()) return;
+    const FVector DimensionsMeters(2.44,12.2,2.59);
+    const FVector ForceNewtons=FPortWindAerodynamics::DragForceNewtons(WindVelocityMetersPerSecond,
+        Body->GetPhysicsLinearVelocity(),Body->GetComponentQuat(),DimensionsMeters,DragCoefficient);
+    // Chaos uses centimetres, so one SI newton is 100 kg*cm/s^2.
+    Body->AddForce(ForceNewtons*100.f);
 }
 
 void APortContainerActor::InitializeContainer(int32 Number)

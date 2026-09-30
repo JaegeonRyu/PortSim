@@ -27,6 +27,13 @@ APortSiteLogistics::APortSiteLogistics()
     bCargoAlignedHandover=!FParse::Param(FCommandLine::Get(),TEXT("PortSimFixedHandover"));
 }
 
+void APortSiteLogistics::SetWindVelocity(FVector WorldVelocityMetersPerSecond)
+{
+    WindVelocityMetersPerSecond=WorldVelocityMetersPerSecond.ContainsNaN()?FVector::ZeroVector:
+        WorldVelocityMetersPerSecond.GetClampedToMaxSize(50.f);
+    for(const auto& Crane:Equipment) if(IsValid(Crane)) Crane->SetWindVelocity(WindVelocityMetersPerSecond);
+}
+
 void APortSiteLogistics::AddShipCargo(FVector Position,int32 STS)
 {
     check(STS>=0 && STS<9);
@@ -512,6 +519,7 @@ void APortSiteLogistics::Stop(const FString& Reason)
 void APortSiteLogistics::Advance(float Dt,bool Paused)
 {
     if (!bReady) return;
+    for(const auto& Cargo:ShipContainers) if(IsValid(Cargo)) Cargo->ApplyWind(WindVelocityMetersPerSecond,STSProfile.Dynamics.WindDrag);
     SimulationTime+=Dt;
     ExportDashboard(Paused);
     if(Paused) for(int32 Index:PreparedCargo) if(Index!=INDEX_NONE) Manifest[Index].PreparedPausedSeconds+=Dt;

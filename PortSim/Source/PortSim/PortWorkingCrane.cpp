@@ -114,7 +114,7 @@ void APortWorkingCrane::ResetOperation()
         if (IsValid(CargoActor)) CargoActor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
         CargoActor=nullptr; bJobActive=bCarrying=bPaused=bResumePhysics=false; bDestinationReady=true;
         SourceSlot=Stage=CompletedJobs=0; Fault.Empty(); Speed=StageTime=SettleTime=0;
-        Head=Local(Slots[0]); Head.Z=SafeZ; JobStartHead=Head; UpdateParts();
+        Head=Local(Slots[0]); Head.Z=SafeZ; JobStartHead=Head; StageHoldTarget=Head; UpdateParts();
         for (const auto& Pad:Pads) { Pad->SetCollisionEnabled(ECollisionEnabled::NoCollision); Pad->SetVisibility(false); }
         return;
     }
@@ -130,7 +130,7 @@ void APortWorkingCrane::ResetOperation()
     SourceSlot=Stage=CompletedJobs=0;
     bCarrying=bPaused=bResumePhysics=false;
     Fault.Empty(); Speed=StageTime=0; SettleTime=0;
-    Head=Local(Slots[0]); Head.Z=SafeZ;
+    Head=Local(Slots[0]); Head.Z=SafeZ; StageHoldTarget=Head;
     UpdateParts();
 }
 
@@ -242,13 +242,19 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
     }
     // Pick and lift the next ship box while the vehicle is away; hold it safely
     // above the dock until the returning AGV is stopped beneath the spreader.
-    if (Stage==5 && !bDestinationReady) { if(bSTS) MoveSTS(Head,Dt); return; }
+    if (Stage==5 && !bDestinationReady) { if(bSTS) MoveSTS(StageHoldTarget,Dt); return; }
     StageTime+=Dt;
-    if (StageTime>(bSTS?STSProfile.StageTimeout:180.f)) { Stop(TEXT("Job stage timed out")); return; }
+    if (StageTime>(bSTS?STSProfile.StageTimeout:180.f))
+    {
+        Stop(FString::Printf(TEXT("Job stage timed out: stage=%d head=%s target_hold=%s sway=%.3f wind=%s"),
+            Stage,*Head.ToCompactString(),*StageHoldTarget.ToCompactString(),SuspensionState.SwayDegrees(),
+            *WindVelocityMetersPerSecond.ToCompactString()));
+        return;
+    }
     if(bSTS && Stage==2){AdvancePickup(Dt);return;}
     const FVector Source=bSTS && Stage==3?Local(Pickup.TrialOrigin):Local(Slots[SourceSlot]);
     const FVector Destination=Local(Slots[1-SourceSlot]);
-    FVector Target=Head;
+    FVector Target=StageHoldTarget;
     switch(Stage)
     {
     case 0: Target.Z=SafeZ; break;
@@ -315,6 +321,7 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
         CargoActor->LocationOwner=bSTS && (1-SourceSlot)==0?ECargoOwner::Ship:ECargoOwner::Yard;
         bCarrying=false;
     }
+    StageHoldTarget=Head+SuspendedOffset;
     ++Stage; StageTime=SettleTime=0;
     if(bSTS) SampleSTS(true);
 }
@@ -330,7 +337,21 @@ bool APortWorkingCrane::ValidateOperation(FString& Error) const
     // the trolley alone rejects that corrective motion even while the spreader
     // remains inside the reservation.
     const FVector ControlledPosition=Head+SuspendedOffset;
-    const double Margin=bSTS?STSProfile.Pickup.AcquisitionRadius:1;
+    double Margin=bSTS?STSProfile.Pickup.AcquisitionRadius:1;
+    if(bSTS && STSProfile.bReady)
+    {
+        auto WindConfig=STSProfile.Dynamics;
+        WindConfig.Wind=Orientation.UnrotateVector(WindVelocityMetersPerSecond);
+        const FVector WindAllowance=WindConfig.WindEquilibriumOffset(STSProfile.MaxRope,
+            FMath::Max(1.f,STSProfile.SpreaderMassKg))*100.;
+        Margin+=FMath::Max(FMath::Abs(WindAllowance.X),FMath::Abs(WindAllowance.Y));
+        // A loaded trolley can enter the end of the reserved segment at full
+        // reference speed. Include its bounded braking distance as well as the
+        // wind deflection instead of treating controlled deceleration as escape.
+        const double TrolleyStopping=FMath::Square(double(STSProfile.TrolleySpeed))/(2.*STSProfile.TrolleyAcceleration);
+        const double GantryStopping=FMath::Square(double(STSProfile.GantrySpeed))/(2.*STSProfile.GantryAcceleration);
+        Margin+=FMath::Max(TrolleyStopping,GantryStopping);
+    }
     if (ControlledPosition.X<FMath::Min3(A.X,B.X,JobStartHead.X)-Margin || ControlledPosition.X>FMath::Max3(A.X,B.X,JobStartHead.X)+Margin ||
         ControlledPosition.Y<FMath::Min3(A.Y,B.Y,JobStartHead.Y)-Margin || ControlledPosition.Y>FMath::Max3(A.Y,B.Y,JobStartHead.Y)+Margin || Head.Z>SafeZ+1)
     {
@@ -371,6 +392,7 @@ bool APortWorkingCrane::AssignCargo(APortContainerActor* Cargo,FVector Source,FV
     CargoActor=Cargo; Slots[0]=Source; Slots[1]=Destination; SourceSlot=Stage=0;
     bDestinationReady=true;
     bJobActive=true; bCarrying=false; Speed=StageTime=SettleTime=0; JobStartHead=Head;
+    StageHoldTarget=Head+SuspendedOffset;
     for (int32 I=0;I<2;++I)
     {
         const bool Support=I==0?SourceSupport:DestinationSupport;
