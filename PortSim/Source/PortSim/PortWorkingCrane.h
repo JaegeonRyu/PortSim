@@ -23,6 +23,7 @@ public:
     bool AssignCargo(APortContainerActor* Cargo, FVector Source, FVector Destination, bool SourceSupport, bool DestinationSupport, APortAGVActor* HandoverVehicle=nullptr);
     void SetSTSProfile(const FSTSOperatingProfile& Profile) { STSProfile=Profile; }
     void SetWindVelocity(FVector WorldVelocityMetersPerSecond);
+    void UpdateMovingShipSource(APortContainerActor* Cargo,FVector WorldPosition);
     FVector GetWindVelocity() const { return WindVelocityMetersPerSecond; }
     bool HasSTSProfile() const { return STSProfile.bReady; }
     double LastJobSeconds=0, LastPausedSeconds=0;

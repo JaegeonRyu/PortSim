@@ -7,14 +7,17 @@ $repositoryRoot = Split-Path $projectRoot -Parent
 $hasher = [Security.Cryptography.SHA256]::Create()
 try { $digest = [BitConverter]::ToString($hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($repositoryRoot))).Replace('-','').Substring(0,12) }
 finally { $hasher.Dispose() }
-$aliasRoot = Join-Path ([IO.Path]::GetTempPath()) ('PortSimBuild-' + $digest)
-if (Test-Path -LiteralPath $aliasRoot) {
-    $aliasItem = Get-Item -LiteralPath $aliasRoot
-    if ($aliasItem.LinkType -ne 'Junction' -or [IO.Path]::GetFullPath([string]$aliasItem.Target) -ne $repositoryRoot) {
-        throw "Build alias already exists with a different target: $aliasRoot"
+$aliasRoot = if ($repositoryRoot -match '^[\x00-\x7F]+$') { $repositoryRoot }
+    else { Join-Path $env:SystemDrive ('PortSimBuild-' + $digest) }
+if ($aliasRoot -ne $repositoryRoot) {
+    if (Test-Path -LiteralPath $aliasRoot) {
+        $aliasItem = Get-Item -LiteralPath $aliasRoot
+        if ($aliasItem.LinkType -ne 'Junction' -or [IO.Path]::GetFullPath([string]$aliasItem.Target) -ne $repositoryRoot) {
+            throw "Build alias already exists with a different target: $aliasRoot"
+        }
+    } else {
+        New-Item -ItemType Junction -Path $aliasRoot -Target $repositoryRoot | Out-Null
     }
-} else {
-    New-Item -ItemType Junction -Path $aliasRoot -Target $repositoryRoot | Out-Null
 }
 $project = Join-Path $aliasRoot 'PortSim\PortSim.uproject'
 & (Join-Path $Engine 'Engine\Build\BatchFiles\Build.bat') PortSimEditor Win64 Development "-Project=$project" -WaitMutex -NoHotReloadFromIDE -NoUBA -NoUBTMakefiles

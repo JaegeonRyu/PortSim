@@ -22,6 +22,13 @@ void APortWorkingCrane::SetWindVelocity(FVector WorldVelocityMetersPerSecond)
         WorldVelocityMetersPerSecond.GetClampedToMaxSize(50.f);
 }
 
+void APortWorkingCrane::UpdateMovingShipSource(APortContainerActor* Cargo,FVector WorldPosition)
+{
+    if(!bSTS || !bJobActive || bCarrying || CargoActor!=Cargo || Stage>2 || SourceSlot<0 || SourceSlot>1) return;
+    Slots[SourceSlot]=WorldPosition;
+    if(Pads.IsValidIndex(SourceSlot)) Pads[SourceSlot]->SetWorldLocation(WorldPosition-FVector(0,0,139.5f));
+}
+
 void APortWorkingCrane::SetDestinationReady(bool Ready)
 {
     if(bDestinationReady==Ready) return;
@@ -78,7 +85,7 @@ void APortWorkingCrane::SampleSTS(bool Force)
     S.SpreaderPosition=HeadPosition()+Orientation.RotateVector(FVector(STSProfile.PositionBias));
     S.SpreaderVelocity=SpreaderVelocity();
     S.CargoPosition=CargoActor->GetActorLocation()+Orientation.RotateVector(STSProfile.Pickup.PoseBias);
-    S.CargoVelocity=bCarrying?S.SpreaderVelocity:CargoActor->GetBody()->GetPhysicsLinearVelocity();
+    S.CargoVelocity=bCarrying?S.SpreaderVelocity:CargoActor->GetMotionVelocity();
     const FVector Gap=Orientation.UnrotateVector(S.SpreaderPosition-S.CargoPosition);
     S.bLanded=FMath::Abs(Gap.X)<=STSProfile.LandingTolerance && FMath::Abs(Gap.Y)<=STSProfile.LandingTolerance &&
         FMath::Abs(Gap.Z-154.5f)<=STSProfile.SeatingTolerance &&
@@ -139,6 +146,11 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
     const double Payload=bCarrying?CargoActor->MassKg:0, Mass=STSProfile.SpreaderMassKg+Payload;
     const FVector MeasuredPosition=Local(Observation.SpreaderPosition);
     const FVector MeasuredVelocity=Orientation.UnrotateVector(Observation.SpreaderVelocity);
+    // During vessel pickup the target is not stationary. Feed the measured
+    // secured-cargo velocity into the drive loop so the spreader follows the
+    // deck through the seating window instead of repeatedly chasing its wake.
+    const FVector TargetVelocity=Stage==2 && !bCarrying?
+        Orientation.UnrotateVector(Observation.CargoVelocity):FVector::ZeroVector;
     const double Age=FMath::Max(0.,SimulationTime-Observation.Timestamp);
     const FVector CoG=bCarrying?CargoActor->CoGOffsetCm*.01*(Payload/Mass):FVector::ZeroVector;
     // Equal slices avoid a nanosecond remainder from float tick durations.
@@ -166,7 +178,7 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
             // the trolley/gantry upwind of the aerodynamic equilibrium offset.
             const double ControlTarget=I<2?Target[I]-WindOffset[I]:Target[I];
             const double Error=ControlTarget-FeedbackPosition;
-            double Desired=.8*Error-.8*Observation.DriveVelocity[I];
+            double Desired=.8*Error+TargetVelocity[I]-.8*(Observation.DriveVelocity[I]-TargetVelocity[I]);
 
             double Acceleration=Accelerations[I];
             if(I==2)
@@ -189,7 +201,7 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
                 const double WindTrackingGain=SensorConfig.Wind.IsNearlyZero()?1.:4.;
                 const double EquilibriumAngle=FMath::Asin(FMath::Clamp(WindOffset[I]*.01/Length,-1.,1.));
                 const double Command=C.HorizontalAcceleration(Error*.01,
-                    Observation.DriveVelocity[I]*.01,FMath::Max(.1,(BeamZ-Observation.DrivePosition.Z)*.01),
+                    (Observation.DriveVelocity[I]-TargetVelocity[I])*.01,FMath::Max(.1,(BeamZ-Observation.DrivePosition.Z)*.01),
                     Observation.SwayRate[I],Observation.SwayAngle[I],EquilibriumAngle,WindTrackingGain)*100;
                 AxisVelocity[I]=FMath::Clamp(AxisVelocity[I]+FMath::Clamp(Command,-Acceleration,Acceleration)*Step,-double(Limits[I]),double(Limits[I]));
             }

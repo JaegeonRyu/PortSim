@@ -86,6 +86,63 @@ bool FSTSDynamicsTest::RunTest(const FString& Parameters)
         WindConfig.HorizontalAcceleration(0,0,20,0,EquilibriumAngle+.01,EquilibriumAngle,4)>0);
     TestTrue(TEXT("Anti-sway adds no angle correction at the measured wind equilibrium"),
         FMath::IsNearlyZero(WindConfig.HorizontalAcceleration(0,0,20,0,EquilibriumAngle,EquilibriumAngle,4)));
+    struct FWindResponseMetrics
+    {
+        double PeakSwayErrorDegrees=0,PeakPositionErrorM=0,RmsSwayErrorDegrees=0,PeakAccelerationMps2=0;
+    };
+    auto WindResponse=[&](bool Gust,bool AntiSway)
+    {
+        auto Scenario=C; Scenario.AntiSway=AntiSway;
+        FSTSSuspension S; double Trolley=0,Velocity=0,SquaredSwayError=0; int32 Samples=0;
+        constexpr double H=1./120.,Length=20.,Mass=17000.,BaseWind=3.5,GustIncrement=4.,MeasureSeconds=60.;
+        FWindResponseMetrics Metrics;
+        auto Step=[&](double Time,bool Measure)
+        {
+            double GustSpeed=0;
+            if(Gust && Time>=10 && Time<=20)
+            {
+                const double Phase=(Time-10)/10.;
+                const double Envelope=Phase<.25?FMath::SmoothStep(0.,.25,Phase):
+                    (Phase<=.65?1.:FMath::SmoothStep(1.,.65,Phase));
+                GustSpeed=GustIncrement*Envelope;
+            }
+            Scenario.Wind=FVector(BaseWind+GustSpeed,0,0);
+            const double Offset=Scenario.WindEquilibriumOffset(Length,Mass).X;
+            const double Equilibrium=FMath::Asin(FMath::Clamp(Offset/Length,-1.,1.));
+            const double Command=Scenario.HorizontalAcceleration(-Offset-Trolley,Velocity,Length,S.Rate.X,
+                S.Angle.X,Equilibrium,4);
+            const double Acceleration=FMath::Clamp(Command,-1.5,1.5);
+            const double Next=FMath::Clamp(Velocity+Acceleration*H,-4.,4.);
+            const double AppliedAcceleration=(Next-Velocity)/H; Velocity=Next; Trolley+=Velocity*H;
+            S.Step(Scenario,H,Length,0,FVector(AppliedAcceleration,0,0),FVector(Velocity,0,0),Mass,FVector::ZeroVector,P.HoistPowerW);
+            if(Measure)
+            {
+                const double SwayError=FMath::Abs(FMath::RadiansToDegrees(S.Angle.X-Equilibrium));
+                Metrics.PeakSwayErrorDegrees=FMath::Max(Metrics.PeakSwayErrorDegrees,SwayError);
+                Metrics.PeakPositionErrorM=FMath::Max(Metrics.PeakPositionErrorM,FMath::Abs(Trolley+S.Offset.X));
+                Metrics.PeakAccelerationMps2=FMath::Max(Metrics.PeakAccelerationMps2,FMath::Abs(AppliedAcceleration));
+                SquaredSwayError+=SwayError*SwayError; ++Samples;
+            }
+        };
+        // Settle under the same mean wind before comparing the disturbance.
+        for(int32 I=0;I<FMath::RoundToInt(60/H);++I) Step(-60+I*H,false);
+        for(int32 I=0;I<FMath::RoundToInt(MeasureSeconds/H);++I) Step(I*H,true);
+        Metrics.RmsSwayErrorDegrees=FMath::Sqrt(SquaredSwayError/FMath::Max(1,Samples));
+        return Metrics;
+    };
+    const FWindResponseMetrics Normal=WindResponse(false,true);
+    const FWindResponseMetrics GustControlled=WindResponse(true,true);
+    const FWindResponseMetrics GustUncontrolled=WindResponse(true,false);
+    const double NormalForce=.5*1.225*C.WindDrag*C.WindArea*3.5*3.5;
+    const double GustForce=.5*1.225*C.WindDrag*C.WindArea*7.5*7.5;
+    UE_LOG(LogTemp,Display,TEXT("PORTSIM_GUST_METRICS: mean_mps=3.5 peak_mps=7.5 force_ratio=%.3f normal_peak_sway_error_deg=%.6f normal_peak_position_error_m=%.6f anti_sway_peak_sway_error_deg=%.6f anti_sway_rms_sway_error_deg=%.6f anti_sway_peak_position_error_m=%.6f anti_sway_peak_acceleration_mps2=%.6f no_anti_sway_peak_sway_error_deg=%.6f no_anti_sway_rms_sway_error_deg=%.6f no_anti_sway_peak_position_error_m=%.6f"),
+        GustForce/NormalForce,Normal.PeakSwayErrorDegrees,Normal.PeakPositionErrorM,
+        GustControlled.PeakSwayErrorDegrees,GustControlled.RmsSwayErrorDegrees,GustControlled.PeakPositionErrorM,GustControlled.PeakAccelerationMps2,
+        GustUncontrolled.PeakSwayErrorDegrees,GustUncontrolled.RmsSwayErrorDegrees,GustUncontrolled.PeakPositionErrorM);
+    TestTrue(TEXT("Gust creates more sway error than steady mean wind"),GustControlled.PeakSwayErrorDegrees>Normal.PeakSwayErrorDegrees*2);
+    TestTrue(TEXT("Anti-sway reduces gust peak sway error"),GustControlled.PeakSwayErrorDegrees<GustUncontrolled.PeakSwayErrorDegrees);
+    TestTrue(TEXT("Anti-sway reduces gust RMS sway error"),GustControlled.RmsSwayErrorDegrees<GustUncontrolled.RmsSwayErrorDegrees);
+    TestTrue(TEXT("Anti-sway reduces gust load-position error"),GustControlled.PeakPositionErrorM<GustUncontrolled.PeakPositionErrorM);
     auto LimitedMotor=C;LimitedMotor.MotorMaxTorque=1;FSTSSuspension MotorState;
     MotorState.Step(LimitedMotor,.05,20,0,FVector::ZeroVector,FVector::ZeroVector,17000,FVector::ZeroVector,P.HoistPowerW);
     TestTrue(TEXT("Motor saturation is exposed independently of rope limits"),MotorState.Saturated);

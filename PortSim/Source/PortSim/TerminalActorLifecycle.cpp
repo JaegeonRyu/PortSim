@@ -23,8 +23,11 @@ bool AQuayCrane::ValidateTerminalActors(FString& Error) const
 {
     if (bUnifiedTerminal)
     {
-        if (!IsValid(SiteLogistics) || WorkingCranes.Num()!=55 || SupportFleet.Num()!=105 || ContainerActors.Num()!=0 || AGVActors.Num()!=0 || ShipActor)
+        if (!IsValid(SiteLogistics) || WorkingCranes.Num()!=55 || SupportFleet.Num()!=105 || ContainerActors.Num()!=0 || AGVActors.Num()!=0 || ShipActor || VesselActors.Num()!=3)
         { Error=TEXT("Legacy central berth still exists or unified equipment count is wrong"); return false; }
+        for(const auto& Vessel:VesselActors)
+            if(!IsValid(Vessel) || Vessel->GetOwner()!=this || Vessel->GetAttachParentActor())
+            { Error=TEXT("Unified vessel actor ownership mismatch"); return false; }
         return SiteLogistics->Validate(Error);
     }
     const int32 Expected=bTerminalMode?24:1;
@@ -85,6 +88,8 @@ void AQuayCrane::DestroyTerminalActors()
     for (const auto& Vehicle:AGVActors) Destroy(Vehicle);
     for (const auto& Vehicle:SupportFleet) Destroy(Vehicle);
     SupportFleet.Reset();
+    for(const auto& Vessel:VesselActors) Destroy(Vessel);
+    VesselActors.Reset(); VesselBaseTransforms.Reset(); VesselBasePivots.Reset();
     Destroy(SiteLogistics); SiteLogistics=nullptr;
     for (const auto& Crane:WorkingCranes) Destroy(Crane);
     WorkingCranes.Reset();

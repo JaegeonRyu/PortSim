@@ -159,6 +159,9 @@ private:
     UPROPERTY(VisibleInstanceOnly, Category="Terminal|Actors") TArray<TObjectPtr<APortAGVActor>> AGVActors;
     UPROPERTY(VisibleInstanceOnly, Category="Terminal|Actors") TObjectPtr<APortWorkingCrane> RMGActor;
     UPROPERTY(VisibleInstanceOnly, Category="Terminal|Actors") TObjectPtr<APortShipActor> ShipActor;
+    UPROPERTY(VisibleInstanceOnly, Category="Terminal|Actors") TArray<TObjectPtr<APortShipActor>> VesselActors;
+    TArray<FTransform> VesselBaseTransforms;
+    TArray<FVector> VesselBasePivots;
     APortContainerActor* SpawnContainer(int32 Number, FVector Position);
     bool ValidateTerminalActors(FString& Error) const;
     void DestroyTerminalActors();
@@ -228,8 +231,10 @@ private:
     TArray<FVector> SiteTestPositions;
     UPROPERTY() TObjectPtr<AActor> SiteActor;
     void ResetTerminal();
+    void ApplySeaMotion();
     void ApplyAppearance();
     void UpdateRopes();
+    FVector TerminalShipSlotBase(int32 Index) const;
     FVector TerminalSlot(int32 Index, bool bShip) const;
     void TickAutomatic(float Dt);
     void BeginAutomaticJob();
@@ -334,4 +339,5 @@ public:
     virtual void NotifyHitBoxClick(FName BoxName) override;
 private:
     void DrawWindCompass(const UPortEnvironmentComponent& Environment,float Scale);
+    void DrawSeaState(const UPortEnvironmentComponent& Environment,float Scale);
 };

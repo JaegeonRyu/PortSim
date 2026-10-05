@@ -151,10 +151,13 @@ void AQuayCrane::BuildTerminalSite()
     int32 VesselIndex=0;
     for (float Y:ShipPositions)
     {
-        Box(Roads,FVector(-32,Y,-1),FVector(45,285,10));
-        Box(Blue,FVector(-32,Y,4.2),FVector(43,285,.4));
-        Box(Roads,FVector(-32,Y+146,-1),FVector(29,7,10));
-        Box(Buildings,FVector(-32,Y-125,14),FVector(38,18,20));
+        if(!bUnifiedTerminal)
+        {
+            Box(Roads,FVector(-32,Y,-1),FVector(45,285,10));
+            Box(Blue,FVector(-32,Y,4.2),FVector(43,285,.4));
+            Box(Roads,FVector(-32,Y+146,-1),FVector(29,7,10));
+            Box(Buildings,FVector(-32,Y-125,14),FVector(38,18,20));
+        }
         for (int32 Row=0;Row<ShipRows;++Row)
             for (int32 Bay=0;Bay<ShipBays;++Bay)
                 for (int32 Tier=0;Tier<ShipTiers;++Tier)

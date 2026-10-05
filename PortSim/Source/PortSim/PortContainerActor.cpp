@@ -53,6 +53,18 @@ void APortContainerActor::ApplyWind(FVector WindVelocityMetersPerSecond,float Dr
     Body->AddForce(ForceNewtons*100.f);
 }
 
+void APortContainerActor::SetSecuredVesselMotion(FVector Position,FQuat Rotation,FVector VelocityCentimetersPerSecond)
+{
+    if(Body->IsSimulatingPhysics()) Body->SetSimulatePhysics(false);
+    SetActorLocationAndRotation(Position,Rotation,false,nullptr,ETeleportType::TeleportPhysics);
+    KinematicVelocityCentimetersPerSecond=VelocityCentimetersPerSecond;
+}
+
+FVector APortContainerActor::GetMotionVelocity() const
+{
+    return Body->IsSimulatingPhysics()?Body->GetPhysicsLinearVelocity():KinematicVelocityCentimetersPerSecond;
+}
+
 void APortContainerActor::InitializeContainer(int32 Number)
 {
     ContainerID=FName(*FString::Printf(TEXT("C%02d"),Number));

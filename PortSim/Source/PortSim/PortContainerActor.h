@@ -22,6 +22,8 @@ public:
     void ApplyContainerAppearance();
     void SetPhysicalParameters(float Mass, FVector CoGOffset);
     void ApplyWind(FVector WindVelocityMetersPerSecond,float DragCoefficient=1.2f);
+    void SetSecuredVesselMotion(FVector Position,FQuat Rotation,FVector VelocityCentimetersPerSecond);
+    FVector GetMotionVelocity() const;
     UStaticMeshComponent* GetBody() const { return Body; }
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Container") FName ContainerID;
@@ -30,4 +32,5 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Container") ECargoOwner LocationOwner=ECargoOwner::Ship;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Container") TObjectPtr<UStaticMeshComponent> Body;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Container") TObjectPtr<UStaticMeshComponent> Visual;
+    FVector KinematicVelocityCentimetersPerSecond=FVector::ZeroVector;
 };
