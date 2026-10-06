@@ -54,6 +54,13 @@ FPortVesselMotion FPortSeaState::SampleVesselMotion(int32 VesselIndex) const
     const FVector VelocityMeters=WaveFlow*WaveHorizontal*WaveOmega*WaveCos+
         SwellFlow*SwellHorizontal*SwellOmega*SwellCos+
         FVector(0,0,WaveHeave*WaveOmega*WaveCos+SwellHeave*SwellOmega*SwellCos);
+    const FVector AccelerationMeters=-WaveFlow*WaveHorizontal*WaveOmega*WaveOmega*WaveSin-
+        SwellFlow*SwellHorizontal*SwellOmega*SwellOmega*SwellSin+
+        FVector(0,0,-WaveHeave*WaveOmega*WaveOmega*WaveSin-SwellHeave*SwellOmega*SwellOmega*SwellSin);
+    const FVector JerkMeters=-WaveFlow*WaveHorizontal*WaveOmega*WaveOmega*WaveOmega*WaveCos-
+        SwellFlow*SwellHorizontal*SwellOmega*SwellOmega*SwellOmega*SwellCos+
+        FVector(0,0,-WaveHeave*WaveOmega*WaveOmega*WaveOmega*WaveCos-
+            SwellHeave*SwellOmega*SwellOmega*SwellOmega*SwellCos);
     // Vessel length is world Y: roll is about Y and pitch about X.
     const double RollDegrees=.45*WaveHeightMeters*FMath::Sin(WavePhase+.35)+
         .65*SwellHeightMeters*FMath::Sin(SwellPhase+.20);
@@ -63,11 +70,35 @@ FPortVesselMotion FPortSeaState::SampleVesselMotion(int32 VesselIndex) const
         .65*SwellHeightMeters*SwellOmega*FMath::Cos(SwellPhase+.20));
     const double PitchRateRadians=FMath::DegreesToRadians(.18*WaveHeightMeters*WaveOmega*FMath::Cos(WavePhase-.25)+
         .25*SwellHeightMeters*SwellOmega*FMath::Cos(SwellPhase-.15));
+    const double RollAccelerationRadians=FMath::DegreesToRadians(-.45*WaveHeightMeters*WaveOmega*WaveOmega*FMath::Sin(WavePhase+.35)-
+        .65*SwellHeightMeters*SwellOmega*SwellOmega*FMath::Sin(SwellPhase+.20));
+    const double PitchAccelerationRadians=FMath::DegreesToRadians(-.18*WaveHeightMeters*WaveOmega*WaveOmega*FMath::Sin(WavePhase-.25)-
+        .25*SwellHeightMeters*SwellOmega*SwellOmega*FMath::Sin(SwellPhase-.15));
+    const double RollJerkRadians=FMath::DegreesToRadians(-.45*WaveHeightMeters*WaveOmega*WaveOmega*WaveOmega*FMath::Cos(WavePhase+.35)-
+        .65*SwellHeightMeters*SwellOmega*SwellOmega*SwellOmega*FMath::Cos(SwellPhase+.20));
+    const double PitchJerkRadians=FMath::DegreesToRadians(-.18*WaveHeightMeters*WaveOmega*WaveOmega*WaveOmega*FMath::Cos(WavePhase-.25)-
+        .25*SwellHeightMeters*SwellOmega*SwellOmega*SwellOmega*FMath::Cos(SwellPhase-.15));
     Result.TranslationCentimeters=TranslationMeters*100.;
     Result.LinearVelocityCentimetersPerSecond=VelocityMeters*100.;
+    Result.LinearAccelerationCentimetersPerSecondSquared=AccelerationMeters*100.;
+    Result.LinearJerkCentimetersPerSecondCubed=JerkMeters*100.;
     Result.Rotation=FQuat(FVector::XAxisVector,FMath::DegreesToRadians(PitchDegrees))*
         FQuat(FVector::YAxisVector,FMath::DegreesToRadians(RollDegrees));
-    Result.AngularVelocityRadiansPerSecond=FVector(PitchRateRadians,RollRateRadians,0);
+    // Rotation is Rx(pitch) * Ry(roll). The roll axis is therefore rotated by
+    // pitch in world space; retaining only X/Y rates loses the coupled Z term
+    // and gives incorrect point velocities near the bow and stern.
+    const double PitchRadians=FMath::DegreesToRadians(PitchDegrees);
+    const double SinPitch=FMath::Sin(PitchRadians),CosPitch=FMath::Cos(PitchRadians);
+    Result.AngularVelocityRadiansPerSecond=FVector(PitchRateRadians,
+        RollRateRadians*CosPitch,RollRateRadians*SinPitch);
+    Result.AngularAccelerationRadiansPerSecondSquared=FVector(PitchAccelerationRadians,
+        RollAccelerationRadians*CosPitch-RollRateRadians*PitchRateRadians*SinPitch,
+        RollAccelerationRadians*SinPitch+RollRateRadians*PitchRateRadians*CosPitch);
+    Result.AngularJerkRadiansPerSecondCubed=FVector(PitchJerkRadians,
+        RollJerkRadians*CosPitch-2*RollAccelerationRadians*PitchRateRadians*SinPitch-
+            RollRateRadians*PitchAccelerationRadians*SinPitch-RollRateRadians*PitchRateRadians*PitchRateRadians*CosPitch,
+        RollJerkRadians*SinPitch+2*RollAccelerationRadians*PitchRateRadians*CosPitch+
+            RollRateRadians*PitchAccelerationRadians*CosPitch-RollRateRadians*PitchRateRadians*PitchRateRadians*SinPitch);
     Result.HeaveMeters=TranslationMeters.Z;
     Result.RollDegrees=RollDegrees;
     Result.PitchDegrees=PitchDegrees;

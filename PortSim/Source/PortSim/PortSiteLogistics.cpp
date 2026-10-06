@@ -40,7 +40,7 @@ void APortSiteLogistics::SetVesselMotions(const TArray<FPortVesselMotion>& Motio
     VesselBasePivots=BasePivots;
 }
 
-bool APortSiteLogistics::ResolveVesselTransform(const FSiteShipCargo& Cargo,FVector& Position,FQuat& Rotation,FVector& Velocity) const
+bool APortSiteLogistics::ResolveVesselTransform(const FSiteShipCargo& Cargo,FVector& Position,FQuat& Rotation,FVector& Velocity,FVector& Acceleration,FVector& Jerk) const
 {
     const int32 Vessel=LaneCount==9?Cargo.STS/3:INDEX_NONE;
     if(!VesselMotions.IsValidIndex(Vessel) || !VesselBasePivots.IsValidIndex(Vessel)) return false;
@@ -49,6 +49,8 @@ bool APortSiteLogistics::ResolveVesselTransform(const FSiteShipCargo& Cargo,FVec
     Position=Motion.TransformPosition(Base,Pivot);
     Rotation=Motion.TransformRotation(Cargo.Transform.GetRotation());
     Velocity=Motion.VelocityAtPosition(Base,Pivot);
+    Acceleration=Motion.AccelerationAtPosition(Base,Pivot);
+    Jerk=Motion.JerkAtPosition(Base,Pivot);
     return true;
 }
 
@@ -58,9 +60,9 @@ void APortSiteLogistics::ApplyVesselMotions()
     {
         auto* Actor=Cargo.Actor.Get();
         if(!IsValid(Actor) || Actor->LocationOwner!=ECargoOwner::Ship || Actor->GetAttachParentActor()) continue;
-        FVector Position,Velocity;FQuat Rotation;
-        if(!ResolveVesselTransform(Cargo,Position,Rotation,Velocity)) continue;
-        Actor->SetSecuredVesselMotion(Position,Rotation,Velocity);
+        FVector Position,Velocity,Acceleration,Jerk;FQuat Rotation;
+        if(!ResolveVesselTransform(Cargo,Position,Rotation,Velocity,Acceleration,Jerk)) continue;
+        Actor->SetSecuredVesselMotion(Position,Rotation,Velocity,Acceleration,Jerk);
         if(Equipment.IsValidIndex(YardCraneCount+Cargo.STS))
             Equipment[YardCraneCount+Cargo.STS]->UpdateMovingShipSource(Actor,Position);
     }
@@ -696,9 +698,9 @@ void APortSiteLogistics::ResetLogistics()
         check(Actor);
         Actor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
         Actor->GetBody()->SetSimulatePhysics(false);
-        FVector Position=Cargo.Transform.GetLocation(),Velocity=FVector::ZeroVector;FQuat Rotation=Cargo.Transform.GetRotation();
-        ResolveVesselTransform(Cargo,Position,Rotation,Velocity);
-        Actor->SetSecuredVesselMotion(Position,Rotation,Velocity);
+        FVector Position=Cargo.Transform.GetLocation(),Velocity=FVector::ZeroVector,Acceleration=FVector::ZeroVector,Jerk=FVector::ZeroVector;FQuat Rotation=Cargo.Transform.GetRotation();
+        ResolveVesselTransform(Cargo,Position,Rotation,Velocity,Acceleration,Jerk);
+        Actor->SetSecuredVesselMotion(Position,Rotation,Velocity,Acceleration,Jerk);
         Actor->LocationOwner=ECargoOwner::Ship;
         Cargo.State=0; Cargo.HandoverMask=0;
     }
@@ -753,8 +755,8 @@ bool APortSiteLogistics::Validate(FString& Error) const
             Actor->ContainerID!=FName(*FString::Printf(TEXT("C%02d"),Cargo.ID)) || Cargo.STS<0 || Cargo.STS>=LaneCount)
         { Error=TEXT("Missing, replaced, duplicate or unassigned ship container actor"); return false; }
         Actors.Add(Actor);
-        FVector ExpectedPosition=Cargo.Transform.GetLocation(),ExpectedVelocity=FVector::ZeroVector;FQuat ExpectedRotation=Cargo.Transform.GetRotation();
-        ResolveVesselTransform(Cargo,ExpectedPosition,ExpectedRotation,ExpectedVelocity);
+        FVector ExpectedPosition=Cargo.Transform.GetLocation(),ExpectedVelocity=FVector::ZeroVector,ExpectedAcceleration=FVector::ZeroVector,ExpectedJerk=FVector::ZeroVector;FQuat ExpectedRotation=Cargo.Transform.GetRotation();
+        ResolveVesselTransform(Cargo,ExpectedPosition,ExpectedRotation,ExpectedVelocity,ExpectedAcceleration,ExpectedJerk);
         if (Cargo.State==0 && (Actor->LocationOwner!=ECargoOwner::Ship || Actor->GetAttachParentActor() ||
             Actor->GetBody()->IsSimulatingPhysics() || !Actor->GetActorLocation().Equals(ExpectedPosition,.5f) ||
             FQuat::ErrorAutoNormalize(Actor->GetActorQuat(),ExpectedRotation)>.0001f))

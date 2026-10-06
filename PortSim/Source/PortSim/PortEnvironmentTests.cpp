@@ -122,6 +122,25 @@ bool FPortSeaStateTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Equal simulated time preserves translation"),FineMotion.TranslationCentimeters.Equals(CoarseMotion.TranslationCentimeters,.001f));
     TestTrue(TEXT("Equal simulated time preserves rotation"),FineMotion.Rotation.Equals(CoarseMotion.Rotation,.000001f));
     TestFalse(TEXT("Separate vessels do not move in lockstep"),Fine.SampleVesselMotion(0).TranslationCentimeters.Equals(FineMotion.TranslationCentimeters,.001f));
+    FPortSeaState Kinematics; Kinematics.Initialize(-1617359246); Kinematics.ElapsedSeconds=237.5;
+    constexpr double H=.01;
+    FPortSeaState Before=Kinematics,After=Kinematics; Before.ElapsedSeconds-=H; After.ElapsedSeconds+=H;
+    const FVector Pivot(-3400,0,0),Base(-4900,23300,827);
+    const auto M0=Kinematics.SampleVesselMotion(2),Mm=Before.SampleVesselMotion(2),Mp=After.SampleVesselMotion(2);
+    const FVector P0=M0.TransformPosition(Base,Pivot),Pm=Mm.TransformPosition(Base,Pivot),Pp=Mp.TransformPosition(Base,Pivot);
+    const FVector DifferenceVelocity=(Pp-Pm)/(2*H);
+    const FVector DifferenceAcceleration=(Pp-2*P0+Pm)/(H*H);
+    const FVector DifferenceJerk=(Mp.AccelerationAtPosition(Base,Pivot)-Mm.AccelerationAtPosition(Base,Pivot))/(2*H);
+    AddInfo(FString::Printf(TEXT("Vessel kinematics analytic_velocity=%s finite_velocity=%s analytic_acceleration=%s finite_acceleration=%s analytic_jerk=%s finite_jerk=%s"),
+        *M0.VelocityAtPosition(Base,Pivot).ToCompactString(),*DifferenceVelocity.ToCompactString(),
+        *M0.AccelerationAtPosition(Base,Pivot).ToCompactString(),*DifferenceAcceleration.ToCompactString(),
+        *M0.JerkAtPosition(Base,Pivot).ToCompactString(),*DifferenceJerk.ToCompactString()));
+    TestTrue(TEXT("Analytic vessel point velocity matches transformed-position finite difference"),
+        M0.VelocityAtPosition(Base,Pivot).Equals(DifferenceVelocity,.05));
+    TestTrue(TEXT("Analytic vessel point acceleration matches transformed-position finite difference"),
+        M0.AccelerationAtPosition(Base,Pivot).Equals(DifferenceAcceleration,.2));
+    TestTrue(TEXT("Analytic vessel point jerk matches acceleration finite difference"),
+        M0.JerkAtPosition(Base,Pivot).Equals(DifferenceJerk,.5));
     const double FrozenAt=Sea.ElapsedSeconds;
     Sea.bSeaMotionEnabled=false;
     Sea.Advance(100.);

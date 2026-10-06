@@ -164,7 +164,8 @@ void AQuayCrane::ApplySeaMotion()
             Container->LocationOwner!=ECargoOwner::Ship || Container->GetAttachParentActor()) continue;
         const FVector Base=TerminalShipSlotBase(Index);
         Container->SetSecuredVesselMotion(Motion.TransformPosition(Base,VesselBasePivots[0]),
-            Motion.TransformRotation(FQuat::Identity),Motion.VelocityAtPosition(Base,VesselBasePivots[0]));
+            Motion.TransformRotation(FQuat::Identity),Motion.VelocityAtPosition(Base,VesselBasePivots[0]),
+            Motion.AccelerationAtPosition(Base,VesselBasePivots[0]),Motion.JerkAtPosition(Base,VesselBasePivots[0]));
     }
 }
 

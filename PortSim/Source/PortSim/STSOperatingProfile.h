@@ -49,6 +49,7 @@ struct FSTSObservation
     FVector WindVelocityMetersPerSecond = FVector::ZeroVector;
     FVector SpreaderPosition = FVector::ZeroVector, SpreaderVelocity = FVector::ZeroVector;
     FVector CargoPosition = FVector::ZeroVector, CargoVelocity = FVector::ZeroVector;
+    FVector CargoAcceleration = FVector::ZeroVector, CargoJerk = FVector::ZeroVector;
     float SwayDegrees = 0;
     float CornerLoadsN[4] = {0,0,0,0}; // analytic virtual load cells including acceleration; not elastic contact reactions
     bool Locked[4] = {false,false,false,false};

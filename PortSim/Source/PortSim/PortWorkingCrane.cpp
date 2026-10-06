@@ -209,7 +209,19 @@ void APortWorkingCrane::Advance(float Dt,bool bGlobalPaused)
     { AdvanceStep(Dt,bGlobalPaused); return; }
     const int32 Steps=FMath::Max(1,FMath::CeilToInt(double(Dt)*60.));
     const float Step=Dt/Steps;
-    for(int32 I=0;I<Steps;++I) AdvanceStep(Step,bGlobalPaused);
+    for(int32 I=0;I<Steps;++I)
+    {
+        // Pickup can complete inside this outer frame. Re-evaluate ownership
+        // every substep so a newly attached load is never moved back onto the
+        // vessel by the remaining frame interpolation.
+        if(IsValid(CargoActor) && CargoActor->LocationOwner==ECargoOwner::Ship &&
+            !CargoActor->GetAttachParentActor() && Stage<=2)
+        {
+            CargoActor->ApplySecuredMotionFraction(double(I+1)/Steps);
+            UpdateMovingShipSource(CargoActor,CargoActor->GetActorLocation());
+        }
+        AdvanceStep(Step,bGlobalPaused);
+    }
 }
 
 void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)

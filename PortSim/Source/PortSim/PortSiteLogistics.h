@@ -132,7 +132,7 @@ private:
     FVector WindVelocityMetersPerSecond=FVector::ZeroVector;
     TArray<FPortVesselMotion> VesselMotions;
     TArray<FVector> VesselBasePivots;
-    bool ResolveVesselTransform(const FSiteShipCargo& Cargo,FVector& Position,FQuat& Rotation,FVector& Velocity) const;
+    bool ResolveVesselTransform(const FSiteShipCargo& Cargo,FVector& Position,FQuat& Rotation,FVector& Velocity,FVector& Acceleration,FVector& Jerk) const;
     void ApplyVesselMotions();
     void Dispatch(int32 Lane);
     void ScheduleFleet();

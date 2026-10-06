@@ -86,6 +86,8 @@ void APortWorkingCrane::SampleSTS(bool Force)
     S.SpreaderVelocity=SpreaderVelocity();
     S.CargoPosition=CargoActor->GetActorLocation()+Orientation.RotateVector(STSProfile.Pickup.PoseBias);
     S.CargoVelocity=bCarrying?S.SpreaderVelocity:CargoActor->GetMotionVelocity();
+    S.CargoAcceleration=bCarrying?PlantAcceleration:CargoActor->GetMotionAcceleration();
+    S.CargoJerk=bCarrying?FVector::ZeroVector:CargoActor->GetMotionJerk();
     const FVector Gap=Orientation.UnrotateVector(S.SpreaderPosition-S.CargoPosition);
     S.bLanded=FMath::Abs(Gap.X)<=STSProfile.LandingTolerance && FMath::Abs(Gap.Y)<=STSProfile.LandingTolerance &&
         FMath::Abs(Gap.Z-154.5f)<=STSProfile.SeatingTolerance &&
@@ -151,6 +153,10 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
     // deck through the seating window instead of repeatedly chasing its wake.
     const FVector TargetVelocity=Stage==2 && !bCarrying?
         Orientation.UnrotateVector(Observation.CargoVelocity):FVector::ZeroVector;
+    const FVector TargetAcceleration=Stage==2 && !bCarrying?
+        Orientation.UnrotateVector(Observation.CargoAcceleration):FVector::ZeroVector;
+    const FVector TargetJerk=Stage==2 && !bCarrying?
+        Orientation.UnrotateVector(Observation.CargoJerk):FVector::ZeroVector;
     const double Age=FMath::Max(0.,SimulationTime-Observation.Timestamp);
     const FVector CoG=bCarrying?CargoActor->CoGOffsetCm*.01*(Payload/Mass):FVector::ZeroVector;
     // Equal slices avoid a nanosecond remainder from float tick durations.
@@ -168,6 +174,12 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
         for(int32 I=0;I<3;++I)
         {
             const double PredictionTime=Age+Substep*Step;
+            const double PredictedTarget=Target[I]+TargetVelocity[I]*PredictionTime+
+                .5*TargetAcceleration[I]*PredictionTime*PredictionTime+
+                TargetJerk[I]*PredictionTime*PredictionTime*PredictionTime/6.;
+            const double PredictedTargetVelocity=TargetVelocity[I]+TargetAcceleration[I]*PredictionTime+
+                .5*TargetJerk[I]*PredictionTime*PredictionTime;
+            const double PredictedTargetAcceleration=TargetAcceleration[I]+TargetJerk[I]*PredictionTime;
             // Horizontal position feedback uses the trolley/gantry encoders.
             // Feeding the suspended offset into this error and again through
             // sway-rate feedback makes the trolley chase the pendulum forever.
@@ -176,9 +188,18 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
                 : MeasuredPosition[I]+MeasuredVelocity[I]*PredictionTime;
             // Hold the spreader over its target under a steady wind by parking
             // the trolley/gantry upwind of the aerodynamic equilibrium offset.
-            const double ControlTarget=I<2?Target[I]-WindOffset[I]:Target[I];
+            // A suspended load is displaced from its accelerating support by
+            // a*L/g. Move the support by the opposite amount so the spreader,
+            // not merely the drive, follows the accelerating vessel target.
+            const double AccelerationOffset=I<2 && Stage==2 && !bCarrying?
+                PredictedTargetAcceleration*Length/9.80665:0.;
+            const double ControlTarget=I<2?PredictedTarget-WindOffset[I]-AccelerationOffset:PredictedTarget;
+            // The pendulum follows a changing acceleration equilibrium with a
+            // phase lag. Do not differentiate that quasi-static offset into a
+            // trolley velocity command; doing so amplifies wave-frequency lag.
+            const double ControlTargetVelocity=PredictedTargetVelocity;
             const double Error=ControlTarget-FeedbackPosition;
-            double Desired=.8*Error+TargetVelocity[I]-.8*(Observation.DriveVelocity[I]-TargetVelocity[I]);
+            double Desired=.8*Error+ControlTargetVelocity-.8*(Observation.DriveVelocity[I]-ControlTargetVelocity);
 
             double Acceleration=Accelerations[I];
             if(I==2)
@@ -199,10 +220,12 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
                 // wind equilibrium rejects changing-wind lag without treating
                 // the normal downwind lean as unwanted sway.
                 const double WindTrackingGain=SensorConfig.Wind.IsNearlyZero()?1.:4.;
-                const double EquilibriumAngle=FMath::Asin(FMath::Clamp(WindOffset[I]*.01/Length,-1.,1.));
+                const double EquilibriumOffset=WindOffset[I]+AccelerationOffset;
+                const double EquilibriumAngle=FMath::Asin(FMath::Clamp(EquilibriumOffset*.01/Length,-1.,1.));
                 const double Command=C.HorizontalAcceleration(Error*.01,
-                    (Observation.DriveVelocity[I]-TargetVelocity[I])*.01,FMath::Max(.1,(BeamZ-Observation.DrivePosition.Z)*.01),
-                    Observation.SwayRate[I],Observation.SwayAngle[I],EquilibriumAngle,WindTrackingGain)*100;
+                    (Observation.DriveVelocity[I]-ControlTargetVelocity)*.01,FMath::Max(.1,(BeamZ-Observation.DrivePosition.Z)*.01),
+                    Observation.SwayRate[I],Observation.SwayAngle[I],EquilibriumAngle,WindTrackingGain)*100+
+                    PredictedTargetAcceleration;
                 AxisVelocity[I]=FMath::Clamp(AxisVelocity[I]+FMath::Clamp(Command,-Acceleration,Acceleration)*Step,-double(Limits[I]),double(Limits[I]));
             }
             else AxisVelocity[I]=FMath::FInterpConstantTo(AxisVelocity[I],FMath::Clamp(Desired,-double(Limits[I]),double(Limits[I])),Step,Acceleration);

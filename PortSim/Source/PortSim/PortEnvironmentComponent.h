@@ -11,6 +11,10 @@ struct PORTSIM_API FPortVesselMotion
     FQuat Rotation=FQuat::Identity;
     FVector LinearVelocityCentimetersPerSecond=FVector::ZeroVector;
     FVector AngularVelocityRadiansPerSecond=FVector::ZeroVector;
+    FVector LinearAccelerationCentimetersPerSecondSquared=FVector::ZeroVector;
+    FVector AngularAccelerationRadiansPerSecondSquared=FVector::ZeroVector;
+    FVector LinearJerkCentimetersPerSecondCubed=FVector::ZeroVector;
+    FVector AngularJerkRadiansPerSecondCubed=FVector::ZeroVector;
     float HeaveMeters=0;
     float RollDegrees=0;
     float PitchDegrees=0;
@@ -22,6 +26,25 @@ struct PORTSIM_API FPortVesselMotion
     {
         return LinearVelocityCentimetersPerSecond+
             FVector::CrossProduct(AngularVelocityRadiansPerSecond,Rotation.RotateVector(BasePosition-Pivot));
+    }
+    FVector AccelerationAtPosition(FVector BasePosition,FVector Pivot) const
+    {
+        const FVector Radius=Rotation.RotateVector(BasePosition-Pivot);
+        return LinearAccelerationCentimetersPerSecondSquared+
+            FVector::CrossProduct(AngularAccelerationRadiansPerSecondSquared,Radius)+
+            FVector::CrossProduct(AngularVelocityRadiansPerSecond,FVector::CrossProduct(AngularVelocityRadiansPerSecond,Radius));
+    }
+    FVector JerkAtPosition(FVector BasePosition,FVector Pivot) const
+    {
+        const FVector Radius=Rotation.RotateVector(BasePosition-Pivot);
+        const FVector OmegaRadius=FVector::CrossProduct(AngularVelocityRadiansPerSecond,Radius);
+        return LinearJerkCentimetersPerSecondCubed+
+            FVector::CrossProduct(AngularJerkRadiansPerSecondCubed,Radius)+
+            2*FVector::CrossProduct(AngularAccelerationRadiansPerSecondSquared,OmegaRadius)+
+            FVector::CrossProduct(AngularVelocityRadiansPerSecond,
+                FVector::CrossProduct(AngularAccelerationRadiansPerSecondSquared,Radius))+
+            FVector::CrossProduct(AngularVelocityRadiansPerSecond,
+                FVector::CrossProduct(AngularVelocityRadiansPerSecond,OmegaRadius));
     }
 };
 

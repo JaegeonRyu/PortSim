@@ -53,16 +53,59 @@ void APortContainerActor::ApplyWind(FVector WindVelocityMetersPerSecond,float Dr
     Body->AddForce(ForceNewtons*100.f);
 }
 
-void APortContainerActor::SetSecuredVesselMotion(FVector Position,FQuat Rotation,FVector VelocityCentimetersPerSecond)
+void APortContainerActor::SetSecuredVesselMotion(FVector Position,FQuat Rotation,FVector VelocityCentimetersPerSecond,
+    FVector AccelerationCentimetersPerSecondSquared,FVector JerkCentimetersPerSecondCubed)
 {
-    if(Body->IsSimulatingPhysics()) Body->SetSimulatePhysics(false);
+    const bool WasSimulating=Body->IsSimulatingPhysics();
+    if(WasSimulating) Body->SetSimulatePhysics(false);
+    const FTransform Next(Rotation.GetNormalized(),Position);
+    if(!bHasSecuredMotionFrame || WasSimulating)
+    {
+        PreviousSecuredTransform=Next;
+        PreviousSecuredVelocity=VelocityCentimetersPerSecond;
+        PreviousSecuredAcceleration=AccelerationCentimetersPerSecondSquared;
+        PreviousSecuredJerk=JerkCentimetersPerSecondCubed;
+    }
+    else
+    {
+        PreviousSecuredTransform=CurrentSecuredTransform;
+        PreviousSecuredVelocity=CurrentSecuredVelocity;
+        PreviousSecuredAcceleration=CurrentSecuredAcceleration;
+        PreviousSecuredJerk=CurrentSecuredJerk;
+    }
+    CurrentSecuredTransform=Next;
+    CurrentSecuredVelocity=VelocityCentimetersPerSecond;
+    CurrentSecuredAcceleration=AccelerationCentimetersPerSecondSquared;
+    CurrentSecuredJerk=JerkCentimetersPerSecondCubed;
+    bHasSecuredMotionFrame=true;
+    ApplySecuredMotionFraction(1.);
+}
+
+void APortContainerActor::ApplySecuredMotionFraction(double Fraction)
+{
+    if(!bHasSecuredMotionFrame || Body->IsSimulatingPhysics()) return;
+    const double Alpha=FMath::Clamp(Fraction,0.,1.);
+    const FVector Position=FMath::Lerp(PreviousSecuredTransform.GetLocation(),CurrentSecuredTransform.GetLocation(),Alpha);
+    const FQuat Rotation=FQuat::Slerp(PreviousSecuredTransform.GetRotation(),CurrentSecuredTransform.GetRotation(),Alpha).GetNormalized();
     SetActorLocationAndRotation(Position,Rotation,false,nullptr,ETeleportType::TeleportPhysics);
-    KinematicVelocityCentimetersPerSecond=VelocityCentimetersPerSecond;
+    KinematicVelocityCentimetersPerSecond=FMath::Lerp(PreviousSecuredVelocity,CurrentSecuredVelocity,Alpha);
+    KinematicAccelerationCentimetersPerSecondSquared=FMath::Lerp(PreviousSecuredAcceleration,CurrentSecuredAcceleration,Alpha);
+    KinematicJerkCentimetersPerSecondCubed=FMath::Lerp(PreviousSecuredJerk,CurrentSecuredJerk,Alpha);
 }
 
 FVector APortContainerActor::GetMotionVelocity() const
 {
     return Body->IsSimulatingPhysics()?Body->GetPhysicsLinearVelocity():KinematicVelocityCentimetersPerSecond;
+}
+
+FVector APortContainerActor::GetMotionAcceleration() const
+{
+    return Body->IsSimulatingPhysics()?FVector::ZeroVector:KinematicAccelerationCentimetersPerSecondSquared;
+}
+
+FVector APortContainerActor::GetMotionJerk() const
+{
+    return Body->IsSimulatingPhysics()?FVector::ZeroVector:KinematicJerkCentimetersPerSecondCubed;
 }
 
 void APortContainerActor::InitializeContainer(int32 Number)
@@ -76,6 +119,7 @@ void APortContainerActor::InitializeContainer(int32 Number)
 
 void APortContainerActor::ResetCargo(FVector Position)
 {
+    bHasSecuredMotionFrame=false;
     Body->SetSimulatePhysics(false);
     SetActorLocationAndRotation(Position,FRotator::ZeroRotator,false,nullptr,ETeleportType::TeleportPhysics);
     Body->SetSimulatePhysics(true);
