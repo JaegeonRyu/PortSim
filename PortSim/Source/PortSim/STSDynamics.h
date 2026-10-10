@@ -27,8 +27,15 @@ struct FSTSDynamicsConfig
     double WindArea=0,WindDrag=0,WindMoment=0;
     TArray<FSTSSensorMount> Mounts;
     bool Load(TSharedPtr<FJsonObject> Root,FString& Error);
-    double HorizontalAcceleration(double ErrorM,double VelocityMps,double LengthM,double AngularRate) const
-    { return PositionGain*ErrorM-VelocityGain*VelocityMps+(AntiSway?SwayGain*LengthM*AngularRate:0); }
+    FVector AerodynamicForce(FVector BodyVelocityMps) const;
+    FVector WindEquilibriumOffset(double LengthM,double MassKg) const;
+    double HorizontalAcceleration(double ErrorM,double VelocityMps,double LengthM,double AngularRate,
+        double AngularDisplacement=0,double EquilibriumAngle=0,double PositionGainScale=1) const
+    {
+        const double SwayFeedback=SwayGain*LengthM*AngularRate+
+            FMath::Square(SwayGain)*LengthM*(AngularDisplacement-EquilibriumAngle);
+        return PositionGain*PositionGainScale*ErrorM-VelocityGain*VelocityMps+(AntiSway?SwayFeedback:0);
+    }
 };
 
 /** Two sway coordinates + yaw. Roll/pitch constrained; no elastic/slack-rope FEM. */

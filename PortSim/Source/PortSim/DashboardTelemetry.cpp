@@ -112,6 +112,8 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
         Physics->SetStringField(TEXT("provenance"),TEXT("unvalidated_simulation_assumptions"));
         Physics->SetBoolField(TEXT("anti_sway"),C.AntiSway); Physics->SetBoolField(TEXT("anti_skew"),C.AntiSkew);
         Physics->SetNumberField(TEXT("sway_deg"),D.SwayDegrees());
+        Vector(Physics,TEXT("sway_angle_rad"),FVector(Observation.SwayAngle.X,Observation.SwayAngle.Y,0));
+        Vector(Physics,TEXT("sway_rate_rad_s"),FVector(Observation.SwayRate.X,Observation.SwayRate.Y,0));
         Physics->SetNumberField(TEXT("skew_deg"),FMath::RadiansToDegrees(D.Yaw));
         Physics->SetNumberField(TEXT("skew_rate_deg_s"),FMath::RadiansToDegrees(D.YawRate));
         Physics->SetNumberField(TEXT("skew_control_torque_nm"),D.ControlTorque);
@@ -122,6 +124,10 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
         Physics->SetNumberField(TEXT("reeving_parts_per_corner"),C.Parts);
         Physics->SetBoolField(TEXT("saturated"),D.Saturated);
         Physics->SetBoolField(TEXT("active"),bJobActive);
+        Vector(Physics,TEXT("wind_velocity_mps"),Observation.WindVelocityMetersPerSecond);
+        auto WindConfig=C; WindConfig.Wind=Observation.WindVelocityMetersPerSecond;
+        Vector(Physics,TEXT("wind_compensation_m"),WindConfig.WindEquilibriumOffset(FMath::Max(.1,(BeamZ-Head.Z)*.01),
+            STSProfile.SpreaderMassKg+(bCarrying&&IsValid(CargoActor)?CargoActor->MassKg:0)));
         Vector(Physics,TEXT("offset_m"),D.Offset);
         TArray<TSharedPtr<FJsonValue>> Wires;
         for(int32 I=0;I<4;++I)
@@ -163,7 +169,7 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
                     else Values.Add(MakeShared<FJsonValueBoolean>(Observation.Locked[CornerIndex]));
                 Sensor->SetArrayField(TEXT("values"),Values);
             }
-            if(M.Key==TEXT("wind"))Sensor->SetNumberField(TEXT("value"),C.Wind.Size());
+            if(M.Key==TEXT("wind"))Sensor->SetNumberField(TEXT("value"),Observation.WindVelocityMetersPerSecond.Size());
             if(M.Key==TEXT("trolley_encoder"))Sensor->SetNumberField(TEXT("value"),M.ReadPosition(Observation.DrivePosition.X*.01));
             if(M.Key==TEXT("hoist_encoder"))Sensor->SetNumberField(TEXT("value"),(BeamZ-Head.Z)*.01);
             if(M.Key==TEXT("telescope_encoder"))Sensor->SetNumberField(TEXT("value"),12.192);

@@ -2,6 +2,7 @@
 #include "PortSiteLogistics.h"
 #include "PortSimTimeStep.h"
 #include "PortEnvironmentComponent.h"
+#include "PortContainerActor.h"
 #include "Misc/FileHelper.h"
 #include "HAL/PlatformTime.h"
 #include "HAL/PlatformProcess.h"
@@ -184,6 +185,7 @@ void AQuayCrane::ApplyAppearance()
     };
     for (const auto& Vehicle:AGVActors) AddEquipmentMeshes(Vehicle);
     AddEquipmentMeshes(ShipActor);
+    for(const auto& Vessel:VesselActors) AddEquipmentMeshes(Vessel);
     for (auto* Mesh : Meshes)
     {
         const FString Name = Mesh->GetName();
@@ -356,6 +358,17 @@ void AQuayCrane::ToggleLock()
         Status = TEXT("Lock denied: align above cargo, lower closer and stop moving.");
         return;
     }
+    // Secured ship cargo is kinematic so it follows the vessel exactly. At
+    // lock engagement it becomes a suspended dynamic load and inherits the
+    // deck velocity, avoiding an artificial impulse or a fixed-body lock.
+    if(auto* Container=ContainerActors.IsValidIndex(ActiveCargoIndex)?ContainerActors[ActiveCargoIndex].Get():nullptr;
+        Container && !Cargo->IsSimulatingPhysics())
+    {
+        const FVector VesselVelocity=Container->GetMotionVelocity();
+        Cargo->SetSimulatePhysics(true);
+        Cargo->SetPhysicsLinearVelocity(VesselVelocity);
+        Cargo->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+    }
     TwistLock->SetWorldLocation(Spreader->GetComponentLocation() - FVector(0.f, 0.f, Crane::SpreaderHalfHeight));
     TwistLock->SetConstrainedComponents(Spreader, NAME_None, Cargo, NAME_None);
     bLocked = true;
@@ -397,6 +410,10 @@ void AQuayCrane::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
     Environment->AdvanceEnvironment(DeltaSeconds);
+    ApplySeaMotion();
+    const FVector WindVelocity=Environment->GetEffectiveWindVelocity();
+    if(SiteLogistics) SiteLogistics->SetWindVelocity(WindVelocity);
+    for(const auto& Container:ContainerActors) if(IsValid(Container)) Container->ApplyWind(WindVelocity);
     if(bPickupTest){TickPickupTest(DeltaSeconds);return;}
     // World timers, control and Chaos consume the same accelerated delta.
     // Chaos subdivides the frame into small physics steps.
@@ -475,6 +492,7 @@ void AQuayCrane::Tick(float DeltaSeconds)
         if (PC->WasInputKeyJustPressed(EKeys::Subtract) || PC->WasInputKeyJustPressed(EKeys::Hyphen)) DecreaseSimulationSpeed();
         const bool Ctrl=PC->IsInputKeyDown(EKeys::LeftControl) || PC->IsInputKeyDown(EKeys::RightControl);
         if (Ctrl && PC->WasInputKeyJustPressed(EKeys::Zero)) Environment->ToggleWind();
+        else if (Ctrl && PC->WasInputKeyJustPressed(EKeys::One)) Environment->ToggleSeaMotion();
         else if (PC->WasInputKeyJustPressed(EKeys::Zero) || PC->WasInputKeyJustPressed(EKeys::NumPadZero)) ResetSimulationSpeed();
         if (PC->WasInputKeyJustPressed(EKeys::U)) StartAutomatic(false);
         if (PC->WasInputKeyJustPressed(EKeys::L)) StartAutomatic(true);
@@ -746,7 +764,8 @@ void APortSimHUD::DrawHUD()
         TogglePosition.X+10.f*Scale,TogglePosition.Y+7.f*Scale,GEngine->GetSmallFont(),Scale);
     AddHitBox(TogglePosition,ToggleSize,TEXT("TogglePortHUD"),true,100);
     if (!CranePawn->bHUDVisible) return;
-    if (const auto* Environment=CranePawn->GetEnvironment()) DrawWindCompass(*Environment,Scale);
+    if (const auto* Environment=CranePawn->GetEnvironment())
+    { DrawWindCompass(*Environment,Scale); DrawSeaState(*Environment,Scale); }
     DrawRect(FLinearColor(0.015f, 0.03f, 0.05f, 0.88f), 16.f, 16.f, 850.f * Scale, (CranePawn->bTerminalMode ? 310.f : 208.f) * Scale);
     float Y = 28.f;
     auto Line = [this, Scale, &Y](const FString& Text, FLinearColor Color, float FontScale = 1.f)

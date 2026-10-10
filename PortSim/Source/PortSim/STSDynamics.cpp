@@ -67,12 +67,26 @@ bool FSTSDynamicsConfig::Load(TSharedPtr<FJsonObject> Root,FString& Error)
     return true;
 }
 
+FVector FSTSDynamicsConfig::AerodynamicForce(FVector BodyVelocityMps) const
+{
+    const FVector RelativeWind=Wind-BodyVelocityMps;
+    return .5*1.225*WindDrag*WindArea*RelativeWind.Size()*RelativeWind;
+}
+
+FVector FSTSDynamicsConfig::WindEquilibriumOffset(double LengthM,double MassKg) const
+{
+    if(LengthM<=0 || MassKg<=0) return FVector::ZeroVector;
+    FVector Acceleration=AerodynamicForce(FVector::ZeroVector)/MassKg;
+    Acceleration.Z=0;
+    constexpr double G=9.80665;
+    return Acceleration*LengthM/FMath::Sqrt(G*G+Acceleration.SizeSquared());
+}
+
 void FSTSSuspension::Step(const FSTSDynamicsConfig& C,double Dt,double L,double Ldot,FVector A,FVector V,double M,FVector CoG,double PowerW)
 {
     if(Dt<=0 || M<=0 || L<.1) return;
     constexpr double G=9.80665;
-    const FVector WindRelative=C.Wind-V;
-    const FVector WindForce=.5*1.225*C.WindDrag*C.WindArea*WindRelative.Size()*WindRelative;
+    const FVector WindForce=C.AerodynamicForce(V);
     const FVector OldOffset=Offset;
     for(double Remaining=Dt;Remaining>1.e-9;)
     {

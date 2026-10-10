@@ -2,6 +2,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "STSOperatingProfile.h"
+#include "PortEnvironmentComponent.h"
 #include "Async/Future.h"
 #include "UObject/UnrealType.h"
 #include "TrafficSpatialIndex.h"
@@ -61,6 +62,8 @@ public:
     bool OwnsCentral(int32 Index) const { return CentralReservation==Index; }
     void RegisterBerthVehicles(const TArray<TObjectPtr<APortAGVActor>>& BerthVehicles);
     void BeginTrafficFrame();
+    void SetWindVelocity(FVector WorldVelocityMetersPerSecond);
+    void SetVesselMotions(const TArray<FPortVesselMotion>& Motions,const TArray<FVector>& BasePivots);
     bool MoveVehicle(APortAGVActor* Vehicle,FVector Target,float Dt);
     void Advance(float Dt,bool Paused);
     void ResetLogistics();
@@ -126,6 +129,11 @@ private:
     int32 CentralCount=0, Dispatched=0, LaneCount=8, YardCraneCount=36;
     bool bReady=false, bWasPaused=false;
     bool bCargoAlignedHandover=true;
+    FVector WindVelocityMetersPerSecond=FVector::ZeroVector;
+    TArray<FPortVesselMotion> VesselMotions;
+    TArray<FVector> VesselBasePivots;
+    bool ResolveVesselTransform(const FSiteShipCargo& Cargo,FVector& Position,FQuat& Rotation,FVector& Velocity,FVector& Acceleration,FVector& Jerk) const;
+    void ApplyVesselMotions(float FrameDurationSeconds=0);
     void Dispatch(int32 Lane);
     void ScheduleFleet();
     void ActivateVehicle(int32 Vehicle,int32 STS,bool FromQueue);

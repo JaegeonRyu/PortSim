@@ -54,7 +54,12 @@ void AQuayCrane::ApplySTSGeometry()
     }
 }
 
-float AQuayCrane::GetCargoMassKg() const { return Cargo?Cargo->GetMass():0.f; }
+float AQuayCrane::GetCargoMassKg() const
+{
+    if(const auto* Container=ContainerActors.IsValidIndex(ActiveCargoIndex)?ContainerActors[ActiveCargoIndex].Get():nullptr)
+        return Container->MassKg;
+    return Cargo?Cargo->GetMass():0.f;
+}
 float AQuayCrane::STSBeamHeight() const { return STSProfile.bReady?STSProfile.BeamHeight:3000.f; }
 float AQuayCrane::STSTransferHeight() const { return STSProfile.bReady?STSProfile.SafeHeight:1900.f; }
 float AQuayCrane::STSGantrySpeed() const { return STSProfile.bReady?STSProfile.GantrySpeed:TravelSpeed*0.6f; }
@@ -98,14 +103,14 @@ void AQuayCrane::SampleSTSSensors(bool Force)
     S.SpreaderPosition=Spreader->GetComponentLocation()+FVector(STSProfile.PositionBias);
     S.SpreaderVelocity=Spreader->GetPhysicsLinearVelocity();
     S.CargoPosition=Cargo->GetComponentLocation();
-    S.CargoVelocity=Cargo->GetPhysicsLinearVelocity();
+    const auto* Container=ContainerActors.IsValidIndex(ActiveCargoIndex)?ContainerActors[ActiveCargoIndex].Get():nullptr;
+    S.CargoVelocity=Container?Container->GetMotionVelocity():Cargo->GetPhysicsLinearVelocity();
     S.SwayDegrees=GetSwayDegrees();
     const FVector Gap=S.SpreaderPosition-S.CargoPosition;
     S.bLanded=FMath::Abs(Gap.X)<=STSProfile.LandingTolerance && FMath::Abs(Gap.Y)<=STSProfile.LandingTolerance &&
         FMath::Abs(Gap.Z-154.5f)<=STSProfile.SeatingTolerance &&
         (S.SpreaderVelocity-S.CargoVelocity).Size()<=STSProfile.SettleSpeed &&
         FQuat::ErrorAutoNormalize(Spreader->GetComponentQuat(),Cargo->GetComponentQuat())<0.02f;
-    const auto* Container=ContainerActors.IsValidIndex(ActiveCargoIndex)?ContainerActors[ActiveCargoIndex].Get():nullptr;
     const FVector CoG=Container?Container->CoGOffsetCm:FVector::ZeroVector;
     const float Weight=bLocked?FMath::Max(0.f,GetCargoMassKg()+STSProfile.MassBiasKg)*9.80665f:0;
     for(int32 I=0;I<4;++I)

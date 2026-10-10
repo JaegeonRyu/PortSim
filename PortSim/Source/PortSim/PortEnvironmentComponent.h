@@ -4,12 +4,92 @@
 #include "Components/ActorComponent.h"
 #include "PortEnvironmentComponent.generated.h"
 
-/** Display-only weather model. Own random stream never perturbs logistics randomness. */
+/** Reduced-order rigid vessel response to the current wind-wave and swell state. */
+struct PORTSIM_API FPortVesselMotion
+{
+    FVector TranslationCentimeters=FVector::ZeroVector;
+    FQuat Rotation=FQuat::Identity;
+    FVector LinearVelocityCentimetersPerSecond=FVector::ZeroVector;
+    FVector AngularVelocityRadiansPerSecond=FVector::ZeroVector;
+    FVector LinearAccelerationCentimetersPerSecondSquared=FVector::ZeroVector;
+    FVector AngularAccelerationRadiansPerSecondSquared=FVector::ZeroVector;
+    FVector LinearJerkCentimetersPerSecondCubed=FVector::ZeroVector;
+    FVector AngularJerkRadiansPerSecondCubed=FVector::ZeroVector;
+    float HeaveMeters=0;
+    float RollDegrees=0;
+    float PitchDegrees=0;
+
+    FVector TransformPosition(FVector BasePosition,FVector Pivot) const
+    { return Pivot+TranslationCentimeters+Rotation.RotateVector(BasePosition-Pivot); }
+    FQuat TransformRotation(FQuat BaseRotation) const { return Rotation*BaseRotation; }
+    FVector VelocityAtPosition(FVector BasePosition,FVector Pivot) const
+    {
+        return LinearVelocityCentimetersPerSecond+
+            FVector::CrossProduct(AngularVelocityRadiansPerSecond,Rotation.RotateVector(BasePosition-Pivot));
+    }
+    FVector AccelerationAtPosition(FVector BasePosition,FVector Pivot) const
+    {
+        const FVector Radius=Rotation.RotateVector(BasePosition-Pivot);
+        return LinearAccelerationCentimetersPerSecondSquared+
+            FVector::CrossProduct(AngularAccelerationRadiansPerSecondSquared,Radius)+
+            FVector::CrossProduct(AngularVelocityRadiansPerSecond,FVector::CrossProduct(AngularVelocityRadiansPerSecond,Radius));
+    }
+    FVector JerkAtPosition(FVector BasePosition,FVector Pivot) const
+    {
+        const FVector Radius=Rotation.RotateVector(BasePosition-Pivot);
+        const FVector OmegaRadius=FVector::CrossProduct(AngularVelocityRadiansPerSecond,Radius);
+        return LinearJerkCentimetersPerSecondCubed+
+            FVector::CrossProduct(AngularJerkRadiansPerSecondCubed,Radius)+
+            2*FVector::CrossProduct(AngularAccelerationRadiansPerSecondSquared,OmegaRadius)+
+            FVector::CrossProduct(AngularVelocityRadiansPerSecond,
+                FVector::CrossProduct(AngularAccelerationRadiansPerSecondSquared,Radius))+
+            FVector::CrossProduct(AngularVelocityRadiansPerSecond,
+                FVector::CrossProduct(AngularVelocityRadiansPerSecond,OmegaRadius));
+    }
+};
+
+/** Sheltered-port sea-state assumptions; wave and long-period swell are distinct. */
+struct PORTSIM_API FPortSeaState
+{
+    static constexpr float MinimumWaveHeightMeters=.10f;
+    static constexpr float TypicalWaveHeightMeters=.22f;
+    static constexpr float MaximumWaveHeightMeters=.40f;
+    static constexpr float MinimumSwellHeightMeters=.15f;
+    static constexpr float TypicalSwellHeightMeters=.32f;
+    static constexpr float MaximumSwellHeightMeters=.60f;
+    bool bSeaMotionEnabled=true;
+    float WaveHeightMeters=TypicalWaveHeightMeters;
+    float WavePeriodSeconds=5.5f;
+    float WaveDirectionDegrees=135.f;
+    float SwellHeightMeters=TypicalSwellHeightMeters;
+    float SwellPeriodSeconds=10.5f;
+    float SwellDirectionDegrees=150.f;
+    double ElapsedSeconds=0;
+    double WavePhaseRadians=0;
+    double SwellPhaseRadians=0;
+
+    void Initialize(int32 Seed);
+    void Advance(double SimulationSeconds);
+    FPortVesselMotion SampleVesselMotion(int32 VesselIndex) const;
+    float SignificantWaveHeightMeters() const
+    { return FMath::Sqrt(FMath::Square(WaveHeightMeters)+FMath::Square(SwellHeightMeters)); }
+};
+
+/** Weather model. Own random stream never perturbs logistics randomness. */
 struct PORTSIM_API FPortWindState
 {
     static constexpr float MinimumSpeed=1.f;
     static constexpr float TypicalSpeed=3.5f;
     static constexpr float MaximumSpeed=7.f;
+    // Normal-operation gust assumptions. These are not measured DGT limits.
+    // A short plateau represents the meteorological three-second gust sample.
+    static constexpr float MinimumGustPeak=2.f;
+    static constexpr float MaximumGustPeak=5.f;
+    static constexpr float MinimumGustDuration=6.f;
+    static constexpr float MaximumGustDuration=12.f;
+    static constexpr float MinimumGustInterval=300.f;
+    static constexpr float MaximumGustInterval=900.f;
+    static constexpr float MaximumGustDirectionOffset=15.f;
     bool bWindEnabled=true;
     float WindSpeedMetersPerSecond=TypicalSpeed;
     float WindDirectionDegrees=0;
@@ -17,9 +97,20 @@ struct PORTSIM_API FPortWindState
     float TargetWindSpeedMetersPerSecond=TypicalSpeed;
     float TargetWindDirectionDegrees=0;
     double SecondsUntilTarget=0;
+    bool bGustActive=false;
+    float GustSpeedMetersPerSecond=0;
+    float GustPeakSpeedMetersPerSecond=0;
+    float GustDirectionDegrees=0;
+    float GustDirectionOffsetDegrees=0;
+    double GustElapsedSeconds=0;
+    double GustDurationSeconds=0;
+    double SecondsUntilGust=0;
+    int32 GustCount=0;
 
     void Initialize(int32 Seed);
     void Advance(double SimulationSeconds);
+    FVector EffectiveVelocity() const;
+    float EffectiveDirectionDegrees() const;
     static float NormalizeDirection(float Degrees);
     static float InterpolateDirection(float Current,float Target,double Seconds);
     static FString DirectionName(float Degrees);
@@ -28,12 +119,25 @@ struct PORTSIM_API FPortWindState
     // Degrees describe wind FROM; this unit vector points TO (opposite direction).
     static FVector FlowDirection(float FromDegrees);
 private:
-    FRandomStream Random;
+    FRandomStream Random,GustRandom;
     float SampleSpeed();
     void SelectTarget();
+    void AdvanceMean(double SimulationSeconds);
+    void AdvanceGust(double SimulationSeconds);
+    void StartGust();
+    void ScheduleNextGust(bool Initial);
+    static float GustEnvelope(double Phase);
 };
 
-/** One environment owned by the terminal controller; no equipment/physics dependencies. */
+/** Shared aerodynamic helpers. Inputs and outputs use SI units. */
+struct PORTSIM_API FPortWindAerodynamics
+{
+    static constexpr double AirDensityKgPerCubicMeter=1.225;
+    static FVector DragForceNewtons(FVector WindVelocityMetersPerSecond,FVector BodyVelocityCentimetersPerSecond,
+        FQuat BodyRotation,FVector DimensionsMeters,double DragCoefficient);
+};
+
+/** One environment owned by the terminal controller and sampled by equipment. */
 UCLASS(ClassGroup=(PortSim), meta=(BlueprintSpawnableComponent))
 class PORTSIM_API UPortEnvironmentComponent : public UActorComponent
 {
@@ -48,13 +152,26 @@ public:
     UFUNCTION(BlueprintPure, Category="Environment|Wind") bool IsWindEnabled() const { return Wind.bWindEnabled; }
     UFUNCTION(BlueprintPure, Category="Environment|Wind") float GetWindSpeedMetersPerSecond() const { return Wind.WindSpeedMetersPerSecond; }
     UFUNCTION(BlueprintPure, Category="Environment|Wind") float GetWindDirectionDegrees() const { return Wind.WindDirectionDegrees; }
+    UFUNCTION(BlueprintPure, Category="Environment|Wind") bool IsGustActive() const { return Wind.bGustActive; }
+    UFUNCTION(BlueprintPure, Category="Environment|Wind") float GetGustSpeedMetersPerSecond() const { return Wind.GustSpeedMetersPerSecond; }
+    UFUNCTION(BlueprintPure, Category="Environment|Wind") float GetEffectiveWindSpeedMetersPerSecond() const { return GetEffectiveWindVelocity().Size(); }
+    UFUNCTION(BlueprintPure, Category="Environment|Wind") float GetEffectiveWindDirectionDegrees() const { return Wind.EffectiveDirectionDegrees(); }
     /** Actual wind travel direction, opposite to meteorological wind-from degrees. */
     UFUNCTION(BlueprintPure, Category="Environment|Wind") FVector GetWindDirectionVector() const { return Wind.WindDirectionVector; }
-    /** Velocity in metres/second, NOT Unreal centimetres/second. OFF returns zero. No force is applied. */
+    /** Velocity in metres/second, NOT Unreal centimetres/second. OFF returns zero. */
     UFUNCTION(BlueprintPure, Category="Environment|Wind") FVector GetEffectiveWindVelocity() const;
-    UFUNCTION(BlueprintPure, Category="Environment|Wind") FString GetWindDirectionName() const { return FPortWindState::DirectionName(Wind.WindDirectionDegrees); }
+    UFUNCTION(BlueprintPure, Category="Environment|Wind") FString GetWindDirectionName() const { return FPortWindState::DirectionName(Wind.EffectiveDirectionDegrees()); }
     UFUNCTION(BlueprintCallable, Category="Environment|Wind") void ToggleWind() { Wind.bWindEnabled=!Wind.bWindEnabled; }
     const FPortWindState& GetWindState() const { return Wind; }
+    UFUNCTION(BlueprintPure, Category="Environment|Sea") bool IsSeaMotionEnabled() const { return Sea.bSeaMotionEnabled; }
+    UFUNCTION(BlueprintPure, Category="Environment|Sea") float GetSignificantWaveHeightMeters() const { return Sea.SignificantWaveHeightMeters(); }
+    UFUNCTION(BlueprintPure, Category="Environment|Sea") float GetWavePeriodSeconds() const { return Sea.WavePeriodSeconds; }
+    UFUNCTION(BlueprintPure, Category="Environment|Sea") float GetSwellPeriodSeconds() const { return Sea.SwellPeriodSeconds; }
+    UFUNCTION(BlueprintCallable, Category="Environment|Sea") void ToggleSeaMotion() { Sea.bSeaMotionEnabled=!Sea.bSeaMotionEnabled; }
+    FPortVesselMotion GetVesselMotion(int32 VesselIndex=0) const { return Sea.SampleVesselMotion(VesselIndex); }
+    const FPortSeaState& GetSeaState() const { return Sea; }
 private:
     FPortWindState Wind;
+    FPortSeaState Sea;
+    int32 LastReportedGustCount=0;
 };

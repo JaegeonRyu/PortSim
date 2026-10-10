@@ -22,6 +22,9 @@ public:
     void Advance(float Dt, bool bGlobalPaused);
     bool AssignCargo(APortContainerActor* Cargo, FVector Source, FVector Destination, bool SourceSupport, bool DestinationSupport, APortAGVActor* HandoverVehicle=nullptr);
     void SetSTSProfile(const FSTSOperatingProfile& Profile) { STSProfile=Profile; }
+    void SetWindVelocity(FVector WorldVelocityMetersPerSecond);
+    void UpdateMovingShipSource(APortContainerActor* Cargo,FVector WorldPosition);
+    FVector GetWindVelocity() const { return WindVelocityMetersPerSecond; }
     bool HasSTSProfile() const { return STSProfile.bReady; }
     double LastJobSeconds=0, LastPausedSeconds=0;
     FSTSObservation Observation;
@@ -63,6 +66,7 @@ private:
     FSTSOperatingProfile STSProfile;
     UPROPERTY() TObjectPtr<APortAGVActor> HandoverAGV;
     FVector AxisVelocity=FVector::ZeroVector;
+    FVector WindVelocityMetersPerSecond=FVector::ZeroVector;
     double SimulationTime=0, NextSample=0, JobSeconds=0, PausedSeconds=0;
     bool CornerLocked[4]={false,false,false,false};
     bool bSensorFault=false;
@@ -101,6 +105,7 @@ private:
     bool bJobActive=false;
     bool bDestinationReady=true;
     FVector JobStartHead=FVector::ZeroVector;
+    FVector StageHoldTarget=FVector::ZeroVector;
     FVector Local(FVector World) const;
     bool MoveHead(FVector Target, float Dt);
     void UpdateParts();

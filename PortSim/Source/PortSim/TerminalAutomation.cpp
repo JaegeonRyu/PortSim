@@ -1,4 +1,5 @@
 #include "QuayCrane.h"
+#include "PortEnvironmentComponent.h"
 #include "PortWorkingCrane.h"
 #include "PortSiteLogistics.h"
 #include "Components/StaticMeshComponent.h"
@@ -23,11 +24,22 @@ namespace Terminal
     constexpr float BeamHeight = 3000.f;
 }
 
-FVector AQuayCrane::TerminalSlot(int32 Index, bool bShip) const
+FVector AQuayCrane::TerminalShipSlotBase(int32 Index) const
 {
     const int32 Row = Index % 4;
-    if (bShip) return FVector(-2200.f + ((Index % 12) / 4) * 400.f, -2400.f + Row * 1600.f,
+    return FVector(-2200.f + ((Index % 12) / 4) * 400.f, -2400.f + Row * 1600.f,
         200.f + Terminal::HalfHeight + (Index / 12) * 259.f);
+}
+
+FVector AQuayCrane::TerminalSlot(int32 Index, bool bShip) const
+{
+    if (bShip)
+    {
+        const FVector Base=TerminalShipSlotBase(Index);
+        if(Environment && VesselBasePivots.IsValidIndex(0))
+            return Environment->GetVesselMotion(0).TransformPosition(Base,VesselBasePivots[0]);
+        return Base;
+    }
     return SiteLogistics->CentralSlot(Index);
 }
 
@@ -69,6 +81,22 @@ void AQuayCrane::BuildTerminal()
     if (bUnifiedTerminal)
     {
         BuildTerminalSite();
+        FActorSpawnParameters ShipParams;
+        ShipParams.Owner=this;
+        ShipParams.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        for(int32 Vessel=0;Vessel<3;++Vessel)
+        {
+            const FVector BasePosition(-1800.f,(Vessel-1)*35000.f,250.f);
+            auto* VesselActor=GetWorld()->SpawnActor<APortShipActor>(BasePosition,FRotator::ZeroRotator,ShipParams);
+            check(VesselActor);
+#if WITH_EDITOR
+            VesselActor->SetActorLabel(FString::Printf(TEXT("Ship_%02d"),Vessel+1));
+            VesselActor->SetFolderPath(TEXT("PortSim/Equipment"));
+#endif
+            VesselActors.Add(VesselActor);
+            VesselBaseTransforms.Add(VesselActor->GetActorTransform());
+            VesselBasePivots.Add(BasePosition);
+        }
         CameraArm->TargetArmLength=185000.f;
         CameraArm->SetRelativeLocation(FVector(35000,0,0));
         CameraArm->SetRelativeRotation(FRotator(-52,38,0));
@@ -79,6 +107,8 @@ void AQuayCrane::BuildTerminal()
     ShipParams.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
     ShipActor=GetWorld()->SpawnActor<APortShipActor>(FVector(-1800,0,0),FRotator::ZeroRotator,ShipParams);
     check(ShipActor);
+    VesselBaseTransforms.Add(ShipActor->GetActorTransform());
+    VesselBasePivots.Add(ShipActor->GetActorLocation());
 #if WITH_EDITOR
     ShipActor->SetActorLabel(TEXT("Ship_01"));
     ShipActor->SetFolderPath(TEXT("PortSim/Equipment"));
@@ -100,10 +130,50 @@ void AQuayCrane::BuildTerminal()
     BuildTerminalSite();
 }
 
+void AQuayCrane::ApplySeaMotion()
+{
+    if(!Environment || VesselBaseTransforms.IsEmpty() || VesselBasePivots.IsEmpty()) return;
+    if(bUnifiedTerminal)
+    {
+        TArray<FPortVesselMotion> Motions;
+        Motions.Reserve(VesselActors.Num());
+        for(int32 Vessel=0;Vessel<VesselActors.Num();++Vessel)
+        {
+            const FPortVesselMotion Motion=Environment->GetVesselMotion(Vessel);
+            Motions.Add(Motion);
+            if(!IsValid(VesselActors[Vessel]) || !VesselBaseTransforms.IsValidIndex(Vessel)) continue;
+            const FTransform& Base=VesselBaseTransforms[Vessel];
+            VesselActors[Vessel]->SetActorLocationAndRotation(
+                Base.GetLocation()+Motion.TranslationCentimeters,
+                Motion.TransformRotation(Base.GetRotation()),false,nullptr,ETeleportType::TeleportPhysics);
+        }
+        if(SiteLogistics) SiteLogistics->SetVesselMotions(Motions,VesselBasePivots);
+        return;
+    }
+    const FPortVesselMotion Motion=Environment->GetVesselMotion(0);
+    if(IsValid(ShipActor))
+    {
+        const FTransform& Base=VesselBaseTransforms[0];
+        ShipActor->SetActorLocationAndRotation(Base.GetLocation()+Motion.TranslationCentimeters,
+            Motion.TransformRotation(Base.GetRotation()),false,nullptr,ETeleportType::TeleportPhysics);
+    }
+    for(int32 Index=0;Index<ContainerActors.Num();++Index)
+    {
+        auto* Container=ContainerActors[Index].Get();
+        if(!IsValid(Container) || !CargoOnShip.IsValidIndex(Index) || !CargoOnShip[Index] ||
+            Container->LocationOwner!=ECargoOwner::Ship || Container->GetAttachParentActor()) continue;
+        const FVector Base=TerminalShipSlotBase(Index);
+        Container->SetSecuredVesselMotion(Motion.TransformPosition(Base,VesselBasePivots[0]),
+            Motion.TransformRotation(FQuat::Identity),Motion.VelocityAtPosition(Base,VesselBasePivots[0]),
+            Motion.AccelerationAtPosition(Base,VesselBasePivots[0]),Motion.JerkAtPosition(Base,VesselBasePivots[0]));
+    }
+}
+
 void AQuayCrane::ResetTerminal()
 {
     if (bUnifiedTerminal)
     {
+        ApplySeaMotion();
         ResetSiteOperations();
         bLocked=bEmergencyStop=bAutoPaused=bAutoLoading=false; bAutoRunning=true;
         AutoStage=ETerminalStage::Idle; AutoCompleted=Deliveries=0; AutoElapsed=0;
@@ -133,6 +203,7 @@ void AQuayCrane::ResetTerminal()
         CargoOnShip[I]=true;
         ContainerActors[I]->ResetCargo(TerminalSlot(I,true));
     }
+    ApplySeaMotion();
     Spreader->SetWorldLocationAndRotation(FVector(TrolleyPosition,GantryPosition,STSTransferHeight()),FRotator::ZeroRotator,false,nullptr,ETeleportType::TeleportPhysics);
     Spreader->SetSimulatePhysics(true);
     Spreader->SetPhysicsLinearVelocity(FVector::ZeroVector);
@@ -287,6 +358,9 @@ void AQuayCrane::TickAutomatic(float Dt)
     DriveInput=FVector::ZeroVector;
     AutoElapsed+=Dt; JobElapsed+=Dt;
     if (bAutoPaused || bEmergencyStop) { JobPausedSeconds+=Dt; return; }
+    if(bAutoLoading) AutoDestination=TerminalSlot(ActiveCargoIndex,true);
+    else if(CargoOnShip.IsValidIndex(ActiveCargoIndex) && CargoOnShip[ActiveCargoIndex])
+        AutoSource=TerminalSlot(ActiveCargoIndex,true);
     AutoStageTime+=Dt;
     if(!STSObservation.IsFresh(STSSimulationTime,STSProfile.SensorMaxAge)) { StopAutomatic(TEXT("Required STS sensor observation invalid/stale.")); return; }
     if(bLocked && !STSLoadedHoistAllowed()) { StopAutomatic(TEXT("Loaded hoist interlock: locks/load observation invalid.")); return; }
@@ -294,7 +368,7 @@ void AQuayCrane::TickAutomatic(float Dt)
     if(AutoStage==ETerminalStage::FleetPrepare) JobPrepareSeconds+=Dt;
     else if(AutoStage==ETerminalStage::FleetDeliver) JobDeliverySeconds+=Dt;
     else JobSTSSeconds+=Dt;
-    if (AutoStageTime>FMath::Max(FleetStage?12000.f:0.f,STSProfile.StageTimeout)) { StopAutomatic(FString::Printf(TEXT("Timed out at %s for C%02d spreader=%s speed=%s trolley=%s cargo=%s"),GetAutoStageName(),ActiveCargoIndex+1,*Spreader->GetComponentLocation().ToString(),*Spreader->GetPhysicsLinearVelocity().ToString(),*TrolleyMesh->GetComponentLocation().ToString(),*Cargo->GetComponentLocation().ToString())); return; }
+    if (AutoStageTime>FMath::Max(FleetStage?12000.f:0.f,STSProfile.StageTimeout)) { StopAutomatic(FString::Printf(TEXT("Timed out at %s for C%02d spreader=%s speed=%s trolley=%s cargo=%s sway=%.3f wind=%.3f gust=%.3f"),GetAutoStageName(),ActiveCargoIndex+1,*Spreader->GetComponentLocation().ToString(),*Spreader->GetPhysicsLinearVelocity().ToString(),*TrolleyMesh->GetComponentLocation().ToString(),*Cargo->GetComponentLocation().ToString(),STSObservation.SwayDegrees,Environment->GetEffectiveWindSpeedMetersPerSecond(),Environment->GetGustSpeedMetersPerSecond())); return; }
     if (FleetStage) { TickFleet(Dt); return; }
     FVector Target(TrolleyPosition,GantryPosition,STSTransferHeight());
     bool bReady=false;
@@ -485,13 +559,13 @@ void AQuayCrane::TickTerminalTest(float Dt)
     else if (TerminalTestStage==7 && bAGVHasCargo)
     {
         ResetTerminal();
-        if (bAGVHasCargo || bRMGHasCargo || !CargoBodies[23]->IsSimulatingPhysics()) { Finish(false,TEXT("AGV carry reset failed")); return; }
+        if (bAGVHasCargo || bRMGHasCargo || CargoBodies[23]->IsSimulatingPhysics()) { Finish(false,TEXT("AGV carry reset failed")); return; }
         StartAutomatic(false); TerminalTestStage=8;
     }
     else if (TerminalTestStage==8 && bRMGHasCargo)
     {
         ResetTerminal();
-        if (bAGVHasCargo || bRMGHasCargo || !CargoBodies[23]->IsSimulatingPhysics() || GetShipCargoCount()!=24)
+        if (bAGVHasCargo || bRMGHasCargo || CargoBodies[23]->IsSimulatingPhysics() || GetShipCargoCount()!=24)
         { Finish(false,TEXT("RMG carry reset failed")); return; }
         Finish(true,FParse::Param(FCommandLine::Get(),TEXT("PortSimFleetResetTest"))?TEXT("STS/AGV/RMG carry reset and restart passed"):TEXT("3 AGVs + 18 distributed yard blocks: 24 unload + 24 load, all physical slots and owners, each AGV 16 jobs, moving fleet pause/E-stop, STS/AGV/RMG carry reset, CSV export"));
     }
