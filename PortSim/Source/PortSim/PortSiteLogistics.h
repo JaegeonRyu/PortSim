@@ -133,7 +133,7 @@ private:
     TArray<FPortVesselMotion> VesselMotions;
     TArray<FVector> VesselBasePivots;
     bool ResolveVesselTransform(const FSiteShipCargo& Cargo,FVector& Position,FQuat& Rotation,FVector& Velocity,FVector& Acceleration,FVector& Jerk) const;
-    void ApplyVesselMotions();
+    void ApplyVesselMotions(float FrameDurationSeconds=0);
     void Dispatch(int32 Lane);
     void ScheduleFleet();
     void ActivateVehicle(int32 Vehicle,int32 STS,bool FromQueue);

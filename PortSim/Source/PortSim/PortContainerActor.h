@@ -24,7 +24,7 @@ public:
     void ApplyWind(FVector WindVelocityMetersPerSecond,float DragCoefficient=1.2f);
     void SetSecuredVesselMotion(FVector Position,FQuat Rotation,FVector VelocityCentimetersPerSecond,
         FVector AccelerationCentimetersPerSecondSquared=FVector::ZeroVector,
-        FVector JerkCentimetersPerSecondCubed=FVector::ZeroVector);
+        FVector JerkCentimetersPerSecondCubed=FVector::ZeroVector,double FrameDurationSeconds=0.);
     /** Interpolate the latest vessel-motion frame for fixed-rate crane substeps. */
     void ApplySecuredMotionFraction(double Fraction);
     FVector GetMotionVelocity() const;
@@ -46,5 +46,6 @@ private:
     FVector PreviousSecuredVelocity=FVector::ZeroVector, CurrentSecuredVelocity=FVector::ZeroVector;
     FVector PreviousSecuredAcceleration=FVector::ZeroVector, CurrentSecuredAcceleration=FVector::ZeroVector;
     FVector PreviousSecuredJerk=FVector::ZeroVector, CurrentSecuredJerk=FVector::ZeroVector;
+    double SecuredFrameDurationSeconds=0;
     bool bHasSecuredMotionFrame=false;
 };

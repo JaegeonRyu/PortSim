@@ -54,7 +54,7 @@ bool APortSiteLogistics::ResolveVesselTransform(const FSiteShipCargo& Cargo,FVec
     return true;
 }
 
-void APortSiteLogistics::ApplyVesselMotions()
+void APortSiteLogistics::ApplyVesselMotions(float FrameDurationSeconds)
 {
     for(auto& Cargo:Manifest)
     {
@@ -62,7 +62,7 @@ void APortSiteLogistics::ApplyVesselMotions()
         if(!IsValid(Actor) || Actor->LocationOwner!=ECargoOwner::Ship || Actor->GetAttachParentActor()) continue;
         FVector Position,Velocity,Acceleration,Jerk;FQuat Rotation;
         if(!ResolveVesselTransform(Cargo,Position,Rotation,Velocity,Acceleration,Jerk)) continue;
-        Actor->SetSecuredVesselMotion(Position,Rotation,Velocity,Acceleration,Jerk);
+        Actor->SetSecuredVesselMotion(Position,Rotation,Velocity,Acceleration,Jerk,FrameDurationSeconds);
         if(Equipment.IsValidIndex(YardCraneCount+Cargo.STS))
             Equipment[YardCraneCount+Cargo.STS]->UpdateMovingShipSource(Actor,Position);
     }
@@ -553,7 +553,7 @@ void APortSiteLogistics::Stop(const FString& Reason)
 void APortSiteLogistics::Advance(float Dt,bool Paused)
 {
     if (!bReady) return;
-    ApplyVesselMotions();
+    ApplyVesselMotions(Dt);
     for(const auto& Cargo:ShipContainers) if(IsValid(Cargo)) Cargo->ApplyWind(WindVelocityMetersPerSecond,STSProfile.Dynamics.WindDrag);
     SimulationTime+=Dt;
     ExportDashboard(Paused);
