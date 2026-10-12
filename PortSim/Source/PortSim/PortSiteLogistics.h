@@ -39,7 +39,7 @@ struct FSiteTransfer
     int32 LastStage=-1;
     TWeakObjectPtr<APortContainerActor> Actor;
     TArray<FVector> Route;
-    bool bYardReleased=false, bRMGReserved=false;
+    bool bYardReleased=false, bRMGReserved=false, bParkingDeparture=false;
     double TrafficWaitSeconds=0, YardWaitSeconds=0, LastRerouteAt=-10;
     int32 Reroutes=0;
     int32 ReturnSTS=INDEX_NONE, ReturnCargo=INDEX_NONE;
@@ -128,7 +128,7 @@ private:
     TMap<int32,FVector> RoadTargets;
     TMap<int32,int32> RoadBlockers;
     TMap<int32,double> RoadWaitSince;
-    double TrafficClock=0;
+    double TrafficClock=0, LastCycleRecoveryAt=-10;
     float NoProgressTime=0;
     int32 LastProgressDelivered=0;
     TSet<int32> FinishedRoadSegments;

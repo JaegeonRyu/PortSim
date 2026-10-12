@@ -23,6 +23,12 @@ bool FTrafficJunctionTest::RunTest(const FString& Parameters)
     Exit.Reset();
     TrafficJunctionPolicy::AppendExitCorridor(Exit,Route,0,2,[](int32){return FVector(730,210,250);});
     TestEqual(TEXT("Staging stop never claims unowned crane handover"),Exit.Num(),1);
+    TMap<int32,int32> Blockers={{100,102},{102,106},{106,101},{101,100},{110,100}};
+    const auto Cycle=TrafficJunctionPolicy::WaitCycle(Blockers,110);
+    TestEqual(TEXT("Four-vehicle cycle excludes incoming queue"),Cycle.Num(),4);
+    TestFalse(TEXT("Upstream waiter is not part of cycle"),Cycle.Contains(110));
+    Blockers.Remove(101);
+    TestTrue(TEXT("Open wait chain is not a deadlock"),TrafficJunctionPolicy::WaitCycle(Blockers,110).IsEmpty());
     const double Old=10,New=20;
     TestTrue(TEXT("Longer road wait beats vehicle ID"),TrafficJunctionPolicy::OlderRequestFirst(&Old,&New,200,100));
     TestFalse(TEXT("New request cannot bypass waiting vehicle"),TrafficJunctionPolicy::OlderRequestFirst(nullptr,&Old,1,200));

@@ -336,6 +336,7 @@ void APortSiteLogistics::ActivateVehicle(int32 Vehicle,int32 STS,bool FromQueue)
     Job=FSiteTransfer();
     Job.Cargo=PreparedCargo[STS]; Job.Actor=Manifest[Job.Cargo].Actor; Job.STS=STS;
     Job.Stage=6; Job.Waypoint=0;
+    Job.bParkingDeparture=!FromQueue;
     Job.StartedAt=Manifest[Job.Cargo].StartedAt; Job.Time=SimulationTime-Job.StartedAt;
     Job.PausedSeconds=Manifest[Job.Cargo].PreparedPausedSeconds;
     // Acquire the independent RMG approach before occupying the STS through
@@ -1026,6 +1027,33 @@ void APortSiteLogistics::BeginTrafficFrame()
         RoadReservations.Remove(ID); ReservationIndex.Remove(ID); RoadTargets.Remove(ID);
     }
     FinishedRoadSegments.Reset();
+    // A stopped wait cycle can retain mutually blocking future corridors.
+    // Re-admit those corridors in normal priority order. Physical occupancy,
+    // LiDAR and the post-move overlap guard remain authoritative throughout.
+    if(LaneCount==9 && TrafficClock-LastCycleRecoveryAt>=10)
+    {
+        for(const auto& Waiting:RoadBlockers)
+        {
+            const TArray<int32> Cycle=TrafficJunctionPolicy::WaitCycle(RoadBlockers,Waiting.Key);
+            if(Cycle.Num()<2) continue;
+            bool Stopped=true;
+            for(int32 ID:Cycle)
+            {
+                const int32 I=Vehicles.IndexOfByPredicate([ID](const auto& V){return V->VehicleID==ID;});
+                if(!Jobs.IsValidIndex(I) || Vehicles[I]->Speed>.1f || Jobs[I].StationaryTime<8.f)
+                { Stopped=false; break; }
+            }
+            if(!Stopped) continue;
+            for(int32 ID:Cycle)
+            {
+                RoadReservations.Remove(ID); ReservationIndex.Remove(ID); RoadTargets.Remove(ID);
+                if(!RoadWaitSince.Contains(ID)) RoadWaitSince.Add(ID,TrafficClock);
+            }
+            LastCycleRecoveryAt=TrafficClock;
+            UE_LOG(LogTemp,Display,TEXT("AGV_CYCLE_RECOVERY: re-admit %d stopped vehicles"),Cycle.Num());
+            break;
+        }
+    }
     if (!bTrafficIndexReady)
     {
         ReservationIndex.Reset(); VehicleIndex.Reset();
@@ -1458,7 +1486,7 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
             break;
         case 8: break;
         case 6:
-            if (LaneCount==9 && Job.Waypoint==0)
+            if (LaneCount==9 && Job.Waypoint==0 && Job.bParkingDeparture)
             {
                 // Release one AGV at a time from each vessel's parking row.
                 // Once the leader reaches the longitudinal aisle (waypoint 1),
@@ -1472,6 +1500,7 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
                 for(int32 Other=0;Other<Jobs.Num();++Other)
                 {
                     if(Other==Lane || Jobs[Other].Stage!=6 || Jobs[Other].Waypoint!=0 ||
+                        !Jobs[Other].bParkingDeparture ||
                         TerminalLayout::AGVBerthGroup(Jobs[Other].STS)!=Pool) continue;
                     const float OtherDistance=FMath::Abs(Vehicles[Other]->GetActorLocation().Y-CrossY);
                     if(OtherDistance<LeaderDistance-1.f ||
@@ -1652,7 +1681,7 @@ void APortSiteLogistics::ResetLogistics()
     for (int32 I=0;I<Jobs.Num();++I) { Jobs[I]=FSiteTransfer(); Vehicles[I]->ResetVehicle(FleetPark(I)); }
     STSOwners.Init(INDEX_NONE,LaneCount);
     NextVehicles.Init(INDEX_NONE,LaneCount); PreparedStarted.Init(false,LaneCount); QueuedHandoffs=0;
-    NoProgressTime=0; LastProgressDelivered=0; RoadBlockers.Reset(); RoadWaitSince.Reset(); TrafficClock=0;
+    NoProgressTime=0; LastProgressDelivered=0; RoadBlockers.Reset(); RoadWaitSince.Reset(); TrafficClock=0; LastCycleRecoveryAt=-10;
     YardApproachOwners.Init(INDEX_NONE,LaneCount==9?YardCraneCount:TerminalLayout::YardBlockCount); BlocksBusy.Init(false,TerminalLayout::YardBlockCount); RMGBusy.Init(false,YardCraneCount); PreparedCargo.Init(INDEX_NONE,LaneCount); SlotAssigned.Init(false,Yard.Num());
     CentralReservation=CentralPending=INDEX_NONE;
     ReservationIndex.Reset(); VehicleIndex.Reset(); bTrafficIndexReady=false;

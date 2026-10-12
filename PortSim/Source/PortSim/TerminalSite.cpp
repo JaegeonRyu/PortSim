@@ -193,7 +193,7 @@ void AQuayCrane::BuildTerminalSite()
                     const int32 Zone=FourZones?(Bay<7?0:Bay<15?1:Bay<22?2:3):Slot.Half;
                     Slot.Crane=WorkingCranes.Num()+Zone;
                     const float DockX=FourZones?(205.f+(Zone==0?0:Zone==1?7:Zone==2?15:22)*13.f):(Slot.Half?420.f:180.f);
-                    Slot.Handover=FVector((FourZones?TerminalLayout::SiteX(DockX):TerminalLayout::RMGHandoverX(Slot.Half))*100,(Y+13.2f)*100,0);
+                    Slot.Handover=FVector((FourZones?TerminalLayout::SiteX(DockX):TerminalLayout::RMGHandoverX(Slot.Half))*100,TerminalLayout::RMGHandoverY(Block)*100,0);
                     YardSlots.Add(Slot);
                 }
         // Two disjoint work reservations per block: no shared gantry travel zone.

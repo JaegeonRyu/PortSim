@@ -34,6 +34,25 @@ namespace TrafficJunctionPolicy
         }
     }
 
+    // Return only a closed wait cycle, not the upstream queue leading to it.
+    inline TArray<int32> WaitCycle(const TMap<int32,int32>& Blockers,int32 Start)
+    {
+        TArray<int32> Chain;
+        int32 Current=Start;
+        while(const int32* Next=Blockers.Find(Current))
+        {
+            const int32 Seen=Chain.Find(Current);
+            if(Seen!=INDEX_NONE)
+            {
+                Chain.RemoveAt(0,Seen);
+                return Chain;
+            }
+            Chain.Add(Current);
+            Current=*Next;
+        }
+        return {};
+    }
+
     inline bool OlderRequestFirst(const double* A,const double* B,int32 IDA,int32 IDB)
     {
         if(bool(A)!=bool(B)) return A!=nullptr;
