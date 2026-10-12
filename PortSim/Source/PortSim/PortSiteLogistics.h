@@ -44,6 +44,7 @@ struct FSiteTransfer
     int32 Reroutes=0;
     int32 ReturnSTS=INDEX_NONE, ReturnCargo=INDEX_NONE;
     int32 YardEntryWaypoint=INDEX_NONE;
+    int32 ReturnCorridor=INDEX_NONE, QuayClearWaypoint=INDEX_NONE;
 };
 
 /** One manifest, conserved cargo IDs and reserved yard slots across STS -> AGV -> RMG. */
@@ -78,6 +79,8 @@ public:
     TArray<FVector> Snapshot() const;
     int32 InitialShipCount() const { return Manifest.Num()+CentralCount; }
     bool UsesCargoAlignedHandover() const { return bCargoAlignedHandover; }
+    int32 ReturnCorridorUse(int32 Corridor) const
+    { return Corridor>=0 && Corridor<3?ReturnRouteCounts[Corridor]:0; }
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 BaselineYard=0;
@@ -116,7 +119,7 @@ private:
     TArray<FSiteTransfer> Jobs;
     TArray<bool> BlocksBusy;
     TArray<bool> RMGBusy;
-    TArray<int32> YardApproachOwners; // One inbound/waiting AGV per block, independent of crane ownership.
+    TArray<int32> YardApproachOwners; // One inbound/waiting AGV per RMG (legacy eight-STS mode: per block).
     TArray<int32> PreparedCargo;
     TArray<int32> STSOwners;
     TArray<int32> NextVehicles;
@@ -131,6 +134,7 @@ private:
     TSet<int32> FinishedRoadSegments;
     TArray<bool> SlotAssigned;
     int32 CentralCount=0, Dispatched=0, LaneCount=8, YardCraneCount=46;
+    int32 ReturnRouteCounts[3]={0,0,0};
     bool bReady=false, bWasPaused=false;
     bool bCargoAlignedHandover=true;
     void Dispatch(int32 Lane);
@@ -139,6 +143,8 @@ private:
     void AssignReturnSTS(int32 Vehicle);
     void PrepareNextCargo(int32 Lane);
     bool ReserveYardApproach(int32 Lane);
+    bool YardApproachAvailable(int32 Cargo) const;
+    int32 YardApproachKey(const FSiteYardSlot& Slot) const { return LaneCount==9?Slot.Crane:Slot.Block; }
     bool ReserveYard(int32 Lane);
     bool PlanYardDestinations();
     void PrepareRoute(int32 Lane,bool Return);
