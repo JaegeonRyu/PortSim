@@ -147,6 +147,7 @@ void AQuayCrane::BuildTerminalSite()
     }
     const float NorthParkingAccessY=(TerminalLayout::AGVParkY(TerminalLayout::AGVParkBays-1)+3000.f)/100.f;
     RoadSegment(Roads,{50,NorthParkingAccessY},{167,NorthParkingAccessY},18);
+    RoadSegment(Roads,{50,NorthParkingAccessY+25.f},{167,NorthParkingAccessY+25.f},18);
     for(int32 Vehicle=0;Vehicle<TerminalLayout::AGVParkRows*TerminalLayout::AGVParkBays;++Vehicle)
     {
         const float X=TerminalLayout::SiteCmX(TerminalLayout::AGVParkX(Vehicle))/100.f;

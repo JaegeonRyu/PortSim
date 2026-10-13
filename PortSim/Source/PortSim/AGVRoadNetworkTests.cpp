@@ -24,6 +24,18 @@ bool FAGVRoadNetworkTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Reroute from a split road point"),G.Find(FVector(500,0,0),FVector(10000,0,0),Route,Clear));
     TestTrue(TEXT("Sensor-tolerance endpoint remains on road"),
         G.Find(FVector(-.04f,0,0),FVector(10000,0,0),Route,Clear));
+    // 2026-10-12: AGV108 had progressed south from STS3, then congestion
+    // rerouting sent it back north on the shared quay lane toward AGV101.
+    FAGVRoadNetwork Quay;
+    Quay.Add(FVector(6000,-31200,0),FVector(6000,-48750,0));
+    Quay.Add(FVector(6000,-48750,0),FVector(14000,-48750,0));
+    Quay.Add(FVector(6000,-17950,0),FVector(14000,-17950,0));
+    Quay.Add(FVector(14000,-17950,0),FVector(14000,-48750,0));
+    TestTrue(TEXT("Busy loaded quay still has a forward route"),Quay.Find(
+        FVector(6000,-39130,0),FVector(14000,-48750,0),Route,
+        [](FVector A,FVector B){return A.X==6000 && B.X==6000?30000.:0.;}));
+    TestTrue(TEXT("Congestion cannot reverse the loaded departure toward an occupied STS"),
+        !Route.IsEmpty() && Route[0].Y<-39130);
     return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAGVSweptChassisTest,"PortSim.Traffic.SweptChassis",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
