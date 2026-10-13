@@ -142,6 +142,8 @@ void AQuayCrane::BuildTerminalSite()
         const float Width=TerminalLayout::AGVParkCrossingWidthM;
         Box(Roads,FVector(100,Y,.25f),FVector(130,Width,.06f));
     }
+    const float NorthParkingAccessY=(TerminalLayout::AGVParkY(TerminalLayout::AGVParkBays-1)+3000.f)/100.f;
+    RoadSegment(Roads,{50,NorthParkingAccessY+25.f},{167,NorthParkingAccessY+25.f},18);
     // Rounded quay-side corners join the straight inland service road.
     BezierRoad(Roads,{145,-480},{145,-505},{170,-505},{195,-505},18,10);
     RoadSegment(Roads,{195,-505},{595,-505},18);

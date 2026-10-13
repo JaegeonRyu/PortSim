@@ -4,13 +4,37 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
 
 APortAGVActor::APortAGVActor()
 {
     Box(TEXT("AGV_Deck"),RootComponent,FVector(0,0,170),FVector(300,1380,100),true);
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> Cylinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+    static ConstructorHelpers::FObjectFinder<UMaterialInterface> Rubber(TEXT("/Game/PortSim/Assets/Materials/M_SiteAsphalt.M_SiteAsphalt"));
+    static ConstructorHelpers::FObjectFinder<UMaterialInterface> Steel(TEXT("/Game/PortSim/Assets/Materials/M_Steel.M_Steel"));
+    auto WheelPart=[&](const FString& Name,FVector Position,float Diameter,float Width,UMaterialInterface* Material)
+    {
+        auto* Wheel=CreateDefaultSubobject<UStaticMeshComponent>(FName(*Name));
+        Wheel->SetupAttachment(RootComponent);
+        Wheel->SetStaticMesh(Cylinder.Object);
+        Wheel->SetMobility(EComponentMobility::Movable);
+        Wheel->SetRelativeLocation(Position);
+        // Cylinder Z is the axle; AGVs travel along local Y, so turn the axle
+        // onto local X. Preserve the existing 4.2 m chassis envelope.
+        Wheel->SetRelativeRotation(FRotator(90,0,0));
+        const FVector Size=Cylinder.Object->GetBounds().BoxExtent*2.f;
+        Wheel->SetRelativeScale3D(FVector(Diameter/Size.X,Diameter/Size.Y,Width/Size.Z));
+        Wheel->SetCollisionProfileName(TEXT("NoCollision"));
+        if(Material) Wheel->SetMaterial(0,Material);
+    };
     for (int32 Side:{-1,1}) for (int32 Axle:{-1,0,1})
-        Box(*FString::Printf(TEXT("Bogie_AGV_%d_%d"),Side,Axle),RootComponent,FVector(Side*170,Axle*480,75),FVector(75,160,110));
+    {
+        WheelPart(FString::Printf(TEXT("Bogie_AGV_%d_%d"),Side,Axle),
+            FVector(Side*170,Axle*480,75),140,75,Rubber.Object);
+        WheelPart(FString::Printf(TEXT("WheelHub_AGV_%d_%d"),Side,Axle),
+            FVector(Side*208,Axle*480,75),80,4,Steel.Object);
+    }
     Box(TEXT("AGV_Sensor"),RootComponent,FVector(0,670,265),FVector(110,45,90));
     Box(TEXT("Front_LiDAR"),RootComponent,FVector(0,700,250),FVector(70,35,55));
     Box(TEXT("Rear_LiDAR"),RootComponent,FVector(0,-700,250),FVector(70,35,55));
@@ -42,6 +66,8 @@ void APortAGVActor::ResetVehicle(FVector Position)
     SetActorLocationAndRotation(Position,FRotator::ZeroRotator,false,nullptr,ETeleportType::TeleportPhysics);
     Sensors=FAGVSensorState(); Sensors.EstimatedPosition=Sensors.LastAbsolutePosition=Position;
     DockingAxis=FVector::ZeroVector;
+    FMSApproachSpeedLimit=MAX_flt;
+    bSteeringLookAhead=false;
 }
 
 FVector APortAGVActor::CargoPosition() const
@@ -83,7 +109,9 @@ bool APortAGVActor::MoveToPosition(FVector Target,float Dt,bool StopAtTarget)
         if(StopAtTarget) Speed=0;
         return true;
     }
-    FVector DesiredDirection=ToTarget.GetSafeNormal2D();
+    const FVector SteeringVector=bSteeringLookAhead && !Sensors.bDockingNode?
+        SteeringLookAhead-Previous:ToTarget;
+    FVector DesiredDirection=SteeringVector.GetSafeNormal2D();
     if(Sensors.bDockingNode && !DockingAxis.IsNearlyZero())
     {
         // Track the final FMS axis instead of chasing the docking point in a
@@ -121,8 +149,9 @@ bool APortAGVActor::MoveToPosition(FVector Target,float Dt,bool StopAtTarget)
     const float Cross=MotionDirection.X*DesiredDirection.Y-MotionDirection.Y*DesiredDirection.X;
     const float HeadingError=FMath::Atan2(Cross,Dot);
     const float Acceleration=AccelerationCmPerSecondSquared();
-    const float Limit=FMath::Abs(HeadingError)>FMath::DegreesToRadians(5.f)?
+    const float HeadingLimit=FMath::Abs(HeadingError)>FMath::DegreesToRadians(5.f)?
         FMath::Min(SpeedLimitCmPerSecond(),AGVReference::ReferenceCurveSpeedCmPerSecond):SpeedLimitCmPerSecond();
+    const float Limit=FMath::Min(HeadingLimit,FMSApproachSpeedLimit);
     float Desired=StopAtTarget?FMath::Min(Limit,FMath::Sqrt(2.f*Acceleration*Distance)):Limit;
     if((Sensors.bDockingNode || FMSAcceptanceCm<=100.f) &&
         Distance<=AGVReference::DockingApproachDistanceCm)
@@ -140,32 +169,41 @@ bool APortAGVActor::MoveToPosition(FVector Target,float Dt,bool StopAtTarget)
     // huge and lets the AGV drift off the road before it aligns. Cap only the
     // far look-ahead; nearby arc points retain their actual distance so the
     // controller does not circle them.
-    const float CurvatureLookAhead=FMath::Clamp(Distance,100.f,
+    const float SteeringDistance=bSteeringLookAhead && !Sensors.bDockingNode?SteeringVector.Size2D():Distance;
+    const float CurvatureLookAhead=FMath::Clamp(SteeringDistance,Sensors.bDockingNode?100.f:25.f,
         2.f*AGVReference::MinimumInnerTurnRadiusCm);
     const float RequestedCurvature=2.f*FMath::Sin(HeadingError)/CurvatureLookAhead;
     const float Curvature=FMath::Clamp(RequestedCurvature,
         -1.f/AGVReference::MinimumInnerTurnRadiusCm,1.f/AGVReference::MinimumInnerTurnRadiusCm);
     const float YawStepRadians=Travel*Curvature;
+    const FVector BeforeAxis=Sensors.bReversing?-GetActorRightVector():GetActorRightVector();
+    const float HalfYaw=YawStepRadians*.5f;
+    const FVector DrivenAxis(BeforeAxis.X*FMath::Cos(HalfYaw)-BeforeAxis.Y*FMath::Sin(HalfYaw),
+        BeforeAxis.X*FMath::Sin(HalfYaw)+BeforeAxis.Y*FMath::Cos(HalfYaw),0);
+    const float Chord=FMath::Abs(Curvature)>1.e-6f?2.f*FMath::Sin(HalfYaw)/Curvature:Travel;
     AddActorWorldRotation(FRotator(0,FMath::RadiansToDegrees(YawStepRadians),0));
-    const FVector DrivenAxis=Sensors.bReversing?-GetActorRightVector():GetActorRightVector();
-    const FVector Delta=DrivenAxis.GetSafeNormal2D()*Travel;
+    // Integrate the actual circular arc, rather than advancing along its end
+    // tangent. The midpoint tangent measures steering travel without crab slip.
+    const FVector Delta=DrivenAxis.GetSafeNormal2D()*Chord;
     SetActorLocation(Previous+Delta);
     const FVector Lateral(-DrivenAxis.Y,DrivenAxis.X,0);
     Sensors.LateralSlipCm=FMath::Abs(FVector::DotProduct(Delta,Lateral));
     Sensors.SteeringAngleDegrees=FMath::RadiansToDegrees(FMath::Atan(
-        AGVReference::EffectiveWheelbaseCm*Curvature));
+        AGVReference::EffectiveWheelbaseCm*Curvature))*(Sensors.bReversing?-1.f:1.f);
     UpdateOdometry(Previous);
     return false;
 }
 
-void APortAGVActor::SetFMSCommand(FVector Target,int32 NodeIndex,int32 NodeCount,bool Docking,float AcceptanceCm)
+void APortAGVActor::SetFMSCommand(FVector Target,int32 NodeIndex,int32 NodeCount,bool Docking,float AcceptanceCm,
+    FVector ExpectedDockingAxis)
 {
     const bool NewNode=!Sensors.FMSNextNode.Equals(Target,.01f) || Sensors.FMSNodeIndex!=NodeIndex;
     if(NewNode)
     {
         if(Docking)
         {
-            const FVector Axis=(Target-Sensors.FMSNextNode).GetSafeNormal2D();
+            const FVector Axis=ExpectedDockingAxis.IsNearlyZero()?
+                (Target-Sensors.FMSNextNode).GetSafeNormal2D():ExpectedDockingAxis.GetSafeNormal2D();
             if(!Axis.IsNearlyZero()) DockingAxis=Axis;
         }
         const FVector Desired=(Target-GetActorLocation()).GetSafeNormal2D();

@@ -125,6 +125,10 @@ private:
     TArray<int32> NextVehicles;
     TArray<bool> PreparedStarted;
     TMap<int32,TArray<FBox>> RoadReservations;
+    TMap<int32,int32> RoadReservationEndWaypoint;
+    TMap<int32,FVector> TrafficRecoveryTargets;
+    TMap<int32,bool> TrafficRecoveryOriginalReverse;
+    double LastTrafficRecoveryAt=-100;
     TMap<int32,FVector> RoadTargets;
     TMap<int32,int32> RoadBlockers;
     TMap<int32,double> RoadWaitSince;
@@ -144,6 +148,9 @@ private:
     void PrepareNextCargo(int32 Lane);
     bool ReserveYardApproach(int32 Lane);
     bool YardApproachAvailable(int32 Cargo) const;
+    void AdvanceStep(float Dt,bool Paused);
+    void RecoverTrafficCycle();
+    double PendingSimulationSeconds=0;
     int32 YardApproachKey(const FSiteYardSlot& Slot) const { return LaneCount==9?Slot.Crane:Slot.Block; }
     bool ReserveYard(int32 Lane);
     bool PlanYardDestinations();

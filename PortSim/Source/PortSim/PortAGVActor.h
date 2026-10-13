@@ -50,11 +50,14 @@ public:
     FVector PlannedMotionDirection(FVector Target) const;
     FVector CargoPosition() const;
     void SetPayload(float GrossMassKg) { PayloadKg=FMath::Max(0.f,GrossMassKg); }
-    void SetFMSCommand(FVector Target,int32 NodeIndex,int32 NodeCount,bool Docking,float AcceptanceCm=-1.f);
+    void SetFMSCommand(FVector Target,int32 NodeIndex,int32 NodeCount,bool Docking,float AcceptanceCm=-1.f,
+        FVector ExpectedDockingAxis=FVector::ZeroVector);
     void SetFMSHold(bool Hold);
     void UpdateLiDARObservation(float FrontDistanceCm,float RearDistanceCm,float SafetyDistanceCm,
         bool ControlledStop,int32 BlockingVehicleID=INDEX_NONE);
     float SpeedLimitCmPerSecond() const;
+    void SetApproachSpeedLimit(float Limit) { FMSApproachSpeedLimit=Limit; }
+    void SetSteeringLookAhead(FVector Target,bool Enabled) { SteeringLookAhead=Target; bSteeringLookAhead=Enabled; }
     float AccelerationCmPerSecondSquared() const;
     bool PayloadWithinReferenceLimit() const;
 
@@ -67,6 +70,9 @@ private:
     void UpdateOdometry(FVector PreviousPosition);
     void CorrectAtTransponder(FVector Position);
     float FMSAcceptanceCm=800.f;
+    float FMSApproachSpeedLimit=MAX_flt;
+    FVector SteeringLookAhead=FVector::ZeroVector;
+    bool bSteeringLookAhead=false;
     FVector DockingAxis=FVector::ZeroVector;
     UPROPERTY() TObjectPtr<UTextRenderComponent> NameLabel;
 };
