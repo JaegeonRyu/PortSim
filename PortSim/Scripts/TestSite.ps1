@@ -1,5 +1,5 @@
 param([string]$Engine = 'C:\Program Files\Epic Games\UE_5.6',
-    [ValidateSet('All','Normal','Faults','SensorFault','LockFault','Overload','AGVFault')][string]$Mode = 'All',
+    [ValidateSet('All','Normal','Full','Faults','SensorFault','LockFault','Overload','AGVFault')][string]$Mode = 'All',
     [ValidateRange(1,60)][int]$FixedFPS = 10,
     [ValidateRange(1,120)][int]$TimeoutMinutes = 30)
 $ErrorActionPreference = 'Stop'
@@ -16,6 +16,8 @@ foreach ($case in $cases) {
     $testLog = Join-Path $root "Saved\Logs\SiteTest_${case}_$PID.log"
     if (Test-Path -LiteralPath $testLog) { Remove-Item -LiteralPath $testLog -Force }
     $arguments = @("`"$project`"", '/Engine/Maps/Entry','-game','-nullrhi','-nosound','-unattended','-nosplash','-benchmark',"-fps=$FixedFPS",'-PortSimSiteTest',"`"-abslog=$testLog`"")
+    if($case -eq 'Full') { $arguments += '-PortSimFullUnloadTest' }
+    $expectedShipments=if($case -eq 'Full') {600} else {120}
     $expected = $null
     if ($case -eq 'SensorFault') { $arguments += '-PortSimSTSSensorFault'; $expected = 'Required STS sensor observation invalid/stale' }
     if ($case -eq 'LockFault') { $arguments += '-PortSimSTSLockFault=0'; $expected = 'Twist lock alignment failed' }
@@ -33,7 +35,7 @@ foreach ($case in $cases) {
     Write-Output "RUN Site $case"
     $process = Start-Process -FilePath $editor -ArgumentList $arguments -WindowStyle Hidden -PassThru
     $null = $process.Handle
-    $timeoutMs = if ($case -eq 'Normal') { $TimeoutMinutes*60000 } else { 900000 }
+    $timeoutMs = if ($case -in @('Normal','Full')) { $TimeoutMinutes*60000 } else { 900000 }
     if (-not $process.WaitForExit($timeoutMs)) { $process.Kill(); throw "Site $case timed out" }
     $process.Refresh()
     $text = Get-Content -LiteralPath $testLog -Raw
@@ -51,7 +53,7 @@ foreach ($case in $cases) {
         $reports = Get-ChildItem -LiteralPath (Join-Path $root 'Saved\Results') -Filter 'Site_*.csv' | Where-Object { $_.LastWriteTime -ge $started }
         foreach ($report in $reports) {
             $rows = @(Import-Csv -LiteralPath $report.FullName)
-            if ($rows.Count -ne 120) { continue }
+            if ($rows.Count -ne $expectedShipments) { continue }
             $completed++
             if (@($rows.STSLane | Sort-Object -Unique).Count -ne 9) { throw 'Not all nine STSs completed shipments' }
             if (@($rows.AGVID | Sort-Object -Unique).Count -lt 9) { throw 'Cost-aware dispatch did not sustain concurrent STS service' }
@@ -71,9 +73,9 @@ foreach ($case in $cases) {
             }
             $snapshot = Get-Content -LiteralPath ($report.FullName.Replace('.csv','_profile.json')) -Raw | ConvertFrom-Json
             if ($snapshot.sts_profile.reference.geometry.rail_gauge.value -ne 30.48) { throw 'Site reference snapshot missing' }
-            Write-Output "TIMING Site: 9 STSs, 120 shipments; final placement $($rows[-1].FinalPlacementAtSeconds) seconds"
+            Write-Output "TIMING Site: 9 STSs, $expectedShipments shipments; final placement $($rows[-1].FinalPlacementAtSeconds) seconds"
         }
-        if ($completed -ne 1) { throw 'Expected one completed 120-shipment report' }
+        if ($completed -ne 1) { throw "Expected one completed $expectedShipments-shipment report" }
     }
     Write-Output "PASS Site $case : $testLog"
 }

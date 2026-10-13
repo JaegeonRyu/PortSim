@@ -25,7 +25,9 @@ namespace AGVReference
     // A one-degree centreline tolerance becomes roughly 12 cm at a 45 ft
     // container corner.  Keep the heading tight enough for the RMG's
     // independent twistlock corner sensors instead of accepting centre-only alignment.
-    constexpr float DockingHeadingToleranceDegrees=1.f;
+    // At 45 ft, 0.43 degrees already displaces a corner by > 5 cm. Leave
+    // position-control margin inside the independent RMG seating limit.
+    constexpr float DockingHeadingToleranceDegrees=.25f;
     constexpr float DockingSpeedCmPerSecond=40.f;
     constexpr float DockingApproachDistanceCm=100.f;
     constexpr float MinimumInnerTurnRadiusCm=580.f;
