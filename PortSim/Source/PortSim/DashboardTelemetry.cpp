@@ -1,4 +1,5 @@
-﻿#include "TerminalLayout.h"
+#include "TerminalLayout.h"
+#include "QuayCrane.h"
 #include "PortSiteLogistics.h"
 #include "Async/Async.h"
 #include "PortWorkingCrane.h"
@@ -332,6 +333,12 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     Root->SetStringField(TEXT("generated_at"),FDateTime::UtcNow().ToIso8601());
     Root->SetStringField(TEXT("run_id"),FPaths::GetCleanFilename(ReportBase));
     Root->SetNumberField(TEXT("simulation_seconds"),SimulationTime);
+    if(const auto* Controller=Cast<AQuayCrane>(GetOwner()))
+    {
+        Root->SetNumberField(TEXT("elapsed_seconds"),Controller->AutoElapsed);
+        Root->SetNumberField(TEXT("playback_rate"),Controller->SimulationSpeed);
+        Root->SetBoolField(TEXT("running"),Controller->bAutoRunning);
+    }
     Root->SetBoolField(TEXT("paused"),Paused);
     Root->SetBoolField(TEXT("unified"),LaneCount==9);
     Root->SetStringField(TEXT("handover_policy"),UsesCargoAlignedHandover()?TEXT("cargo_aligned_quay"):TEXT("fixed_quay"));
@@ -471,7 +478,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
         Actors.Add(Value(O));
     }
     TArray<TSharedPtr<FJsonValue>> Vessels;
-    if(LaneCount==9) for(int32 V=0;V<3;++V)
+    if(LaneCount==9) for(int32 V=0;V<ConfiguredShips;++V)
     {
         auto O=Object(); int32 Total=0,Unloaded=0,Placed=0;
         for(const auto& C:Manifest) if(C.STS/3==V) { ++Total; Unloaded+=bool(C.HandoverMask&1); Placed+=C.State==2; }

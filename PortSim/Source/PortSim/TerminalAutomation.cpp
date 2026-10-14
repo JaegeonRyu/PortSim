@@ -1,4 +1,4 @@
-﻿#include "QuayCrane.h"
+#include "QuayCrane.h"
 #include "PortWorkingCrane.h"
 #include "PortSiteLogistics.h"
 #include "Components/StaticMeshComponent.h"
@@ -144,9 +144,9 @@ void AQuayCrane::ResetTerminal()
     if (bUnifiedTerminal)
     {
         ResetSiteOperations();
-        bLocked=bEmergencyStop=bAutoPaused=bAutoLoading=false; bAutoRunning=true;
+        bLocked=bEmergencyStop=bAutoPaused=bAutoLoading=false; bAutoRunning=false;
         AutoStage=ETerminalStage::Idle; AutoCompleted=Deliveries=0; AutoElapsed=0;
-        Status=TEXT("Three equal berths: automatic STS > AGV > available yard RMG");
+        Status=TEXT("실행 대기 — 실행 버튼을 눌러 하역을 시작하세요.");
         return;
     }
     if(bAutoRunning) { RecordSTSStage(TEXT("RESET")); SaveSTSReports(); }

@@ -1,0 +1,88 @@
+#include "QuayCrane.h"
+#include "PortSiteLogistics.h"
+#include "Misc/Paths.h"
+#include "Misc/FileHelper.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
+#include "HAL/FileManager.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+
+namespace
+{
+FString RunSettingsPath()
+{
+    FString Path=FPaths::ProjectSavedDir()/TEXT("SimulationSettings.json");
+    FParse::Value(FCommandLine::Get(),TEXT("PortSimSettings="),Path);
+    return Path;
+}
+}
+
+int32 AQuayCrane::PendingCargoTotal() const
+{ int32 Total=0; for(int32 I=0;I<PendingShips;++I) Total+=PendingCargo[I]; return Total; }
+int32 AQuayCrane::PendingCargoLimit(int32 Vessel) const
+{ return 5594-PendingCargoTotal()+PendingCargo[Vessel]; }
+void AQuayCrane::SetPendingShips(int32 Count)
+{
+    const int32 Old=PendingShips;
+    PendingShips=FMath::Clamp(Count,1,3);
+    for(int32 I=Old;I<PendingShips;++I) PendingCargo[I]=1;
+    int32 Excess=PendingCargoTotal()-5594;
+    for(int32 I=0;I<PendingShips && Excess>0;++I)
+    { const int32 Take=FMath::Min(Excess,PendingCargo[I]-1); PendingCargo[I]-=Take; Excess-=Take; }
+}
+void AQuayCrane::SetPendingCargo(int32 Vessel,int32 Count)
+{
+    if(Vessel>=0 && Vessel<PendingShips)
+        PendingCargo[Vessel]=FMath::Clamp(Count,1,PendingCargoLimit(Vessel));
+}
+void AQuayCrane::LoadRunSettings()
+{
+    FString Json; TSharedPtr<FJsonObject> Object;
+    if(FFileHelper::LoadFileToString(Json,*RunSettingsPath()) &&
+        FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json),Object) && Object.IsValid())
+    {
+        double Ships=3; Object->TryGetNumberField(TEXT("ships"),Ships);
+        PendingShips=FMath::IsFinite(Ships)?int32(FMath::Clamp(Ships,1.,3.)):3;
+        int32 Budget=5594;
+        for(int32 I=0;I<PendingShips;++I)
+        {
+            double Count=200; Object->TryGetNumberField(FString::Printf(TEXT("cargo_%d"),I+1),Count);
+            PendingCargo[I]=FMath::IsFinite(Count)?int32(FMath::Clamp(Count,1.,double(Budget-(PendingShips-I-1)))):1;
+            Budget-=PendingCargo[I];
+        }
+    }
+    // Command-line overrides allow repeatable tests without changing saved settings.
+    int32 Ships=PendingShips;
+    FParse::Value(FCommandLine::Get(),TEXT("PortSimShips="),Ships); SetPendingShips(Ships);
+    for(int32 I=0;I<PendingShips;++I)
+    {
+        int32 Count=PendingCargo[I];
+        if(FParse::Value(FCommandLine::Get(),*FString::Printf(TEXT("PortSimCargo%d="),I+1),Count)) SetPendingCargo(I,Count);
+    }
+    ConfiguredShips=PendingShips;
+    for(int32 I=0;I<3;++I) ConfiguredCargo[I]=PendingCargo[I];
+}
+bool AQuayCrane::SaveRunSettings()
+{
+    auto Object=MakeShared<FJsonObject>(); Object->SetNumberField(TEXT("ships"),PendingShips);
+    for(int32 I=0;I<3;++I) Object->SetNumberField(FString::Printf(TEXT("cargo_%d"),I+1),PendingCargo[I]);
+    FString Json; FJsonSerializer::Serialize(Object,TJsonWriterFactory<>::Create(&Json));
+    const FString Path=RunSettingsPath();
+    bRunSettingsSaved=FFileHelper::SaveStringToFile(Json,*(Path+TEXT(".tmp")),FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM) &&
+        IFileManager::Get().Move(*Path,*(Path+TEXT(".tmp")),true,true);
+    return bRunSettingsSaved;
+}
+void AQuayCrane::StopSimulation()
+{
+    ResetSimulation(); bAutoRunning=false; bAutoPaused=false;
+    AutoElapsed=0; Status=TEXT("정지 — 실행 버튼을 누르면 현재 설정으로 시작합니다.");
+    if(SiteLogistics) SiteLogistics->ExportDashboard(true,true);
+}
+FString AQuayCrane::ElapsedText() const
+{
+    const int64 Seconds=FMath::Max<int64>(0,int64(AutoElapsed));
+    return FString::Printf(TEXT("%02lld시 %02lld분 %02lld초"),Seconds/3600,(Seconds/60)%60,Seconds%60);
+}
+

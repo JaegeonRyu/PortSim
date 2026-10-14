@@ -18,6 +18,8 @@ void AQuayCrane::BuildTerminalSite()
     Params.Owner=this;
     SiteLogistics=GetWorld()->SpawnActor<APortSiteLogistics>(FVector::ZeroVector,FRotator::ZeroRotator,Params);
     SiteLogistics->SetSTSProfile(STSProfile);
+    SiteLogistics->ConfiguredShips=ConfiguredShips;
+    for(int32 I=0;I<3;++I) SiteLogistics->ConfiguredCargo[I]=ConfiguredCargo[I];
     TArray<FSiteYardSlot> YardSlots;
     int32 FixedYard=0;
     SiteActor=GetWorld()->SpawnActor<AActor>(FVector::ZeroVector,FRotator::ZeroRotator,Params);
@@ -267,19 +269,22 @@ void AQuayCrane::BuildTerminalSite()
     int32 VesselIndex=0;
     for (float Y:ShipPositions)
     {
+        if(bUnifiedTerminal && VesselIndex>=ConfiguredShips) break;
         Box(Roads,FVector(-32,Y,-1),FVector(45,bUnifiedTerminal?TerminalLayout::VesselLengthM:285.f,10));
         Box(Blue,FVector(-32,Y,4.2),FVector(43,bUnifiedTerminal?TerminalLayout::VesselLengthM:285.f,.4));
         Box(Roads,FVector(-32,Y+(bUnifiedTerminal?108.5f:146.f),-1),FVector(29,7,10));
         Box(Buildings,FVector(-32,Y-(bUnifiedTerminal?91.f:125.f),14),FVector(38,18,20));
-        for (int32 Row=0;Row<ShipRows;++Row)
-            for (int32 Bay=0;Bay<ShipBays;++Bay)
-                for (int32 Tier=0;Tier<ShipTiers;++Tier)
+        const int32 Count=bUnifiedTerminal?ConfiguredCargo[VesselIndex]:ShipRows*ShipBays*ShipTiers;
+        for(int32 Index=0;Index<Count;++Index)
                 {
+                    const int32 Capacity=ShipRows*ShipBays*ShipTiers;
+                    const int32 Local=Index%Capacity;
+                    const int32 Row=Local%ShipRows, Bay=(Local/ShipRows)%ShipBays, Tier=Local/(ShipRows*ShipBays);
                     const float BayY=bUnifiedTerminal?-81.f+Bay*18.f:-99.f+Bay*13.f;
                     const FVector Position(-49+Row*3,Y+BayY,5.695+Tier*2.59);
                     const float CraneSpacing=bUnifiedTerminal?70.f:100.f;
                     const int32 Nearest=FMath::Clamp(FMath::RoundToInt((Position.Y-(Y-CraneSpacing))/CraneSpacing),0,2)+(bUnifiedTerminal?VesselIndex*3:(Y<0?0:5));
-                    SiteLogistics->AddShipCargo(Position*100.,Nearest);
+                    SiteLogistics->AddShipCargo(Position*100.,Nearest,bUnifiedTerminal?Index/Capacity:0);
                 }
         ++VesselIndex;
     }

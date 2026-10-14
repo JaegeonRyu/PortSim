@@ -23,7 +23,7 @@ void AQuayCrane::TickSiteOperations(float Dt)
     const bool CarLike=FParse::Param(FCommandLine::Get(),TEXT("PortSimCarLikeTest"));
     if (FirstWave) SiteLogistics->DispatchLimit=9;
     else if (CarLike) SiteLogistics->DispatchLimit=1;
-    SiteLogistics->Advance(Dt,bAutoPaused || bEmergencyStop);
+    SiteLogistics->Advance(Dt,bAutoPaused || bEmergencyStop || (bUnifiedTerminal && !bAutoRunning));
     if (FirstWave || CarLike)
     {
         SiteTestTime+=Dt;
