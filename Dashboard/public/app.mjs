@@ -15,6 +15,20 @@ const emptyBaseline={hours:'',count:'',cranes:'3',source:'',vessel:'vessel-1',bo
 let baseline={...emptyBaseline};
 try{baseline={...baseline,...JSON.parse(localStorage.getItem('portsim-baseline-v1')||'{}')};}catch{}
 const actors=()=>state?.actors||[];
+let lastFaultSignature='';
+function updateFaultDialog(){
+ if(!state)return;
+ const faults=actors().filter(a=>a.fault).map(a=>`${a.name||a.id}: ${a.fault}`).sort();
+ if(state.fault)faults.unshift(state.fault);
+ const dialog=$('#fault-dialog');
+ if(!faults.length){lastFaultSignature='';if(dialog.open)dialog.close();return;}
+ const signature=JSON.stringify([state.run_id,faults]);
+ if(signature===lastFaultSignature)return;
+ lastFaultSignature=signature;
+ $('#fault-details').textContent=faults.join('\n\n');
+ $('#fault-title').textContent=live?'장비 오류로 정지했습니다':'최근 실행 기록에 장비 오류가 있습니다';
+ if(!dialog.open)dialog.showModal();
+}
 const current=()=>actors().find(a=>a.id===selected);
 const ref=()=>state?.applied_profile?.reference||reference;
 const config=(a)=>a?.type==='rmg'?(a.applied_crane_profile?.simulation_assumptions||{}):(state?.applied_profile?.simulation_assumptions||settings||{});
@@ -209,6 +223,7 @@ async function poll(){
  try{
   const response=await fetch('/api/state');if(!response.ok)throw Error();const payload=await response.json();
   state=payload.state;live=payload.live;age=payload.age_seconds;
+  updateFaultDialog();
   if(!current())selected=actors().find(a=>a.type==='sts')?.id||null;
   renderChrome();
   if(lastRendered!==`${state?.generated_at}|${live}`&&!pointerHeld&&(!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName)||(view==='sensors'&&document.activeElement?.id==='sensor-actor'))&&!document.querySelector('details[open]')&&!window.getSelection()?.toString()){
