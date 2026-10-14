@@ -33,6 +33,9 @@ struct FSTSOperatingProfile
     FSTSPickupConfig Pickup;
 
     bool Load(const FString& ReferenceFile, const FString& SettingsFile);
+    // Shared crane controller units; RMG resolves its own reference and assumptions.
+    bool LoadRMG(const FString& SettingsFile);
+    float CollisionMargin=0, StackHeightTolerance=0;
     float HoistLimit(float PayloadKg, bool bLoaded) const;
     float MinTrolley() const { return WatersideRailX - Outreach; }
     float MaxTrolley() const { return WatersideRailX + RailGauge + Backreach; }
@@ -52,6 +55,7 @@ struct FSTSObservation
     FVector CargoAcceleration = FVector::ZeroVector, CargoJerk = FVector::ZeroVector;
     float SwayDegrees = 0;
     float CornerLoadsN[4] = {0,0,0,0}; // analytic virtual load cells including acceleration; not elastic contact reactions
+    float CornerHalfWidthCm=100, CornerHalfLengthCm=520;
     bool Locked[4] = {false,false,false,false};
     bool bLanded = false, bAGVAligned = false, bCargoSupported = false;
     bool bTargetVisible=false, CornerSeated[4]={false,false,false,false};
@@ -59,6 +63,8 @@ struct FSTSObservation
     FVector2D SwayRate=FVector2D::ZeroVector;
     FVector2D SwayAngle=FVector2D::ZeroVector;
     float RelativeYawDegrees=0, TargetTiltDegrees=0, SkewDegrees=0, HoistAcceleration=0;
+    bool bStackProfileValid=false, bCraneClear=true;
+    float StackTopZ=0, CraneDistance=-1;
 
     bool IsFresh(double Now, float MaxAge) const { return bValid && Now >= Timestamp && Now - Timestamp <= MaxAge; }
     bool AllLocked() const { return Locked[0] && Locked[1] && Locked[2] && Locked[3]; }

@@ -1,6 +1,7 @@
 param([string]$Engine = 'C:\Program Files\Epic Games\UE_5.6',
-    [ValidateSet('All','Normal','Faults','SensorFault','LockFault','Overload','AGVFault')][string]$Mode = 'All',
-    [ValidateRange(5,60)][int]$FixedFPS = 10)
+    [ValidateSet('All','Normal','Full','Faults','SensorFault','LockFault','Overload','AGVFault')][string]$Mode = 'All',
+    [ValidateRange(1,60)][int]$FixedFPS = 10,
+    [ValidateRange(1,120)][int]$TimeoutMinutes = 30)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $project = Join-Path $root 'PortSim.uproject'
@@ -9,12 +10,18 @@ $cases = if ($Mode -eq 'All') { @('Normal','SensorFault','LockFault','Overload',
     elseif ($Mode -eq 'Faults') { @('SensorFault','LockFault','Overload','AGVFault') } else { @($Mode) }
 foreach ($case in $cases) {
     $started = Get-Date
-    $testLog = Join-Path $root "Saved\Logs\SiteTest_$case.log"
+    # A terminated Unreal process can leave the previous log handle pending in
+    # Windows for a short time. Use a per-run file so that stale handles never
+    # prevent the next verification from starting.
+    $testLog = Join-Path $root "Saved\Logs\SiteTest_${case}_$PID.log"
+    if (Test-Path -LiteralPath $testLog) { Remove-Item -LiteralPath $testLog -Force }
     $arguments = @("`"$project`"", '/Engine/Maps/Entry','-game','-nullrhi','-nosound','-unattended','-nosplash','-benchmark',"-fps=$FixedFPS",'-PortSimSiteTest',"`"-abslog=$testLog`"")
+    if($case -eq 'Full') { $arguments += '-PortSimFullUnloadTest' }
+    $expectedShipments=if($case -eq 'Full') {600} else {120}
     $expected = $null
     if ($case -eq 'SensorFault') { $arguments += '-PortSimSTSSensorFault'; $expected = 'Required STS sensor observation invalid/stale' }
     if ($case -eq 'LockFault') { $arguments += '-PortSimSTSLockFault=0'; $expected = 'Twist lock alignment failed' }
-    if ($case -eq 'AGVFault') { $arguments += '-PortSimSTSAGVFault'; $expected = 'AGV alignment lost during STS handover' }
+    if ($case -eq 'AGVFault') { $arguments += '-PortSimSTSAGVFault'; $expected = 'AGV alignment recovery timed out during STS handover' }
     if ($case -eq 'Overload') {
         $settings = Get-Content -LiteralPath (Join-Path $root 'Config\STS_Simulation.json') -Raw | ConvertFrom-Json
         $settings.default_container_mass_kg = 100000
@@ -28,7 +35,7 @@ foreach ($case in $cases) {
     Write-Output "RUN Site $case"
     $process = Start-Process -FilePath $editor -ArgumentList $arguments -WindowStyle Hidden -PassThru
     $null = $process.Handle
-    $timeoutMs = if ($case -eq 'Normal') { 1800000 } else { 900000 }
+    $timeoutMs = if ($case -in @('Normal','Full')) { $TimeoutMinutes*60000 } else { 900000 }
     if (-not $process.WaitForExit($timeoutMs)) { $process.Kill(); throw "Site $case timed out" }
     $process.Refresh()
     $text = Get-Content -LiteralPath $testLog -Raw
@@ -46,25 +53,29 @@ foreach ($case in $cases) {
         $reports = Get-ChildItem -LiteralPath (Join-Path $root 'Saved\Results') -Filter 'Site_*.csv' | Where-Object { $_.LastWriteTime -ge $started }
         foreach ($report in $reports) {
             $rows = @(Import-Csv -LiteralPath $report.FullName)
-            if ($rows.Count -ne 120) { continue }
+            if ($rows.Count -ne $expectedShipments) { continue }
             $completed++
             if (@($rows.STSLane | Sort-Object -Unique).Count -ne 9) { throw 'Not all nine STSs completed shipments' }
-            if (@($rows.AGVID | Sort-Object -Unique).Count -ne 60) { throw 'Not all sixty AGVs completed shipments' }
+            if (@($rows.AGVID | Sort-Object -Unique).Count -lt 9) { throw 'Cost-aware dispatch did not sustain concurrent STS service' }
             if (@($rows | Where-Object { [int]$_.STSLane -lt 1 -or [int]$_.STSLane -gt 9 -or [int]$_.RMGID -lt 1 -or [int]$_.RMGID -gt 46 }).Count) { throw 'Invalid crane ID in shipment report' }
+            if (@($rows.LengthFt | Sort-Object -Unique).Count -ne 3) { throw '20/40/45 ft manifest coverage missing' }
+            if (@($rows.PlannedSlot | Sort-Object -Unique).Count -ne $rows.Count) { throw 'Planned yard destinations are not unique' }
             foreach ($row in $rows) {
                 $duration = [double]$row.FinalPlacementAtSeconds - [double]$row.StartedAtSeconds
                 if ([Math]::Abs($duration - [double]$row.ShipmentSeconds) -gt .0001 -or
                     [double]$row.STSHandoverAtSeconds -lt [double]$row.StartedAtSeconds -or
                     [double]$row.FinalPlacementAtSeconds -lt [double]$row.STSHandoverAtSeconds -or
-                    [double]$row.STSSeconds -gt [double]$row.ShipmentSeconds -or [double]$row.PayloadKg -ne 12000) {
+                    [double]$row.STSSeconds -gt [double]$row.ShipmentSeconds -or
+                    [double]$row.GrossKg -ne ([double]$row.TareKg+[double]$row.CargoKg) -or
+                    [int]$row.LengthFt -notin @(20,40,45) -or [int]$row.PlannedYardBlock -lt 1 -or [int]$row.PlannedYardBlock -gt 23) {
                     throw "Site timing/mass mismatch: $($row.ContainerID)"
                 }
             }
             $snapshot = Get-Content -LiteralPath ($report.FullName.Replace('.csv','_profile.json')) -Raw | ConvertFrom-Json
             if ($snapshot.sts_profile.reference.geometry.rail_gauge.value -ne 30.48) { throw 'Site reference snapshot missing' }
-            Write-Output "TIMING Site: 9 STSs, 120 shipments; final placement $($rows[-1].FinalPlacementAtSeconds) seconds"
+            Write-Output "TIMING Site: 9 STSs, $expectedShipments shipments; final placement $($rows[-1].FinalPlacementAtSeconds) seconds"
         }
-        if ($completed -ne 1) { throw 'Expected one completed 120-shipment report' }
+        if ($completed -ne 1) { throw "Expected one completed $expectedShipments-shipment report" }
     }
     Write-Output "PASS Site $case : $testLog"
 }

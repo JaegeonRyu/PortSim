@@ -9,9 +9,9 @@ public class PortSim : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "ProceduralMeshComponent" });
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "Json" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "Json", "UMG", "Slate", "SlateCore" });
 
         // One authoritative reference in Document/STS; copy/stage it for packaged runs.
         string ProjectRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "../.."));

@@ -24,7 +24,7 @@ bool FSTSDynamicsConfig::Load(TSharedPtr<FJsonObject> Root,FString& Error)
         Damping>10 || PositionGain>10 || VelocityGain>10 || Wind.Size()>50)
     { Error=TEXT("Inconsistent dynamics assumptions"); return false; }
     const TArray<TSharedPtr<FJsonValue>>* Sensors=nullptr;
-    if(!Root->TryGetArrayField(TEXT("sensor_mounts"),Sensors) || Sensors->Num()!=14) {Error=TEXT("Expected 14 sensor mounts");return false;}
+    if(!Root->TryGetArrayField(TEXT("sensor_mounts"),Sensors) || Sensors->Num()<1 || Sensors->Num()>32) {Error=TEXT("Expected 1 to 32 sensor mounts");return false;}
     TSet<FString> Keys;
     for(const auto& V:*Sensors)
     {

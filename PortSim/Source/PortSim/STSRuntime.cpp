@@ -1,4 +1,5 @@
 #include "QuayCrane.h"
+#include "AGVReference.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "Misc/Paths.h"
@@ -29,7 +30,7 @@ void AQuayCrane::InitializeSTSProfile()
     HoistSpeed=STSProfile.EmptyHoistSpeed;
     Spreader->SetMassOverrideInKg(NAME_None,STSProfile.SpreaderMassKg);
     ApplySTSGeometry();
-    bSTSStartPending=STSProfile.bAutoStart && !bTerminalTest && !FParse::Param(FCommandLine::Get(),TEXT("PortSimManualStart")) && !FParse::Param(FCommandLine::Get(),TEXT("PortSimRateTest")) && !FParse::Param(FCommandLine::Get(),TEXT("PortSimSiteTest")) && !FParse::Param(FCommandLine::Get(),TEXT("PortSimFullUnloadTest"));
+    bSTSStartPending=STSProfile.bAutoStart && !bUnifiedTerminal && !bTerminalTest && !FParse::Param(FCommandLine::Get(),TEXT("PortSimManualStart")) && !FParse::Param(FCommandLine::Get(),TEXT("PortSimRateTest")) && !FParse::Param(FCommandLine::Get(),TEXT("PortSimSiteTest")) && !FParse::Param(FCommandLine::Get(),TEXT("PortSimFullUnloadTest"));
     UE_LOG(LogSTS,Display,TEXT("STS_PROFILE_APPLIED: J5300 gauge=%.2fm reach=%.2f/%.2fm trolley=%.2fm/s gantry=%.2fm/s loaded12t=%.2fcm/s sensors=%d"),
         STSProfile.RailGauge/100,STSProfile.Outreach/100,STSProfile.Backreach/100,TravelSpeed/100,STSGantrySpeed()/100,STSProfile.HoistLimit(12000,true),STSProfile.SensorKeys.Num());
     UE_LOG(LogSTS,Warning,TEXT("STS_SIMULATION_ASSUMPTIONS: LT=%.6fkg provisionally; support height=%.2fm; equivalent suspension, level spreader, synthetic sensors/static corner estimates; no wire/torque/skew actuator solver. Settings: %s"),
@@ -125,7 +126,7 @@ void AQuayCrane::SampleSTSSensors(bool Force)
         const auto* Vehicle=AGVActors[ActiveAGV].Get();
         const FVector Expected=bAutoLoading?AutoSource:AutoDestination;
         S.bAGVAligned=Vehicle->Speed<=0.1f && FVector::Dist(AGVCargoPosition(),Expected)<=STSProfile.AGVTolerance &&
-            FMath::Abs(FMath::FindDeltaAngleDegrees(Vehicle->GetActorRotation().Yaw,0.f))<=STSProfile.AGVHeadingTolerance;
+            AGVReference::AxialHeadingErrorDegrees(Vehicle->GetActorRotation().Yaw,0.f)<=STSProfile.AGVHeadingTolerance;
     }
 }
 

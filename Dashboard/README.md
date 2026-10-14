@@ -4,6 +4,8 @@
 
 ## 실행
 
+가장 간단한 방법은 저장소 루트의 `StartDashboard.cmd`를 더블클릭하는 것입니다. `StartPortSim.cmd`는 UE5.6과 웹 서버를 함께 실행합니다. 백그라운드 서버는 창을 닫아도 유지되고, PC 재시작 후에는 실행 파일을 다시 눌러야 합니다. 이미 같은 프로젝트 서버가 켜져 있으면 재사용합니다.
+
 저장소 루트의 PowerShell에서:
 
 ```powershell
@@ -59,3 +61,11 @@ node Dashboard/tests/telemetry.mjs
 센서 자료 갱신: [SensorSourceApplication.md](../Document/STS/SensorSourceApplication.md). 제품 확인 사양과 파생/가정 설치 좌표를 구분하며 웹 센서 화면에서 출처·복수 스캐너를 조회한다.
 
 센서 기반 픽업: [SensorPickup.md](../Document/STS/SensorPickup.md). STS 개요/센서 탭에서 코너 접촉·잠금 피드백과 시험 인양 검증을 확인한다.
+
+실행 시 Node.js를 찾지 못하면 Node.js를 설치하거나 `LaunchDashboard.ps1 -NodePath "node.exe 경로"`로 지정하세요. 로그는 백그라운드 모드에서 `PortSim/Saved/Logs/Dashboard-4173*.log`에 기록됩니다.
+
+## RMG 센서 제어
+
+RMG 상세 화면에서도 픽업 단계·코너별 접촉/잠금/하중·시험 인양 추정치·줄 장력·모터 토크를 조회할 수 있습니다. 센서 페이지의 조회 장비 목록에서 RMG를 선택하면 전용 센서 배치와 가정 범위를 표시합니다. `RMG_Simulation.json`의 선택 사양을 사용하며 STS 센서 제품 자료를 RMG 사양으로 표시하지 않습니다.
+
+적재면 프로파일은 예약 받침/충돌 액터의 네 코너 높이 검사입니다. 배경 야드 전체의 실측 스캔은 아니며, 보기 레이저는 다른 작업 크레인에 대한 정지 거리 인터록입니다. 상세 범위는 `Document/RMG/SensorControl.md`를 참고하세요.

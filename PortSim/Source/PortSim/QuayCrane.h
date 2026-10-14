@@ -125,6 +125,20 @@ public:
     int32 AutoCompleted = 0;
     int32 ActiveCargoIndex = 0;
     double AutoElapsed = 0;
+    int32 ConfiguredShips=3, PendingShips=3;
+    int32 ConfiguredCargo[3]={200,200,200}, PendingCargo[3]={200,200,200};
+    void LoadRunSettings();
+    bool SaveRunSettings();
+    void SetPendingShips(int32 Count);
+    void SetPendingCargo(int32 Vessel,int32 Count);
+    int32 PendingCargoLimit(int32 Vessel) const;
+    int32 PendingCargoTotal() const;
+    void StopSimulation();
+    FString ElapsedText() const;
+    bool bRunSettingsSaved=true;
+    void TickControlsTest(float Dt);
+    int32 ControlsTestStage=0, ControlsTestFrames=0;
+    double ControlsTestTime=0;
 
 private:
     UPROPERTY(VisibleAnywhere, Category="Environment") TObjectPtr<UPortEnvironmentComponent> Environment;
@@ -337,7 +351,10 @@ class PORTSIM_API APortSimHUD : public AHUD
 public:
     virtual void DrawHUD() override;
     virtual void NotifyHitBoxClick(FName BoxName) override;
+    virtual void NotifyHitBoxRelease(FName BoxName) override;
 private:
+    int32 DragSlider=-2;
+    void UpdateSlider(float MouseX);
     void DrawWindCompass(const UPortEnvironmentComponent& Environment,float Scale);
     void DrawSeaState(const UPortEnvironmentComponent& Environment,float Scale);
 };

@@ -13,7 +13,7 @@ APortContainerActor::APortContainerActor()
     Body=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ContainerBody"));
     SetRootComponent(Body);
     Body->SetStaticMesh(Cube.Object);
-    Body->SetWorldScale3D(FVector(2.44f,12.2f,2.59f));
+    Body->SetWorldScale3D(ExternalDimensionsCm/100.f);
     Body->SetMobility(EComponentMobility::Movable);
     Body->SetCollisionProfileName(TEXT("BlockAllDynamic"));
     Body->SetSimulatePhysics(true);
@@ -38,9 +38,11 @@ void APortContainerActor::BeginPlay()
 
 void APortContainerActor::SetPhysicalParameters(float Mass,FVector CoGOffset)
 {
-    MassKg=Mass; CoGOffsetCm=CoGOffset;
+    MassKg=Mass; CargoMassKg=FMath::Max(0.f,MassKg-TareMassKg); CoGOffsetCm=CoGOffset;
     Body->SetMassOverrideInKg(NAME_None,MassKg);
-    Body->SetCenterOfMass(CoGOffsetCm);
+    // Chaos scales COMNudge by the body scale. CoGOffsetCm is already a physical
+    // centimetre offset; compensate so a 40ft mesh does not multiply it again.
+    Body->SetCenterOfMass(CoGOffsetCm/Body->GetComponentScale());
 }
 
 void APortContainerActor::ApplyWind(FVector WindVelocityMetersPerSecond,float DragCoefficient)
@@ -136,6 +138,16 @@ void APortContainerActor::InitializeContainer(int32 Number)
 #endif
 }
 
+void APortContainerActor::ConfigureSpecification(const FPortContainerSpecification& Specification,FVector CoGOffset)
+{
+    SizeClass=Specification.Size; LengthFt=Specification.LengthFt;
+    ExternalDimensionsCm=FVector(Specification.WidthCm,Specification.LengthCm,Specification.HeightCm);
+    TareMassKg=Specification.TareMassKg; CargoMassKg=Specification.CargoMassKg;
+    Body->SetWorldScale3D(ExternalDimensionsCm/100.f);
+    SetPhysicalParameters(Specification.GrossMassKg(),CoGOffset);
+    ApplyContainerAppearance();
+}
+
 void APortContainerActor::ResetCargo(FVector Position)
 {
     bHasSecuredMotionFrame=false; SecuredFrameDurationSeconds=0;
@@ -155,7 +167,8 @@ void APortContainerActor::ApplyContainerAppearance()
     Visual->SetStaticMesh(Model);
     const FBoxSphereBounds Bounds=Model->GetBounds();
     const FVector Size=Bounds.BoxExtent*2.f;
-    const FVector Scale(1220.f/Size.X,244.f/Size.Y,259.f/Size.Z);
+    // The source asset's long axis is X; rotate it onto the collision body's Y axis.
+    const FVector Scale(ExternalDimensionsCm.Y/Size.X,ExternalDimensionsCm.X/Size.Y,ExternalDimensionsCm.Z/Size.Z);
     const FRotator Rotation(0,90,0);
     Visual->SetRelativeRotation(Rotation);
     Visual->SetRelativeScale3D(Scale);

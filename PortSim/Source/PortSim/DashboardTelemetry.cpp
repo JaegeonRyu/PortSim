@@ -1,8 +1,12 @@
+#include "TerminalLayout.h"
+#include "QuayCrane.h"
 #include "PortSiteLogistics.h"
 #include "Async/Async.h"
 #include "PortWorkingCrane.h"
 #include "PortContainerActor.h"
 #include "PortAGVActor.h"
+#include "AGVReference.h"
+#include "SpreaderTelescope.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "EngineUtils.h"
@@ -90,6 +94,7 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
     O->SetNumberField(TEXT("completed"),CompletedJobs);
     O->SetNumberField(TEXT("job_seconds"),JobSeconds);
     O->SetNumberField(TEXT("stage_seconds"),StageTime);
+    O->SetNumberField(TEXT("agv_alignment_wait_seconds"),AGVAlignmentWait);
     O->SetNumberField(TEXT("paused_seconds"),PausedSeconds);
     O->SetNumberField(TEXT("last_job_seconds"),LastJobSeconds);
     O->SetStringField(TEXT("cargo"),GetNameSafe(CargoActor));
@@ -102,10 +107,18 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
     O->SetNumberField(TEXT("distance_to_destination_m"),FVector::Dist(HeadPosition(),Slots[1-SourceSlot]+FVector(0,0,154.5f))*.01);
     O->SetNumberField(TEXT("beam_height_m"),BeamZ*.01);
     O->SetNumberField(TEXT("safe_height_m"),SafeZ*.01);
+    O->SetNumberField(TEXT("spreader_length_m"),TelescopeLengthCm*.01);
+    O->SetNumberField(TEXT("spreader_target_length_m"),TelescopeTargetLengthCm*.01);
+    O->SetBoolField(TEXT("telescope_ready"),TelescopeReady());
     O->SetStringField(TEXT("model"),TEXT("kinematic_level_spreader"));
-    if(bSTS)
+    if(STSProfile.bReady)
     {
         O->SetStringField(TEXT("model"),TEXT("reduced_order_taut_rope_sway_yaw"));
+        if(!bSTS)
+        {
+            TSharedPtr<FJsonObject> Profile;
+            if(FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(STSProfile.SnapshotJson),Profile))O->SetObjectField(TEXT("applied_crane_profile"),Profile.ToSharedRef());
+        }
         const auto& C=STSProfile.Dynamics;
         const auto& D=SuspensionState;
         auto Physics=Object();
@@ -137,7 +150,9 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
             Wire->SetNumberField(TEXT("tension_n"),D.Tension[I]);
             Wire->SetNumberField(TEXT("estimated_extension_m"),D.Extension[I]);
             Wire->SetNumberField(TEXT("limit_n"),C.RopeLimit);
-            const FVector Corner((I&1)?100:-100,(I&2)?520:-520,0);
+            const float WireHalfWidth=PortSpreaderTelescope::TwistlockHalfWidthCm();
+            const float WireHalfLength=PortSpreaderTelescope::TwistlockHalfLengthCm(TelescopeLengthCm);
+            const FVector Corner((I&1)?WireHalfWidth:-WireHalfWidth,(I&2)?WireHalfLength:-WireHalfLength,0);
             Vector(Wire,TEXT("top_m"),Home+Orientation.RotateVector(FVector(Head.X,Head.Y,BeamZ)+Corner),.01f);
             Vector(Wire,TEXT("bottom_m"),HeadPosition()+Orientation.RotateVector(FRotator(0,FMath::RadiansToDegrees(D.Yaw),0).RotateVector(Corner)),.01f);
             Wires.Add(Value(Wire));
@@ -155,7 +170,7 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
                 FJsonObject::Duplicate(M.Reference,Reference);
                 Sensor->SetObjectField(TEXT("reference"),Reference);
             }
-            Vector(Sensor,TEXT("mount_position_m"),M.Position);
+            Vector(Sensor,TEXT("mount_position_m"),DynamicSpreaderMount(M,M.Position));
             Vector(Sensor,TEXT("world_position_m"),Marker->GetComponentLocation(),.01f);
             Vector(Sensor,TEXT("forward"),Marker->GetForwardVector());
             Sensor->SetNumberField(TEXT("minimum"),M.Minimum);Sensor->SetNumberField(TEXT("maximum"),M.Maximum);Sensor->SetNumberField(TEXT("fov_deg"),M.Fov);
@@ -171,16 +186,22 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
             }
             if(M.Key==TEXT("wind"))Sensor->SetNumberField(TEXT("value"),Observation.WindVelocityMetersPerSecond.Size());
             if(M.Key==TEXT("trolley_encoder"))Sensor->SetNumberField(TEXT("value"),M.ReadPosition(Observation.DrivePosition.X*.01));
+            if(M.Key==TEXT("gantry_encoder"))Sensor->SetNumberField(TEXT("value"),Observation.DrivePosition.Y*.01);
+            if(M.Key==TEXT("sway_sensor"))Sensor->SetNumberField(TEXT("value"),Observation.SwayDegrees);
+            if(M.Key==TEXT("stack_profile"))Sensor->SetBoolField(TEXT("value"),Observation.bStackProfileValid);
+            if(M.Key.StartsWith(TEXT("crane_collision_")))Sensor->SetBoolField(TEXT("value"),Observation.bCraneClear);
+            if(M.Key==TEXT("spreader_camera"))Sensor->SetBoolField(TEXT("value"),Observation.bTargetVisible);
             if(M.Key==TEXT("hoist_encoder"))Sensor->SetNumberField(TEXT("value"),(BeamZ-Head.Z)*.01);
-            if(M.Key==TEXT("telescope_encoder"))Sensor->SetNumberField(TEXT("value"),12.192);
+            if(M.Key==TEXT("telescope_encoder"))Sensor->SetNumberField(TEXT("value"),TelescopeLengthCm*.01);
             if(M.Key==TEXT("landed"))Sensor->SetBoolField(TEXT("value"),Observation.bLanded);
             if(M.Key==TEXT("agv_position_lidar")) Sensor->SetBoolField(TEXT("agv_in_range"),IsValid(HandoverAGV)&&STSSensorContains(M.Key,HandoverAGV->CargoPosition()));
             TArray<FVector> Locations;Locations.Add(M.Position);Locations.Append(M.AdditionalPositions);
             TArray<TSharedPtr<FJsonValue>> Instances;
             for(int32 InstanceIndex=0;InstanceIndex<Locations.Num();++InstanceIndex)
             {
-                const FVector Origin=Marker->GetAttachParent()->GetComponentLocation()+Marker->GetAttachParent()->GetComponentQuat().RotateVector(Locations[InstanceIndex]*100);
-                auto Instance=Object();Vector(Instance,TEXT("mount_position_m"),Locations[InstanceIndex]);Vector(Instance,TEXT("world_position_m"),Origin,.01f);
+                const FVector DynamicLocation=DynamicSpreaderMount(M,Locations[InstanceIndex]);
+                const FVector Origin=Marker->GetAttachParent()->GetComponentLocation()+Marker->GetAttachParent()->GetComponentQuat().RotateVector(DynamicLocation*100);
+                auto Instance=Object();Vector(Instance,TEXT("mount_position_m"),DynamicLocation);Vector(Instance,TEXT("world_position_m"),Origin,.01f);
                 TArray<TSharedPtr<FJsonValue>> Rays;
                 if(M.Scan) for(int32 Ray=0;Ray<9;++Ray)
                 {
@@ -215,12 +236,19 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
         S->SetBoolField(TEXT("landed"),Observation.bLanded);
         S->SetBoolField(TEXT("agv_aligned"),Observation.bAGVAligned);
         S->SetBoolField(TEXT("cargo_supported"),Observation.bCargoSupported);
+        if(!bSTS)
+        {
+            S->SetBoolField(TEXT("stack_profile_valid"),Observation.bStackProfileValid);
+            S->SetNumberField(TEXT("stack_top_m"),Observation.StackTopZ*.01);
+            S->SetBoolField(TEXT("crane_clear"),Observation.bCraneClear);
+            if(Observation.CraneDistance>=0)S->SetNumberField(TEXT("crane_distance_m"),Observation.CraneDistance*.01);
+        }
         Vector(S,TEXT("drive_position_m"),Observation.DrivePosition,.01f);
         Vector(S,TEXT("drive_velocity_mps"),Observation.DriveVelocity,.01f);
         S->SetNumberField(TEXT("sway_deg"),Observation.SwayDegrees);
         S->SetNumberField(TEXT("hoist_acceleration_mps2"),Observation.HoistAcceleration*.01);
         auto Pick=Object();
-        Pick->SetStringField(TEXT("phase"),Stage<2?TEXT("approach"):Pickup.PhaseName());
+        Pick->SetStringField(TEXT("phase"),Stage<2?TEXT("approach"):(Stage==2&&!TelescopeReady()?TEXT("telescope"):Pickup.PhaseName()));
         Pick->SetStringField(TEXT("reason"),Pickup.Reason);
         Pick->SetBoolField(TEXT("target_visible"),Observation.bTargetVisible);
         Pick->SetBoolField(TEXT("verified"),Pickup.EstimateValid);
@@ -311,6 +339,12 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     Root->SetStringField(TEXT("generated_at"),FDateTime::UtcNow().ToIso8601());
     Root->SetStringField(TEXT("run_id"),FPaths::GetCleanFilename(ReportBase));
     Root->SetNumberField(TEXT("simulation_seconds"),SimulationTime);
+    if(const auto* Controller=Cast<AQuayCrane>(GetOwner()))
+    {
+        Root->SetNumberField(TEXT("elapsed_seconds"),Controller->AutoElapsed);
+        Root->SetNumberField(TEXT("playback_rate"),Controller->SimulationSpeed);
+        Root->SetBoolField(TEXT("running"),Controller->bAutoRunning);
+    }
     Root->SetBoolField(TEXT("paused"),Paused);
     Root->SetBoolField(TEXT("unified"),LaneCount==9);
     Root->SetStringField(TEXT("handover_policy"),UsesCargoAlignedHandover()?TEXT("cargo_aligned_quay"):TEXT("fixed_quay"));
@@ -321,11 +355,41 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     Root->SetNumberField(TEXT("receiving_capacity"),ReceivingCapacity);
     Root->SetNumberField(TEXT("peak_moving_agvs"),PeakMovingVehicles);
     Root->SetNumberField(TEXT("prefetched_jobs"),PrefetchedJobs);
+    TArray<TSharedPtr<FJsonValue>> ReturnCorridors;
+    static const TCHAR* ReturnNames[]={TEXT("south"),TEXT("central"),TEXT("north")};
+    for(int32 Corridor=0;Corridor<TerminalLayout::AGVReturnCorridorCount;++Corridor)
+    {
+        auto O=Object();
+        O->SetStringField(TEXT("name"),ReturnNames[Corridor]);
+        O->SetNumberField(TEXT("cross_y_m"),TerminalLayout::AGVReturnCrossY(Corridor)*.01f);
+        O->SetNumberField(TEXT("assigned_returns"),ReturnRouteCounts[Corridor]);
+        int32 Active=0;
+        for(const auto& Job:Jobs) Active+=Job.Stage==5 && Job.ReturnCorridor==Corridor;
+        O->SetNumberField(TEXT("active_returns"),Active);
+        ReturnCorridors.Add(Value(O));
+    }
+    Root->SetArrayField(TEXT("agv_return_corridors"),ReturnCorridors);
     TSharedPtr<FJsonObject> Profile;
     if(FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(STSProfile.SnapshotJson),Profile)) Root->SetObjectField(TEXT("applied_profile"),Profile);
     TMap<AActor*,APortContainerActor*> AttachedCargo;
     for (const auto& Cargo:ShipContainers)
         if (IsValid(Cargo)) if (auto* Parent=Cargo->GetAttachParentActor()) AttachedCargo.Add(Parent,Cargo);
+    auto CargoPlan=[this](const TSharedRef<FJsonObject>& O,const APortContainerActor* C)
+    {
+        O->SetNumberField(TEXT("container_length_ft"),C->LengthFt);
+        O->SetNumberField(TEXT("tare_kg"),C->TareMassKg);
+        O->SetNumberField(TEXT("cargo_mass_kg"),C->CargoMassKg);
+        Vector(O,TEXT("dimensions_m"),C->ExternalDimensionsCm,.01f);
+        const int32 ManifestIndex=Manifest.IndexOfByPredicate([C](const FSiteShipCargo& Entry){return Entry.Actor.Get()==C;});
+        if(Manifest.IsValidIndex(ManifestIndex) && Yard.IsValidIndex(Manifest[ManifestIndex].PlannedSlot))
+        {
+            const int32 Slot=Manifest[ManifestIndex].PlannedSlot;
+            O->SetNumberField(TEXT("planned_yard_block"),Yard[Slot].Block+1);
+            O->SetNumberField(TEXT("planned_yard_slot"),Slot);
+            O->SetNumberField(TEXT("planned_rmg"),Yard[Slot].Crane+1);
+            Vector(O,TEXT("planned_yard_position_m"),Yard[Slot].Position,.01f);
+        }
+    };
     TArray<TSharedPtr<FJsonValue>> Actors;
     for(TActorIterator<AActor> It(GetWorld());It;++It)
     {
@@ -344,24 +408,60 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             O->SetStringField(TEXT("type"),TEXT("agv"));
             O->SetStringField(TEXT("name"),FString::Printf(TEXT("AGV-%03d"),V->VehicleID));
             O->SetNumberField(TEXT("speed_mps"),V->Speed*.01);
-            O->SetNumberField(TEXT("speed_limit_mps"),4.5);
-            O->SetNumberField(TEXT("acceleration_mps2"),1.8);
+            O->SetNumberField(TEXT("speed_limit_mps"),V->SpeedLimitCmPerSecond()*.01);
+            O->SetNumberField(TEXT("acceleration_mps2"),V->AccelerationCmPerSecondSquared()*.01);
             O->SetNumberField(TEXT("completed"),V->CompletedJobs);
             O->SetStringField(TEXT("state"),V->Speed>0?TEXT("working"):TEXT("idle"));
             O->SetNumberField(TEXT("payload_kg"),0);
+            O->SetNumberField(TEXT("reference_payload_max_kg"),AGVReference::MaximumPayloadKg);
+            Vector(O,TEXT("reference_vehicle_dimensions_m"),FVector(AGVReference::VehicleLengthCm,
+                AGVReference::VehicleWidthCm,AGVReference::VehicleHeightCm),.01f);
+            O->SetNumberField(TEXT("reference_straight_speed_max_mps"),AGVReference::ReferenceStraightSpeedCmPerSecond*.01f);
+            O->SetNumberField(TEXT("reference_curve_speed_max_mps"),AGVReference::ReferenceCurveSpeedCmPerSecond*.01f);
+            O->SetNumberField(TEXT("source_crab_speed_not_applied_mps"),AGVReference::SourceCrabSpeedNotAppliedCmPerSecond*.01f);
+            O->SetBoolField(TEXT("lateral_motion_enabled"),AGVReference::LateralMotionEnabled);
+            O->SetStringField(TEXT("motion_model"),TEXT("longitudinal_forward_reverse_steering"));
+            Vector(O,TEXT("estimated_position_m"),V->Sensors.EstimatedPosition,.01f);
+            Vector(O,TEXT("transponder_position_m"),V->Sensors.LastAbsolutePosition,.01f);
+            O->SetNumberField(TEXT("position_error_mm"),V->Sensors.PositionErrorCm*10.f);
+            O->SetNumberField(TEXT("position_accuracy_limit_mm"),AGVReference::PositionAccuracyCm*10.f);
+            O->SetNumberField(TEXT("wheel_odometry_m"),V->Sensors.WheelOdometryCm*.01f);
+            O->SetNumberField(TEXT("steering_angle_deg"),V->Sensors.SteeringAngleDegrees);
+            O->SetNumberField(TEXT("lateral_slip_mm"),V->Sensors.LateralSlipCm*10.f);
+            O->SetBoolField(TEXT("reversing"),V->Sensors.bReversing);
+            O->SetNumberField(TEXT("transponder_id"),V->Sensors.CurrentTransponderID);
+            O->SetBoolField(TEXT("transponder_locked"),V->Sensors.bTransponderLocked);
+            O->SetBoolField(TEXT("fms_connected"),V->Sensors.bFMSConnected);
+            O->SetBoolField(TEXT("fms_hold"),V->Sensors.bFMSHold);
+            O->SetNumberField(TEXT("fms_node_index"),V->Sensors.FMSNodeIndex);
+            O->SetNumberField(TEXT("fms_node_count"),V->Sensors.FMSNodeCount);
+            Vector(O,TEXT("fms_next_node_m"),V->Sensors.FMSNextNode,.01f);
+            O->SetNumberField(TEXT("lidar_front_obstacle_m"),V->Sensors.FrontObstacleDistanceCm<0?-1:V->Sensors.FrontObstacleDistanceCm*.01f);
+            O->SetNumberField(TEXT("lidar_rear_obstacle_m"),V->Sensors.RearObstacleDistanceCm<0?-1:V->Sensors.RearObstacleDistanceCm*.01f);
+            O->SetNumberField(TEXT("lidar_safety_distance_m"),V->Sensors.LiDARSafetyDistanceCm*.01f);
+            O->SetNumberField(TEXT("lidar_blocking_agv"),V->Sensors.LiDARBlockingVehicleID);
+            O->SetBoolField(TEXT("lidar_clear"),V->Sensors.bLiDARClear);
+            O->SetBoolField(TEXT("controlled_stop"),V->Sensors.bControlledStop);
             if (auto* const* C=AttachedCargo.Find(V))
-            { O->SetStringField(TEXT("cargo"),(*C)->GetName()); O->SetNumberField(TEXT("payload_kg"),(*C)->MassKg); }
+            { O->SetStringField(TEXT("cargo"),(*C)->GetName()); O->SetNumberField(TEXT("payload_kg"),(*C)->MassKg); CargoPlan(O,*C); }
             const int32 Lane=Vehicles.IndexOfByKey(V);
             if(Jobs.IsValidIndex(Lane))
             {
                 const auto& J=Jobs[Lane];
                 O->SetNumberField(TEXT("stage"),J.Stage);
+                O->SetNumberField(TEXT("traffic_wait_seconds"),J.TrafficWaitSeconds);
+                O->SetNumberField(TEXT("yard_wait_seconds"),J.YardWaitSeconds);
+                O->SetNumberField(TEXT("return_sts"),J.ReturnSTS==INDEX_NONE?0:J.ReturnSTS+1);
+                O->SetNumberField(TEXT("reroute_count"),J.Reroutes);
                 const int32 CargoIndex=J.Cargo!=INDEX_NONE?J.Cargo:
                     (PreparedCargo.IsValidIndex(J.STS)?PreparedCargo[J.STS]:INDEX_NONE);
                 if (Manifest.IsValidIndex(CargoIndex)) Vector(O,TEXT("handover_position_m"),CargoQuay(CargoIndex),.01f);
-                O->SetStringField(TEXT("state"),!Fault.IsEmpty()?TEXT("fault"):(Paused?TEXT("paused"):(J.Stage?TEXT("working"):TEXT("idle"))));
+                O->SetStringField(TEXT("state"),!Fault.IsEmpty()?TEXT("fault"):(Paused?TEXT("paused"):
+                    (V->Sensors.bControlledStop?TEXT("lidar_stop"):(V->Sensors.bFMSHold?TEXT("fms_hold"):(J.Stage?TEXT("working"):TEXT("idle"))))));
                 if(J.STS!=INDEX_NONE) O->SetStringField(TEXT("sts"),Equipment[YardCraneCount+J.STS]->GetName());
                 O->SetNumberField(TEXT("job_seconds"),J.Time);
+                if(J.ReturnCorridor!=INDEX_NONE)
+                    O->SetStringField(TEXT("return_corridor"),ReturnNames[J.ReturnCorridor]);
                 TArray<TSharedPtr<FJsonValue>> Route;
                 double Remaining=0; FVector P=V->GetActorLocation();
                 for(int32 I=J.Waypoint;I<J.Route.Num();++I)
@@ -375,6 +475,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             O->SetStringField(TEXT("type"),TEXT("container"));
             O->SetStringField(TEXT("name"),C->ContainerID.ToString());
             O->SetNumberField(TEXT("mass_kg"),C->MassKg);
+            CargoPlan(O,C);
             Vector(O,TEXT("cog_m"),C->CoGOffsetCm,.01f);
             O->SetStringField(TEXT("state"),StaticEnum<ECargoOwner>()->GetNameStringByValue(int64(C->LocationOwner)));
             O->SetBoolField(TEXT("simulating_physics"),C->GetBody()->IsSimulatingPhysics());
@@ -383,7 +484,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
         Actors.Add(Value(O));
     }
     TArray<TSharedPtr<FJsonValue>> Vessels;
-    if(LaneCount==9) for(int32 V=0;V<3;++V)
+    if(LaneCount==9) for(int32 V=0;V<ConfiguredShips;++V)
     {
         auto O=Object(); int32 Total=0,Unloaded=0,Placed=0;
         for(const auto& C:Manifest) if(C.STS/3==V) { ++Total; Unloaded+=bool(C.HandoverMask&1); Placed+=C.State==2; }
@@ -391,7 +492,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
         O->SetStringField(TEXT("name"),FString::Printf(TEXT("VESSEL-%02d"),V+1));
         O->SetStringField(TEXT("type"),TEXT("vessel"));
         O->SetStringField(TEXT("class"),TEXT("Logical vessel / manifest group"));
-        Vector(O,TEXT("position_m"),FVector(-34,-350+V*350,0));
+        Vector(O,TEXT("position_m"),FVector(-34,TerminalLayout::VesselCenterY(V),0));
         O->SetNumberField(TEXT("initial_count"),Total);
         O->SetNumberField(TEXT("unloaded"),Unloaded); O->SetNumberField(TEXT("placed"),Placed);
         O->SetNumberField(TEXT("started_at"),VesselStarted[V]);
@@ -400,17 +501,17 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
         O->SetStringField(TEXT("state"),Unloaded==Total?TEXT("complete"):TEXT("working"));
         Vessels.Add(Value(O)); Actors.Add(Value(O));
     }
-    int32 YardTotals[18]={}, YardOccupied[18]={};
-    for (const auto& Slot:Yard) if (Slot.Block>=0 && Slot.Block<18)
+    int32 YardTotals[TerminalLayout::YardBlockCount]={}, YardOccupied[TerminalLayout::YardBlockCount]={};
+    for (const auto& Slot:Yard) if (Slot.Block>=0 && Slot.Block<TerminalLayout::YardBlockCount)
     { ++YardTotals[Slot.Block]; YardOccupied[Slot.Block]+=Slot.Occupied; }
-    for(int32 B=0;B<18;++B)
+    for(int32 B=0;B<TerminalLayout::YardBlockCount;++B)
     {
         auto O=Object(); const int32 Total=YardTotals[B], Occupied=YardOccupied[B];
         O->SetStringField(TEXT("id"),FString::Printf(TEXT("yard-%d"),B+1));
         O->SetStringField(TEXT("name"),FString::Printf(TEXT("YARD-%02d"),B+1));
         O->SetStringField(TEXT("type"),TEXT("yard"));
         O->SetStringField(TEXT("class"),TEXT("Instanced yard block"));
-        Vector(O,TEXT("position_m"),FVector(300,-460+B*44,0));
+        Vector(O,TEXT("position_m"),FVector(TerminalLayout::SiteX(300),TerminalLayout::BlockY(B),0));
         O->SetNumberField(TEXT("slots"),Total); O->SetNumberField(TEXT("occupied"),Occupied);
         O->SetStringField(TEXT("state"),TEXT("available")); Actors.Add(Value(O));
     }

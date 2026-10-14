@@ -7,6 +7,8 @@
 #include "Materials/MaterialInterface.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "Misc/Paths.h"
+#include "SpreaderTelescope.h"
 
 namespace WorkingCrane { constexpr float LiftOffset=154.5f; }
 
@@ -27,7 +29,18 @@ APortWorkingCrane::APortWorkingCrane()
         Pads.Add(Pad);
     }
     Trolley=Box(TEXT("Trolley"),RootComponent,FVector::ZeroVector,FVector(420,1450,120));
-    Spreader=Box(TEXT("Spreader"),RootComponent,FVector::ZeroVector,FVector(244,1220,50));
+    // Spreader is the unscaled moving reference frame.  The visible centre,
+    // telescopic arms, end beams and twistlocks move within this common frame.
+    Spreader=Box(TEXT("Spreader"),RootComponent,FVector::ZeroVector,FVector(100));
+    Spreader->SetVisibility(false);
+    SpreaderCenter=Box(TEXT("SpreaderCenter"),Spreader,FVector::ZeroVector,FVector(243.8f,500.f,50.f));
+    for(int32 End=0;End<2;++End)
+    {
+        TelescopeArms.Add(Box(*FString::Printf(TEXT("TelescopeArm_%d"),End),Spreader,FVector::ZeroVector,FVector(125.f,350.f,34.f)));
+        SpreaderEndBeams.Add(Box(*FString::Printf(TEXT("SpreaderEndBeam_%d"),End),Spreader,FVector::ZeroVector,FVector(243.8f,40.f,60.f)));
+    }
+    for(int32 Corner=0;Corner<4;++Corner)
+        TwistLocks.Add(Box(*FString::Printf(TEXT("TwistLock_%d"),Corner),Spreader,FVector::ZeroVector,FVector(16.f,16.f,20.f)));
     Mast=Box(TEXT("Mast"),RootComponent,FVector::ZeroVector,FVector(100));
     NameLabel=Label(TEXT("CraneName"),FVector::ZeroVector);
     Tags.Add(TEXT("PortSim.WorkingCrane"));
@@ -38,26 +51,32 @@ void APortWorkingCrane::Configure(int32 Number,bool bQuayside,FVector Source,FVe
     check(!bConfigured);
     bExternalJobs=!bCreateCargo; CraneID=Number; bSTS=bQuayside; Home=GetActorLocation(); Orientation=GetActorQuat();
     Slots[0]=Source; Slots[1]=Destination;
-    BeamZ=bSTS && STSProfile.bReady?STSProfile.BeamHeight:(bSTS?3000.f:2600.f);
-    SafeZ=bSTS && STSProfile.bReady?STSProfile.SafeHeight:1900.f;
-    const float HalfGauge=bSTS && STSProfile.bReady?STSProfile.RailGauge*.5f:(bSTS?850.f:1600.f);
+    if(!bSTS && !STSProfile.bReady)
+    {
+        FString File=FPaths::ProjectConfigDir()/TEXT("RMG_Simulation.json");
+        FParse::Value(FCommandLine::Get(),TEXT("PortSimRMGSettings="),File);
+        STSProfile.LoadRMG(File);
+    }
+    BeamZ=STSProfile.bReady?STSProfile.BeamHeight:(bSTS?3000.f:2600.f);
+    SafeZ=STSProfile.bReady?STSProfile.SafeHeight:1900.f;
+    const float HalfGauge=STSProfile.bReady?STSProfile.RailGauge*.5f:(bSTS?850.f:1600.f);
     const float GaugeCenter=bSTS && STSProfile.bReady?STSProfile.WatersideRailX+HalfGauge:0.f;
     const float HalfBase=bSTS?1000.f:820.f;
-    const float Height=bSTS?BeamZ-100.f:2560.f;
+    const float Height=bSTS?BeamZ-100.f:BeamZ-40.f;
     for (int32 I=0;I<4;++I)
     {
-        Legs[I]->SetRelativeLocation(FVector(GaugeCenter+(I<2?-1:1)*HalfGauge,(I%2?-1:1)*HalfBase,bSTS?Height*.5f:1330.f));
+        Legs[I]->SetRelativeLocation(FVector(GaugeCenter+(I<2?-1:1)*HalfGauge,(I%2?-1:1)*HalfBase,bSTS?Height*.5f:Height*.5f+50.f));
         Legs[I]->SetRelativeScale3D(FVector(1,1,Height/100.f));
         Bogies[I]->SetRelativeLocation(FVector(GaugeCenter+(I<2?-1:1)*HalfGauge,(I%2?-1:1)*HalfBase,100));
         Bogies[I]->SetRelativeScale3D(bSTS?FVector(1.8,4.2,1.8):FVector(1.6,3.2,1.6));
     }
     for (int32 I=0;I<2;++I)
     {
-        const float BeamCenter=bSTS && STSProfile.bReady?(STSProfile.MinTrolley()+STSProfile.MaxTrolley())*.5f:(bSTS?-1500.f:0.f);
-        Beams[I]->SetRelativeLocation(FVector(BeamCenter,(I?-1:1)*(bSTS?730.f:650.f),bSTS?BeamZ+100.f:2600.f));
-        CrossBeams[I]->SetRelativeLocation(FVector(GaugeCenter+(I?-1:1)*HalfGauge,0,bSTS?BeamZ-100.f:2580.f));
+        const float BeamCenter=STSProfile.bReady?(STSProfile.MinTrolley()+STSProfile.MaxTrolley())*.5f:(bSTS?-1500.f:0.f);
+        Beams[I]->SetRelativeLocation(FVector(BeamCenter,(I?-1:1)*(bSTS?730.f:650.f),bSTS?BeamZ+100.f:BeamZ));
+        CrossBeams[I]->SetRelativeLocation(FVector(GaugeCenter+(I?-1:1)*HalfGauge,0,bSTS?BeamZ-100.f:BeamZ-20.f));
         CrossBeams[I]->SetRelativeScale3D(bSTS?FVector(1.4,22,1.4):FVector(1.6,18,1.6));
-        const float BeamLength=bSTS && STSProfile.bReady?(STSProfile.MaxTrolley()-STSProfile.MinTrolley()+400.f)/100.f:(bSTS?125.f:34.f);
+        const float BeamLength=STSProfile.bReady?(STSProfile.MaxTrolley()-STSProfile.MinTrolley()+400.f)/100.f:(bSTS?125.f:34.f);
         Beams[I]->SetRelativeScale3D(FVector(BeamLength,bSTS?1.f:1.2f,1.8f));
         Pads[I]->SetWorldLocationAndRotation(Slots[I]-FVector(0,0,139.5f),Orientation);
         Pads[I]->SetWorldScale3D(FVector(3.1f,13.f,.2f));
@@ -79,6 +98,10 @@ void APortWorkingCrane::Configure(int32 Number,bool bQuayside,FVector Source,FVe
     Mast->SetMaterial(0,Material(TEXT("CraneYellow")));
     Trolley->SetMaterial(0,Material(bSTS?TEXT("CraneYellow"):TEXT("Target")));
     Spreader->SetMaterial(0,Material(bSTS?TEXT("CraneYellow"):TEXT("Target")));
+    SpreaderCenter->SetMaterial(0,Material(bSTS?TEXT("CraneYellow"):TEXT("Target")));
+    for(const auto& Part:TelescopeArms) Part->SetMaterial(0,Material(TEXT("Steel")));
+    for(const auto& Part:SpreaderEndBeams) Part->SetMaterial(0,Material(bSTS?TEXT("CraneYellow"):TEXT("Target")));
+    for(const auto& Part:TwistLocks) Part->SetMaterial(0,Material(TEXT("Steel")));
     if (bCreateCargo)
     {
     FActorSpawnParameters Params;
@@ -87,18 +110,19 @@ void APortWorkingCrane::Configure(int32 Number,bool bQuayside,FVector Source,FVe
     CargoActor=GetWorld()->SpawnActor<APortContainerActor>(Source,Orientation.Rotator(),Params);
     check(CargoActor);
     CargoActor->InitializeContainer(1000+Number);
-    if(bSTS && STSProfile.bReady) CargoActor->SetPhysicalParameters(STSProfile.ContainerMassKg,STSProfile.ContainerCoG);
+    if(STSProfile.bReady) CargoActor->SetPhysicalParameters(STSProfile.ContainerMassKg,STSProfile.ContainerCoG);
     }
     bConfigured=true;
+    UpdateSpreaderGeometry();
 #if WITH_EDITOR
     SetActorLabel(FString::Printf(TEXT("Working_%s_%02d"),bSTS?TEXT("STS"):TEXT("RMG"),Number));
     SetFolderPath(TEXT("PortSim/WorkingEquipment"));
 #endif
     ResetOperation();
-    if(bSTS && STSProfile.bReady) BuildSTSSensors();
-    bSensorFault=FParse::Param(FCommandLine::Get(),TEXT("PortSimSTSSensorFault"));
-    FParse::Value(FCommandLine::Get(),TEXT("PortSimSTSLockFault="),LockFault);
-    if(bSTS && !STSProfile.bReady) Stop(TEXT("STS profile unavailable: ")+STSProfile.Error);
+    if(STSProfile.bReady) BuildSTSSensors();
+    bSensorFault=FParse::Param(FCommandLine::Get(),bSTS?TEXT("PortSimSTSSensorFault"):TEXT("PortSimRMGSensorFault"));
+    FParse::Value(FCommandLine::Get(),bSTS?TEXT("PortSimSTSLockFault="):TEXT("PortSimRMGLockFault="),LockFault);
+    if(!STSProfile.bReady) Stop(TEXT("Crane profile unavailable: ")+STSProfile.Error);
 }
 
 FVector APortWorkingCrane::Local(FVector World) const { return Orientation.UnrotateVector(World-Home); }
@@ -161,10 +185,13 @@ void APortWorkingCrane::UpdateParts()
     SetActorLocation(Home+Orientation.RotateVector(FVector(0,Head.Y,0)));
     Trolley->SetRelativeLocation(FVector(Head.X,0,BeamZ));
     Spreader->SetRelativeLocation(FVector(Head.X,0,Head.Z)+SuspendedOffset);
-    Spreader->SetRelativeRotation(FRotator(0,bSTS?FMath::RadiansToDegrees(SuspensionState.Yaw):0,0));
+    Spreader->SetRelativeRotation(FRotator(0,FMath::RadiansToDegrees(SuspensionState.Yaw),0));
+    UpdateSpreaderGeometry();
+    const float HalfLength=PortSpreaderTelescope::TwistlockHalfLengthCm(TelescopeLengthCm);
+    const float HalfWidth=PortSpreaderTelescope::TwistlockHalfWidthCm();
     for (int32 I=0;I<4;++I)
     {
-        const FVector Corner((I&1)?100:-100,(I&2)?520:-520,0);
+        const FVector Corner((I&1)?HalfWidth:-HalfWidth,(I&2)?HalfLength:-HalfLength,0);
         const FVector Top=FVector(Head.X,0,BeamZ)+Corner;
         const FVector Bottom=FVector(Head.X,0,Head.Z)+SuspendedOffset+Spreader->GetRelativeRotation().RotateVector(Corner);
         const FVector Delta=Top-Bottom;
@@ -176,14 +203,7 @@ void APortWorkingCrane::UpdateParts()
 
 bool APortWorkingCrane::MoveHead(FVector Target,float Dt)
 {
-    if(bSTS) return MoveSTS(Target,Dt);
-    const float Distance=FVector::Dist(Head,Target);
-    const float Limit=FMath::Abs(Target.Z-Head.Z)>1.f?200.f:350.f;
-    Speed=FMath::FInterpConstantTo(Speed,FMath::Min(Limit,FMath::Sqrt(2*150.f*Distance)),Dt,150.f);
-    Head=FMath::VInterpConstantTo(Head,Target,Dt,Speed);
-    UpdateParts();
-    if (!Head.Equals(Target,.1f)) return false;
-    Head=Target; Speed=0; UpdateParts(); return true;
+    return MoveSTS(Target,Dt);
 }
 
 bool APortWorkingCrane::DestinationClear() const
@@ -192,7 +212,7 @@ bool APortWorkingCrane::DestinationClear() const
     Query.AddIgnoredActor(CargoActor);
     // Shrink by 2 cm so the supporting pad/ground is not treated as an obstruction.
     return !GetWorld()->OverlapBlockingTestByChannel(Slots[1-SourceSlot],Orientation,ECC_WorldDynamic,
-        FCollisionShape::MakeBox(FVector(120,608,127.5)),Query);
+        FCollisionShape::MakeBox(FVector(120,IsValid(CargoActor)?CargoActor->ExternalDimensionsCm.Y*.5f-2.f:608.f,127.5)),Query);
 }
 
 void APortWorkingCrane::Stop(const FString& Reason)
@@ -203,10 +223,9 @@ void APortWorkingCrane::Stop(const FString& Reason)
 
 void APortWorkingCrane::Advance(float Dt,bool bGlobalPaused)
 {
-    // Subdivide the complete feedback loop, not just the suspension plant.
-    // Sensors and pickup decisions must advance with the accelerated simulation.
-    if(!bSTS || !bConfigured || !bJobActive || bGlobalPaused || !bEnabled || !Fault.IsEmpty())
-    { AdvanceStep(Dt,bGlobalPaused); return; }
+    if(!FMath::IsFinite(Dt) || Dt<=0) { if(Dt==0)AdvanceStep(0,bGlobalPaused);return; }
+    // A render frame can cover a large simulation interval at low FPS/high speed.
+    // Substep observations and the state machine too, not just the physical plant.
     const int32 Steps=FMath::Max(1,FMath::CeilToInt(double(Dt)*60.));
     const float Step=Dt/Steps;
     for(int32 I=0;I<Steps;++I)
@@ -231,14 +250,25 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
     if(bJobActive) { JobSeconds+=Dt; if(bGlobalPaused || !bEnabled || !Fault.IsEmpty()) PausedSeconds+=Dt; }
     SetOperationPaused(bGlobalPaused || !bEnabled || !Fault.IsEmpty());
     if (bPaused || !bJobActive) return;
-    if(bSTS)
+    AdvanceTelescope(Dt);
     {
         SampleSTS();
         if(!STSProfile.bReady || !Observation.IsFresh(SimulationTime,STSProfile.SensorMaxAge))
-        { Stop(TEXT("Required STS sensor observation invalid/stale")); return; }
+        { Stop(bSTS?TEXT("Required STS sensor observation invalid/stale"):TEXT("Required RMG sensor observation invalid/stale")); return; }
         if(bCarrying && (!Observation.AllLocked() || Observation.DynamicPayloadEstimateKg()>STSProfile.RatedPayloadKg))
         { Stop(TEXT("Loaded hoist interlock: locks/load observation invalid")); return; }
-        if(((Stage==5 && bDestinationReady) || Stage==6 || Stage==7) && !Observation.bAGVAligned)
+    }
+    const bool bSTSNeedsAGV=bSTS && ((Stage==5 && bDestinationReady) || Stage==6 || Stage==7);
+    const bool bRMGNeedsAGV=!bSTS && Stage<=2 && IsValid(HandoverAGV);
+    if((bSTSNeedsAGV || bRMGNeedsAGV) && !Observation.bAGVAligned)
+    {
+        // A newly arrived vehicle can be visible one sensor period after the
+        // dispatch state changes.  Keep the suspended load at its current safe
+        // pose and reacquire alignment instead of turning one transient sample
+        // into a terminal-wide emergency stop.
+        AGVAlignmentWait+=Dt;
+        SettleTime=0;
+        if(AGVAlignmentWait>STSProfile.Pickup.AlignmentTimeout)
         {
             const bool bValidAGV=IsValid(HandoverAGV);
             const FVector AGVCargo=bValidAGV?HandoverAGV->CargoPosition():FVector::ZeroVector;
@@ -249,23 +279,39 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
             UE_LOG(LogTemp,Error,TEXT("STS_ALIGNMENT_DETAIL: crane=%d stage=%d ready=%d agv=%s observed=%d speed_cmps=%.3f position_error_cm=%.3f position_limit_cm=%.3f heading_error_deg=%.3f heading_limit_deg=%.3f lidar=%d destination=%s cargo_position=%s"),
                 CraneID,Stage,bDestinationReady,*GetNameSafe(HandoverAGV),Observation.bAGVAligned,AGVSpeed,PositionError,STSProfile.AGVTolerance,
                 HeadingError,STSProfile.AGVHeadingTolerance,bInLidar,*Slots[1-SourceSlot].ToString(),*AGVCargo.ToString());
-            Stop(TEXT("AGV alignment lost during STS handover")); return;
+            UE_LOG(LogTemp,Error,TEXT("CRANE_ALIGNMENT_TIMEOUT: crane=%d kind=%s stage=%d ready=%d agv=%s observed=%d destination=%s wait=%.2f"),
+                CraneID,bSTS?TEXT("STS"):TEXT("RMG"),Stage,bDestinationReady,*GetNameSafe(HandoverAGV),
+                Observation.bAGVAligned,*Slots[bSTS?1-SourceSlot:SourceSlot].ToString(),AGVAlignmentWait);
+            Stop(bSTS?TEXT("AGV alignment recovery timed out during STS handover"):
+                TEXT("AGV alignment recovery timed out during RMG pickup"));
+            return;
         }
+        MoveSTS(Head,Dt);
+        return;
+    }
+    AGVAlignmentWait=0;
+    if(!bSTS)
+    {
+        if(!Observation.bCraneClear) {Stop(TEXT("RMG crane collision clearance violated"));return;}
+        if(Stage==5 && !Observation.bStackProfileValid) {Stop(TEXT("RMG stack profile invalid or destination height mismatch"));return;}
     }
     // Pick and lift the next ship box while the vehicle is away; hold it safely
     // above the dock until the returning AGV is stopped beneath the spreader.
-    if (Stage==5 && !bDestinationReady) { if(bSTS) MoveSTS(StageHoldTarget,Dt); return; }
+    if (Stage==5 && !bDestinationReady) { MoveSTS(StageHoldTarget,Dt); return; }
     StageTime+=Dt;
-    if (StageTime>(bSTS?STSProfile.StageTimeout:180.f))
-    {
-        Stop(FString::Printf(TEXT("Job stage timed out: stage=%d head=%s target_hold=%s sway=%.3f wind=%s"),
-            Stage,*Head.ToCompactString(),*StageHoldTarget.ToCompactString(),SuspensionState.SwayDegrees(),
-            *WindVelocityMetersPerSecond.ToCompactString()));
-        return;
-    }
-    if(bSTS && Stage==2){AdvancePickup(Dt);return;}
-    const FVector Source=bSTS && Stage==3?Local(Pickup.TrialOrigin):Local(Slots[SourceSlot]);
+    if (StageTime>STSProfile.StageTimeout) { Stop(TEXT("Job stage timed out")); return; }
+    const FVector Source=Stage==3?Local(Pickup.TrialOrigin):Local(Slots[SourceSlot]);
     const FVector Destination=Local(Slots[1-SourceSlot]);
+    if(Stage==2)
+    {
+        if(!TelescopeReady())
+        {
+            Pickup.Reason=TEXT("Adjusting telescopic spreader to container ISO corner positions");
+            MoveSTS(FVector(Source.X,Source.Y,SafeZ),Dt);
+            return;
+        }
+        AdvancePickup(Dt);return;
+    }
     FVector Target=StageHoldTarget;
     switch(Stage)
     {
@@ -277,7 +323,7 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
     case 5:
         // Pickup retains the achieved coupling offset. Compensate it from
         // measurements so the cargo, rather than an ideal head centre, lands on the AGV.
-        Target=Destination+(bSTS?Orientation.UnrotateVector(Observation.SpreaderPosition-Observation.CargoPosition):FVector(0,0,WorkingCrane::LiftOffset));
+        Target=Destination+Orientation.UnrotateVector(Observation.SpreaderPosition-Observation.CargoPosition);
         break;
     case 6: Target=FVector(Destination.X,Destination.Y,SafeZ); break;
     case 7:
@@ -290,32 +336,13 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
         LastJobSeconds=JobSeconds; LastPausedSeconds=PausedSeconds;
         if (bExternalJobs) { bJobActive=false; CargoActor=nullptr; Stage=0; StageTime=SettleTime=0; return; }
         SourceSlot=1-SourceSlot; Stage=0; StageTime=SettleTime=0;
-        if(bSTS){Pickup=FSTSPickupController();for(double& Progress:LockProgress)Progress=0;}
+        {Pickup=FSTSPickupController();for(double& Progress:LockProgress)Progress=0;}
         return;
     default: Stop(TEXT("Invalid job stage")); return;
     }
     if (!MoveHead(Target,Dt)) return;
-    if (Stage==2)
-    {
-        if (FVector::Dist(CargoActor->GetActorLocation(),Slots[SourceSlot])>10.f ||
-            CargoActor->GetActorUpVector().Z<.99f || CargoActor->GetBody()->GetPhysicsLinearVelocity().Size()>5.f)
-        {
-            if (StageTime>30.f) Stop(FString::Printf(TEXT("Pickup alignment: error %.2f cm, speed %.2f, up %.3f"),
-                FVector::Dist(CargoActor->GetActorLocation(),Slots[SourceSlot]),CargoActor->GetBody()->GetPhysicsLinearVelocity().Size(),CargoActor->GetActorUpVector().Z));
-            return;
-        }
-        if (bDestinationReady && !DestinationClear()) { Stop(TEXT("Destination slot occupied")); return; }
-        CargoActor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-        auto* Body=CargoActor->GetBody();
-        Body->SetSimulatePhysics(false);
-        CargoActor->SetActorLocationAndRotation(HeadPosition()-FVector(0,0,WorkingCrane::LiftOffset),Spreader->GetComponentRotation());
-        CargoActor->AttachToComponent(Spreader,FAttachmentTransformRules::KeepWorldTransform);
-        CargoActor->LocationOwner=bSTS?ECargoOwner::STS:ECargoOwner::RMG;
-        bCarrying=true;
-    }
     if (Stage==5)
     {
-        if(bSTS)
         {
             if(!Observation.bCargoSupported || Observation.SpreaderVelocity.Size()>STSProfile.SettleSpeed ||
                 !Observation.CargoPosition.Equals(Slots[1-SourceSlot],STSProfile.LandingTolerance)) { SettleTime=0; return; }
@@ -335,7 +362,7 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
     }
     StageHoldTarget=Head+SuspendedOffset;
     ++Stage; StageTime=SettleTime=0;
-    if(bSTS) SampleSTS(true);
+    SampleSTS(true);
 }
 
 bool APortWorkingCrane::ValidateOperation(FString& Error) const
@@ -349,8 +376,8 @@ bool APortWorkingCrane::ValidateOperation(FString& Error) const
     // the trolley alone rejects that corrective motion even while the spreader
     // remains inside the reservation.
     const FVector ControlledPosition=Head+SuspendedOffset;
-    double Margin=bSTS?STSProfile.Pickup.AcquisitionRadius:1;
-    if(bSTS && STSProfile.bReady)
+    double Margin=STSProfile.Pickup.AcquisitionRadius;
+    if(STSProfile.bReady)
     {
         auto WindConfig=STSProfile.Dynamics;
         WindConfig.Wind=Orientation.UnrotateVector(WindVelocityMetersPerSecond);
@@ -372,8 +399,7 @@ bool APortWorkingCrane::ValidateOperation(FString& Error) const
         return false;
     }
     if (bCarrying && (CargoActor->GetAttachParentActor()!=this || CargoActor->GetBody()->IsSimulatingPhysics() ||
-        (bSTS?!CargoActor->GetActorTransform().Equals(LockedCargoTransform*Spreader->GetComponentTransform(),1.f):
-            !CargoActor->GetActorLocation().Equals(HeadPosition()-FVector(0,0,WorkingCrane::LiftOffset),1.f))))
+        !CargoActor->GetActorTransform().Equals(LockedCargoTransform*Spreader->GetComponentTransform(),1.f)))
     { Error=TEXT("Locked cargo is detached or out of alignment"); return false; }
     if (!bCarrying && CargoActor->GetAttachParentActor() &&
         !(Stage<=2 && CargoActor->LocationOwner==ECargoOwner::AGV && !CargoActor->GetBody()->IsSimulatingPhysics()))
@@ -391,17 +417,17 @@ void APortWorkingCrane::EndPlay(const EEndPlayReason::Type Reason)
 bool APortWorkingCrane::AssignCargo(APortContainerActor* Cargo,FVector Source,FVector Destination,bool SourceSupport,bool DestinationSupport,APortAGVActor* HandoverVehicle)
 {
     if (!bExternalJobs || bJobActive || !IsValid(Cargo) || !Fault.IsEmpty()) return false;
-    if(bSTS)
     {
-        if(!STSProfile.bReady) { Stop(TEXT("STS profile unavailable")); return false; }
+        if(!STSProfile.bReady) { Stop(TEXT("Crane profile unavailable")); return false; }
         if(!FMath::IsFinite(Cargo->MassKg) || Cargo->MassKg<=0 || Cargo->MassKg>STSProfile.RatedPayloadKg)
-        { Stop(TEXT("Payload exceeds resolved STS reference capacity")); return false; }
+        { Stop(bSTS?TEXT("Payload exceeds resolved STS reference capacity"):TEXT("Payload exceeds resolved RMG reference capacity")); return false; }
         if(!STSProfile.ContainsTarget(Local(Source)+FVector(0,0,WorkingCrane::LiftOffset)) ||
             !STSProfile.ContainsTarget(Local(Destination)+FVector(0,0,WorkingCrane::LiftOffset)))
-        { Stop(TEXT("Source/destination outside reference STS working envelope")); return false; }
+        { Stop(TEXT("Source/destination outside reference crane working envelope")); return false; }
     }
     ClearSTSState(); HandoverAGV=HandoverVehicle;
     CargoActor=Cargo; Slots[0]=Source; Slots[1]=Destination; SourceSlot=Stage=0;
+    TelescopeTargetLengthCm=Cargo->ExternalDimensionsCm.Y;
     bDestinationReady=true;
     bJobActive=true; bCarrying=false; Speed=StageTime=SettleTime=0; JobStartHead=Head;
     StageHoldTarget=Head+SuspendedOffset;
@@ -409,9 +435,10 @@ bool APortWorkingCrane::AssignCargo(APortContainerActor* Cargo,FVector Source,FV
     {
         const bool Support=I==0?SourceSupport:DestinationSupport;
         Pads[I]->SetWorldLocationAndRotation(Slots[I]-FVector(0,0,139.5f),Orientation);
+        Pads[I]->SetWorldScale3D(FVector(Cargo->ExternalDimensionsCm.X+66.f,Cargo->ExternalDimensionsCm.Y+80.f,20.f)/100.f);
         Pads[I]->SetCollisionEnabled(Support?ECollisionEnabled::QueryAndPhysics:ECollisionEnabled::NoCollision);
         Pads[I]->SetVisibility(Support);
     }
-    if(bSTS) SampleSTS(true);
+    SampleSTS(true);
     return true;
 }

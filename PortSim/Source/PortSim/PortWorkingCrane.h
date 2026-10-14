@@ -25,7 +25,8 @@ public:
     void SetWindVelocity(FVector WorldVelocityMetersPerSecond);
     void UpdateMovingShipSource(APortContainerActor* Cargo,FVector WorldPosition);
     FVector GetWindVelocity() const { return WindVelocityMetersPerSecond; }
-    bool HasSTSProfile() const { return STSProfile.bReady; }
+    bool HasSTSProfile() const { return bSTS && STSProfile.bReady; }
+    bool HasRMGProfile() const { return !bSTS && STSProfile.bReady; }
     double LastJobSeconds=0, LastPausedSeconds=0;
     FSTSObservation Observation;
     void SetDestinationReady(bool Ready);
@@ -48,7 +49,7 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") FString Fault;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") TObjectPtr<APortContainerActor> CargoActor;
 private:
-    void AdvanceStep(float Dt,bool bGlobalPaused);
+    void AdvanceStep(float Dt, bool bGlobalPaused);
     FSTSSuspension SuspensionState;
     FSTSPickupController Pickup;
     double LockProgress[4]={0,0,0,0};
@@ -57,10 +58,16 @@ private:
     FTransform LockedCargoTransform;
     void AdvancePickup(float Dt);
     void SamplePickupGeometry();
+    void SampleRMGEnvironment();
 
     FVector SuspendedOffset=FVector::ZeroVector;
     UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> SensorMarkers;
     void BuildSTSSensors();
+    void AdvanceTelescope(float Dt);
+    void UpdateSpreaderGeometry();
+    void UpdateSpreaderSensors();
+    FVector DynamicSpreaderMount(const FSTSSensorMount& Mount, FVector ConfiguredPosition) const;
+    bool TelescopeReady() const;
     bool STSSensorContains(const FString& Key,FVector Point) const;
     FVector SpreaderVelocity() const;
     FSTSOperatingProfile STSProfile;
@@ -68,6 +75,7 @@ private:
     FVector AxisVelocity=FVector::ZeroVector;
     FVector WindVelocityMetersPerSecond=FVector::ZeroVector;
     double SimulationTime=0, NextSample=0, JobSeconds=0, PausedSeconds=0;
+    double AGVAlignmentWait=0;
     bool CornerLocked[4]={false,false,false,false};
     bool bSensorFault=false;
     int32 LockFault=INDEX_NONE;
@@ -81,6 +89,13 @@ private:
     UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> Bogies;
     UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> CrossBeams;
     UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> Ropes;
+    UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> TelescopeArms;
+    UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> SpreaderEndBeams;
+    UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> TwistLocks;
+    UPROPERTY() TObjectPtr<UStaticMeshComponent> SpreaderCenter;
+    UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> SpreaderSensorInstances;
+    TArray<int32> SpreaderSensorMountIndices;
+    TArray<FVector> SpreaderSensorConfiguredPositions;
     UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> Pads;
     UPROPERTY() TObjectPtr<UStaticMeshComponent> Trolley;
     UPROPERTY() TObjectPtr<UStaticMeshComponent> Spreader;
@@ -95,6 +110,8 @@ private:
     float BeamZ=2300.f;
     float SafeZ=1900.f;
     float Speed=0.f;
+    float TelescopeLengthCm=1219.2f;
+    float TelescopeTargetLengthCm=1219.2f;
     float SettleTime=0.f;
     float StageTime=0.f;
     int32 SourceSlot=0;

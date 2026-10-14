@@ -27,7 +27,8 @@ struct FSiteShipCargo
 {
     FTransform Transform;
     TWeakObjectPtr<APortContainerActor> Actor;
-    int32 STS=0, ID=0, State=0; // same actor: 0 aboard, 1 transfer, 2 yard
+    int32 Wave=0;
+    int32 STS=0, ID=0, State=0, PlannedSlot=INDEX_NONE; // same actor: 0 aboard, 1 transfer, 2 yard
     uint8 HandoverMask=0; // STS->AGV, AGV->RMG, RMG->yard
     double StartedAt=0, PreparedPausedSeconds=0;
 };
@@ -40,7 +41,12 @@ struct FSiteTransfer
     int32 LastStage=-1;
     TWeakObjectPtr<APortContainerActor> Actor;
     TArray<FVector> Route;
-    bool bYardReleased=false;
+    bool bYardReleased=false, bRMGReserved=false, bParkingDeparture=false;
+    double TrafficWaitSeconds=0, YardWaitSeconds=0, LastRerouteAt=-10;
+    int32 Reroutes=0;
+    int32 ReturnSTS=INDEX_NONE, ReturnCargo=INDEX_NONE;
+    int32 YardEntryWaypoint=INDEX_NONE;
+    int32 ReturnCorridor=INDEX_NONE, QuayClearWaypoint=INDEX_NONE;
 };
 
 /** One manifest, conserved cargo IDs and reserved yard slots across STS -> AGV -> RMG. */
@@ -51,7 +57,9 @@ class PORTSIM_API APortSiteLogistics : public AActor
 public:
     APortSiteLogistics();
     void SetSTSProfile(const FSTSOperatingProfile& Profile) { STSProfile=Profile; }
-    void AddShipCargo(FVector Position,int32 STS);
+    void AddShipCargo(FVector Position,int32 STS,int32 Wave=0);
+    int32 ConfiguredShips=3;
+    int32 ConfiguredCargo[3]={200,200,200};
     void Initialize(const TArray<TObjectPtr<APortWorkingCrane>>& Cranes,TArray<FSiteYardSlot> Slots,
         const TArray<UHierarchicalInstancedStaticMeshComponent*>& Palette,int32 CentralCargo,int32 FixedYard);
     FVector CentralSlot(int32 Index) const;
@@ -77,6 +85,8 @@ public:
     TArray<FVector> Snapshot() const;
     int32 InitialShipCount() const { return Manifest.Num()+CentralCount; }
     bool UsesCargoAlignedHandover() const { return bCargoAlignedHandover; }
+    int32 ReturnCorridorUse(int32 Corridor) const
+    { return Corridor>=0 && Corridor<3?ReturnRouteCounts[Corridor]:0; }
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 BaselineYard=0;
@@ -115,18 +125,26 @@ private:
     TArray<FSiteTransfer> Jobs;
     TArray<bool> BlocksBusy;
     TArray<bool> RMGBusy;
+    TArray<int32> YardApproachOwners; // One inbound/waiting AGV per RMG (legacy eight-STS mode: per block).
     TArray<int32> PreparedCargo;
     TArray<int32> STSOwners;
     TArray<int32> NextVehicles;
     TArray<bool> PreparedStarted;
     TMap<int32,TArray<FBox>> RoadReservations;
+    TMap<int32,int32> RoadReservationEndWaypoint;
+    TMap<int32,FVector> TrafficRecoveryTargets;
+    TMap<int32,bool> TrafficRecoveryOriginalReverse;
+    double LastTrafficRecoveryAt=-100;
     TMap<int32,FVector> RoadTargets;
     TMap<int32,int32> RoadBlockers;
+    TMap<int32,double> RoadWaitSince;
+    double TrafficClock=0, LastCycleRecoveryAt=-10;
     float NoProgressTime=0;
     int32 LastProgressDelivered=0;
     TSet<int32> FinishedRoadSegments;
     TArray<bool> SlotAssigned;
-    int32 CentralCount=0, Dispatched=0, LaneCount=8, YardCraneCount=36;
+    int32 CentralCount=0, Dispatched=0, LaneCount=8, YardCraneCount=46;
+    int32 ReturnRouteCounts[3]={0,0,0};
     bool bReady=false, bWasPaused=false;
     bool bCargoAlignedHandover=true;
     FVector WindVelocityMetersPerSecond=FVector::ZeroVector;
@@ -137,9 +155,18 @@ private:
     void Dispatch(int32 Lane);
     void ScheduleFleet();
     void ActivateVehicle(int32 Vehicle,int32 STS,bool FromQueue);
+    void AssignReturnSTS(int32 Vehicle);
     void PrepareNextCargo(int32 Lane);
+    bool ReserveYardApproach(int32 Lane);
+    bool YardApproachAvailable(int32 Cargo) const;
+    void AdvanceStep(float Dt,bool Paused);
+    void RecoverTrafficCycle();
+    double PendingSimulationSeconds=0;
+    int32 YardApproachKey(const FSiteYardSlot& Slot) const { return LaneCount==9?Slot.Crane:Slot.Block; }
     bool ReserveYard(int32 Lane);
+    bool PlanYardDestinations();
     void PrepareRoute(int32 Lane,bool Return);
+    bool PlanRoadRoute(int32 Lane,bool Congested);
     bool Drive(int32 Lane,float Dt);
     void Freeze(bool Paused);
     void Stop(const FString& Reason);
