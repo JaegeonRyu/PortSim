@@ -37,7 +37,20 @@ void AQuayCrane::BeginPickupTest()
     {
         Vehicle=GetWorld()->SpawnActor<APortAGVActor>(Source-FVector(0,0,349.5),FRotator::ZeroRotator,Spawn);
         Vehicle->InitializeVehicle(9000);AGVActors.Add(Vehicle);
+        // Reproduce a real ship -> AGV handover with the reported stale vessel samples.
+        Box->SetSecuredVesselMotion(Box->GetActorLocation(),Box->GetActorQuat(),
+            FVector(5.41,-2.30,8.99),FVector(-.39,.19,-3.13),FVector(-.94,.58,.56));
         Box->AttachToComponent(Vehicle->GetRootComponent(),FAttachmentTransformRules::KeepWorldTransform);Box->LocationOwner=ECargoOwner::AGV;
+        if(!Box->GetMotionVelocity().IsNearlyZero() || !Box->GetMotionAcceleration().IsNearlyZero() ||
+            !Box->GetMotionJerk().IsNearlyZero())
+        {UE_LOG(LogTemp,Error,TEXT("PORTSIM_PICKUP_FAIL: stopped AGV inherited vessel motion"));FPlatformMisc::RequestExitWithStatus(false,1);return;}
+        Vehicle->Speed=100;
+        if(!Box->GetMotionVelocity().Equals(Vehicle->GetActorRightVector()*100,.01))
+        {UE_LOG(LogTemp,Error,TEXT("PORTSIM_PICKUP_FAIL: cargo did not follow AGV velocity"));FPlatformMisc::RequestExitWithStatus(false,1);return;}
+        Vehicle->Sensors.bReversing=true;
+        if(!Box->GetMotionVelocity().Equals(-Vehicle->GetActorRightVector()*100,.01))
+        {UE_LOG(LogTemp,Error,TEXT("PORTSIM_PICKUP_FAIL: cargo did not follow reversing AGV"));FPlatformMisc::RequestExitWithStatus(false,1);return;}
+        Vehicle->Speed=0;Vehicle->Sensors.bReversing=false;
         if(PickupTestCase==TEXT("agv"))Vehicle->Speed=100;
         if(PickupTestCase==TEXT("collision"))
         {
