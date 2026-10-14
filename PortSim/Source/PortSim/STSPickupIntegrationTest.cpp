@@ -19,11 +19,12 @@ void AQuayCrane::BeginPickupTest()
     if(RMG && !Profile.LoadRMG(FPaths::ProjectConfigDir()/TEXT("RMG_Simulation.json")))
     {UE_LOG(LogTemp,Error,TEXT("PORTSIM_PICKUP_FAIL: %s"),*Profile.Error);FPlatformMisc::RequestExitWithStatus(false,1);return;}
     if(PickupTestCase==TEXT("bias"))Profile.Pickup.PoseBias.X=15;
-    const FVector Home(500000,0,0), Source=Home+(RMG?FVector(-1000,0,349.5):FVector(-1600,0,1700)), Destination=Home+(RMG?FVector(1000,2200,149.5):FVector(3000,0,149.5));
+    const FVector Home(500000,0,0), Source=Home+(RMG?FVector(-1000,0,349.5):FVector(-1600,0,PickupTestCase==TEXT("wave")?803.15:1700)), Destination=Home+(RMG?FVector(1000,2200,149.5):FVector(3000,0,149.5));
     FActorSpawnParameters Spawn;Spawn.Owner=this;Spawn.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
     PickupTestCrane=GetWorld()->SpawnActor<APortWorkingCrane>(Home,FRotator::ZeroRotator,Spawn);
     WorkingCranes.Add(PickupTestCrane);PickupTestCrane->SetSTSProfile(Profile);
     PickupTestCrane->Configure(1,!RMG,Source,Destination,false);
+    if(PickupTestCase==TEXT("wave")) PickupTestCrane->SetWindVelocity(FVector(3.5,0,0));
     const FRotator Rotation(0,PickupTestCase==TEXT("yaw")?1.5:0,0);
     auto* Box=GetWorld()->SpawnActor<APortContainerActor>(Source+FVector(30,-20,0),Rotation,Spawn);
     Box->InitializeContainer(9000);ContainerActors.Add(Box);
@@ -57,6 +58,19 @@ void AQuayCrane::TickPickupTest(float Dt)
     {UE_LOG(LogTemp,Error,TEXT("PORTSIM_PICKUP_FAIL: invalid frame interval"));FPlatformMisc::RequestExitWithStatus(false,1);return;}
     if(PickupTestSeconds==0)UE_LOG(LogTemp,Display,TEXT("PICKUP_TEST_STEP: %.6f simulation seconds per render frame"),Dt);
     PickupTestSeconds+=Dt;auto* C=PickupTestCrane.Get();
+    if(PickupTestCase==TEXT("wave") && !C->bCarrying && C->Stage<=2)
+    {
+        // Analytic vessel translation: heave reversals plus horizontal surge.
+        // Keep the real contact, dwell, lock and trial-lift checks enabled.
+        const double W=2.*PI/7., T=PickupTestSeconds;
+        const FVector Amplitude(4,2,8);
+        const FVector Position=FVector(498430,-20,803.15)+Amplitude*FMath::Sin(W*T);
+        auto* WaveCargo=C->CargoActor.Get();
+        WaveCargo->SetSecuredVesselMotion(Position,FRotator(0,0,.235*FMath::Sin(W*T)).Quaternion(),
+            Amplitude*(W*FMath::Cos(W*T)),Amplitude*(-W*W*FMath::Sin(W*T)),
+            Amplitude*(-W*W*W*FMath::Cos(W*T)),Dt);
+        C->UpdateMovingShipSource(WaveCargo,Position);
+    }
     const bool WasAttached=C->bCarrying;
     C->Advance(Dt,false);
     auto Finish=[&](bool Pass,const FString& Why)
@@ -65,7 +79,7 @@ void AQuayCrane::TickPickupTest(float Dt)
         FPlatformMisc::RequestExitWithStatus(false,Pass?0:1);
     };
     const bool RMG=!C->bSTS;
-    const bool Negative=PickupTestCase!=TEXT("offset")&&PickupTestCase!=TEXT("eccentric");
+    const bool Negative=PickupTestCase!=TEXT("offset")&&PickupTestCase!=TEXT("eccentric")&&PickupTestCase!=TEXT("wave");
     // Attachment's instantaneous position is checked in the runtime. The cargo
     // may legitimately move during later control steps of the same render frame.
     if(!WasAttached&&C->bCarrying && !C->Observation.AllLocked())
