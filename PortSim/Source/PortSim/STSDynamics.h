@@ -20,15 +20,22 @@ struct FSTSSensorMount
 struct FSTSDynamicsConfig
 {
     bool AntiSway=true,AntiSkew=true;
-    double Damping=0,SwayGain=0,PositionGain=0,VelocityGain=0,SkewKp=0,SkewKd=0,SkewMaxTorque=0;
+    double Damping=0,PositionGain=0,VelocityGain=0,SwayGain=0,SkewKp=0,SkewKd=0,SkewMaxTorque=0;
     double DrumRadius=0,GearRatio=0,Efficiency=0,Parts=0,MotorCount=0,MotorMaxTorque=0,MotorMaxRPM=0,MotorInertia=0;
     double RopeEA=0,RopeLimit=0,SkewLimit=0;
     FVector Wind=FVector::ZeroVector;
     double WindArea=0,WindDrag=0,WindMoment=0;
     TArray<FSTSSensorMount> Mounts;
     bool Load(TSharedPtr<FJsonObject> Root,FString& Error);
-    double HorizontalAcceleration(double ErrorM,double VelocityMps,double LengthM,double AngularRate) const
-    { return PositionGain*ErrorM-VelocityGain*VelocityMps+(AntiSway?SwayGain*LengthM*AngularRate:0); }
+    FVector AerodynamicForce(FVector BodyVelocityMps) const;
+    FVector WindEquilibriumOffset(double LengthM,double MassKg) const;
+    double HorizontalAcceleration(double ErrorM,double VelocityMps,double LengthM,double AngularRate,
+        double AngularDisplacement=0,double EquilibriumAngle=0,double PositionGainScale=1) const
+    {
+        const double SwayFeedback=SwayGain*LengthM*AngularRate+
+            FMath::Square(SwayGain)*LengthM*(AngularDisplacement-EquilibriumAngle);
+        return PositionGain*PositionGainScale*ErrorM-VelocityGain*VelocityMps+(AntiSway?SwayFeedback:0);
+    }
 };
 
 /** Two sway coordinates + yaw. Roll/pitch constrained; no elastic/slack-rope FEM. */

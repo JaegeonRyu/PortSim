@@ -21,7 +21,10 @@ void AQuayCrane::TickSiteOperations(float Dt)
     if (Testing) SiteLogistics->DispatchLimit=Full?SiteLogistics->InitialShipCount():SiteLogistics->Vehicles.Num()*2;
     const bool FirstWave=FParse::Param(FCommandLine::Get(),TEXT("PortSimFirstWaveTest"));
     const bool CarLike=FParse::Param(FCommandLine::Get(),TEXT("PortSimCarLikeTest"));
-    if (FirstWave) SiteLogistics->DispatchLimit=9;
+    int32 WaveShipmentCount=9;
+    FParse::Value(FCommandLine::Get(),TEXT("PortSimWaveShipmentCount="),WaveShipmentCount);
+    WaveShipmentCount=FMath::Clamp(WaveShipmentCount,1,SiteLogistics->InitialShipCount());
+    if (FirstWave) SiteLogistics->DispatchLimit=WaveShipmentCount;
     else if (CarLike) SiteLogistics->DispatchLimit=1;
     SiteLogistics->Advance(Dt,bAutoPaused || bEmergencyStop || (bUnifiedTerminal && !bAutoRunning));
     if (FirstWave || CarLike)
@@ -41,7 +44,7 @@ void AQuayCrane::TickSiteOperations(float Dt)
                 SiteLogistics->LoadedVehicle()->VehicleID,SiteTestTime,Dt);
             FPlatformMisc::RequestExitWithStatus(false,0);
         }
-        else if (SiteLogistics->Delivered==9)
+        else if (SiteLogistics->Delivered==WaveShipmentCount)
         {
             if (!SiteLogistics->ReturnCorridorUse(1) || !SiteLogistics->ReturnCorridorUse(2))
             {
@@ -51,8 +54,8 @@ void AQuayCrane::TickSiteOperations(float Dt)
                 return;
             }
             SiteLogistics->ExportDashboard(false,true);
-            UE_LOG(LogTemp,Display,TEXT("PORTSIM_FIRST_WAVE_PASS: policy=%s delivered=9 simulation_seconds=%.6f step=%.6f return_routes=%d/%d/%d"),
-                SiteLogistics->UsesCargoAlignedHandover()?TEXT("cargo_aligned"):TEXT("fixed"),SiteTestTime,Dt,
+            UE_LOG(LogTemp,Display,TEXT("PORTSIM_FIRST_WAVE_PASS: policy=%s delivered=%d simulation_seconds=%.6f step=%.6f return_routes=%d/%d/%d"),
+                SiteLogistics->UsesCargoAlignedHandover()?TEXT("cargo_aligned"):TEXT("fixed"),WaveShipmentCount,SiteTestTime,Dt,
                 SiteLogistics->ReturnCorridorUse(0),SiteLogistics->ReturnCorridorUse(1),SiteLogistics->ReturnCorridorUse(2));
             FPlatformMisc::RequestExitWithStatus(false,0);
         }

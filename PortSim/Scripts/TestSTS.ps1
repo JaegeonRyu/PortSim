@@ -23,6 +23,7 @@ foreach ($case in $cases) {
         $arguments += @('/Engine/Maps/Entry','-game','-benchmark','-fps=20')
         if ($case -eq 'Smoke') { $arguments += '-PortSimSmokeTest'; $passPattern = 'PORTSIM_SMOKE_PASS:' }
         else { $arguments += '-PortSimTerminalTest'; $passPattern = 'PORTSIM_TERMINAL_PASS:' }
+        if ($case -eq 'Terminal') { $arguments += '-PortSimEnvironmentSeed=20261006' }
         if ($case -eq 'FleetReset') { $arguments += '-PortSimFleetResetTest' }
         if ($case -eq 'SensorFault') { $arguments += '-PortSimSTSSensorFault'; $expectedFailure = 'Required STS sensor observation invalid/stale' }
         if ($case -eq 'LockFault') { $arguments += '-PortSimSTSLockFault=0'; $expectedFailure = 'Twist lock alignment failed' }
@@ -80,7 +81,7 @@ foreach ($case in $cases) {
             }
             $base = [IO.Path]::Combine($report.DirectoryName, $report.BaseName)
             $snapshot = Get-Content -LiteralPath ($base + '_profile.json') -Raw | ConvertFrom-Json
-            if ($snapshot.reference.geometry.rail_gauge.value -ne 30.48 -or $snapshot.simulation_assumptions.kind -ne 'simulation_assumptions_not_manufacturer_data') {
+            if ($snapshot.reference.geometry.rail_gauge.value -ne 30.48 -or $snapshot.simulation_assumptions.kind -ne 'mixed_manufacturer_sensor_specs_and_simulation_assumptions') {
                 throw "Missing applied reference/assumption snapshot: $($report.Name)"
             }
             Write-Output "TIMING $($rows[0].Direction): 24 jobs, final placement $($rows[-1].FinalPlacementAtSeconds) simulation seconds"

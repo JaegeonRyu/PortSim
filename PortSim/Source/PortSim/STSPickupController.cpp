@@ -11,10 +11,12 @@ bool FSTSPickupConfig::Load(TSharedPtr<FJsonObject> Root,FString& Error)
     {double X=0;if(!O->TryGetNumberField(Key,X)||!FMath::IsFinite(X)||X<=0){Error=FString(TEXT("Invalid pickup setting: "))+Key;return false;} V=X*Scale;return true;};
     double Count=0;
     if(!N(TEXT("corner_tolerance_m"),CornerTolerance,100)||!N(TEXT("vertical_tolerance_m"),VerticalTolerance,100)||
-        !N(TEXT("relative_speed_mps"),RelativeSpeed,100)||!N(TEXT("yaw_tolerance_deg"),YawTolerance)||!N(TEXT("tilt_tolerance_deg"),TiltTolerance)||
+        !N(TEXT("relative_speed_mps"),RelativeSpeed,100)||!N(TEXT("horizontal_relative_speed_mps"),HorizontalRelativeSpeed,100)||
+        !N(TEXT("yaw_tolerance_deg"),YawTolerance)||!N(TEXT("tilt_tolerance_deg"),TiltTolerance)||
         !N(TEXT("seat_time_s"),SeatTime)||!N(TEXT("lock_time_s"),LockTime)||!N(TEXT("lock_timeout_s"),LockTimeout)||
         !N(TEXT("alignment_timeout_s"),AlignmentTimeout)||!N(TEXT("acquisition_radius_m"),AcquisitionRadius,100)||
-        !N(TEXT("trial_height_m"),TrialHeight,100)||!N(TEXT("trial_hold_s"),TrialHold)||!N(TEXT("trial_timeout_s"),TrialTimeout)||
+        !N(TEXT("trial_height_m"),TrialHeight,100)||!N(TEXT("trial_horizontal_tolerance_m"),TrialHorizontalTolerance,100)||
+        !N(TEXT("trial_hold_s"),TrialHold)||!N(TEXT("trial_timeout_s"),TrialTimeout)||
         !N(TEXT("minimum_corner_fraction"),MinimumCornerFraction)||!N(TEXT("mass_stability_fraction"),MassStability)||!N(TEXT("max_attempts"),Count))return false;
     for(int32 I=0;I<3;++I)
     {
@@ -22,13 +24,19 @@ bool FSTSPickupConfig::Load(TSharedPtr<FJsonObject> Root,FString& Error)
         double X=0;if(!O->TryGetNumberField(Key,X)||!FMath::IsFinite(X)||FMath::Abs(X)>1){Error=TEXT("Invalid pickup pose bias");return false;}PoseBias[I]=X*100;
     }
     if(Count!=FMath::FloorToDouble(Count)||Count>5||LockTimeout<=LockTime||CornerTolerance>10||VerticalTolerance>10||
-        TrialHeight<20||TrialHeight>100||MinimumCornerFraction>=.25||MassStability>=.5||YawTolerance>2||TiltTolerance>2||AcquisitionRadius>200)
+        TrialHeight<20||TrialHeight>100||TrialHorizontalTolerance<CornerTolerance||TrialHorizontalTolerance>AcquisitionRadius||
+        MinimumCornerFraction>=.25||MassStability>=.5||YawTolerance>2||TiltTolerance>2||AcquisitionRadius>200||
+        HorizontalRelativeSpeed<RelativeSpeed||HorizontalRelativeSpeed>20)
     {Error=TEXT("Inconsistent pickup assumptions");return false;}
     MaxAttempts=int32(Count);return true;
 }
 
 void FSTSPickupController::Enter(ESTSPickupPhase Next,const TCHAR* Why)
-{Phase=Next;StableTime=PhaseTime=0;Reason=Why;}
+{
+    Phase=Next;StableTime=PhaseTime=0;Reason=Why;
+    if(Next==ESTSPickupPhase::Seat)++SeatEntries;
+    else if(Next==ESTSPickupPhase::Lock)++LockEntries;
+}
 void FSTSPickupController::Fail(const TCHAR* Why)
 {Fault=Why;Enter(ESTSPickupPhase::Failed,Why);}
 const TCHAR* FSTSPickupController::PhaseName() const
@@ -63,23 +71,41 @@ void FSTSPickupController::Update(const FSTSPickupConfig& C,const FSTSObservatio
             for(bool& R:RequestLocks)R=false;
             Enter(ESTSPickupPhase::Align,TEXT("Reacquiring target; alignment retry"));
         }
-        Target=O.bTargetVisible?O.CargoPosition+FVector(0,0,154.5):O.SpreaderPosition;
+        // A large wave-induced sway can move the spreader outside the camera
+        // cone before the first pose acquisition. Return to the reserved
+        // manifest position to reacquire instead of freezing wherever sight
+        // was lost. Fine seating still requires live target visibility below.
+        Target=(O.bTargetVisible?O.CargoPosition:NominalCargo)+FVector(0,0,154.5);
         if(O.bTargetVisible&&FVector::Dist(O.CargoPosition,NominalCargo)>C.AcquisitionRadius)
         {Fail(TEXT("Pickup target outside acquisition window"));return;}
         bool Seated=O.bTargetVisible&&FMath::Abs(O.RelativeYawDegrees)<=C.YawTolerance&&O.TargetTiltDegrees<=C.TiltTolerance&&
-            (O.SpreaderVelocity-O.CargoVelocity).Size()<=C.RelativeSpeed;
+            C.PickupSpeedWithin(O.SpreaderVelocity-O.CargoVelocity);
         for(int32 I=0;I<4;++I)Seated &= O.CornerSeated[I]&&O.CornerError[I].Size2D()<=C.CornerTolerance&&FMath::Abs(O.CornerError[I].Z)<=C.VerticalTolerance;
         if(Phase==ESTSPickupPhase::Align)
         {
-            Reason=O.bTargetVisible?TEXT("Correcting measured relative position and velocity"):TEXT("Target pose unavailable; holding position");
-            if(Seated)Enter(ESTSPickupPhase::Seat,TEXT("Verify four independent seating contacts"));
+            Reason=O.bTargetVisible?TEXT("Correcting measured relative position and velocity"):TEXT("Target pose unavailable; returning to nominal acquisition pose");
+            if(Seated)
+            {
+                // Start the independent twist-lock actuators as soon as all
+                // four seating contacts are present. Their configured dwell
+                // runs inside the longer seating-verification window instead
+                // of requiring an additional uninterrupted wave window.
+                for(int32 I=0;I<4;++I)RequestLocks[I]=O.CornerSeated[I];
+                Enter(ESTSPickupPhase::Seat,TEXT("Verify four contacts while lock actuators engage"));
+            }
 
         }
         else if(Phase==ESTSPickupPhase::Seat)
         {
-            if(!Seated){Enter(ESTSPickupPhase::Align,TEXT("Seating lost; correct alignment"));return;}
+            if(!Seated)
+            {
+                for(bool& R:RequestLocks)R=false;
+                Enter(ESTSPickupPhase::Align,TEXT("Seating lost; cancel locks and correct alignment"));return;
+            }
+            for(int32 I=0;I<4;++I)RequestLocks[I]=O.CornerSeated[I];
             StableTime+=SampleDt;
-            if(StableTime>=C.SeatTime)Enter(ESTSPickupPhase::Lock,TEXT("Command four locks; await individual feedback"));
+            MaximumSeatStableTime=FMath::Max(MaximumSeatStableTime,StableTime);
+            if(StableTime>=C.SeatTime)Enter(ESTSPickupPhase::Lock,TEXT("Seating verified; await four lock feedback signals"));
         }
         else if(Phase==ESTSPickupPhase::Lock)
         {
@@ -97,7 +123,13 @@ void FSTSPickupController::Update(const FSTSPickupConfig& C,const FSTSObservatio
     const double EffectiveG=9.80665+O.HoistAcceleration*.01;
     const double Mass=EffectiveG>1?Sum/EffectiveG:0;
     if(Mass>Capacity){Fail(TEXT("Measured pickup load exceeds rated capacity"));return;}
-    const bool Stationary=O.SpreaderPosition.Equals(Target,1.)&&O.SpreaderVelocity.Size()<=C.RelativeSpeed;
+    const FVector PositionError=O.SpreaderPosition-Target;
+    // A suspended trial load settles at a small horizontal wind-equilibrium
+    // offset. Twist-lock seating tolerances no longer apply after attachment;
+    // keep the vertical lift and velocity checks strict, while bounding the
+    // horizontal station-keeping error with its own explicit assumption.
+    const bool Stationary=PositionError.Size2D()<=C.TrialHorizontalTolerance&&
+        FMath::Abs(PositionError.Z)<=C.VerticalTolerance&&O.SpreaderVelocity.Size()<=C.RelativeSpeed;
     if(Phase==ESTSPickupPhase::TrialLift)
     {
         if(Stationary&&!O.bCargoSupported)Enter(ESTSPickupPhase::TrialHold,TEXT("Verify suspended load distribution before full hoist"));

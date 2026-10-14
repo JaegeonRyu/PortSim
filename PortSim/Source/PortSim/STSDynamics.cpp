@@ -9,8 +9,9 @@ bool FSTSDynamicsConfig::Load(TSharedPtr<FJsonObject> Root,FString& Error)
     auto N=[&](const TCHAR* Key,double& V,bool Zero=false)
     { if(!O->TryGetNumberField(Key,V) || !FMath::IsFinite(V) || V<0 || (!Zero && V==0)) {Error=FString(TEXT("Invalid dynamics field: "))+Key;return false;} return true; };
     if(!O->TryGetBoolField(TEXT("anti_sway"),AntiSway) || !O->TryGetBoolField(TEXT("anti_skew"),AntiSkew) ||
-        !N(TEXT("passive_damping_per_s"),Damping,true) || !N(TEXT("anti_sway_velocity_gain"),SwayGain) ||
+        !N(TEXT("passive_damping_per_s"),Damping,true) ||
         !N(TEXT("horizontal_position_gain_per_s2"),PositionGain) || !N(TEXT("horizontal_velocity_gain_per_s"),VelocityGain) ||
+        !N(TEXT("anti_sway_velocity_gain"),SwayGain) ||
         !N(TEXT("skew_kp_nm_per_rad"),SkewKp) || !N(TEXT("skew_kd_nms_per_rad"),SkewKd) || !N(TEXT("skew_max_torque_nm"),SkewMaxTorque) ||
         !N(TEXT("drum_radius_m"),DrumRadius) || !N(TEXT("gear_ratio"),GearRatio) || !N(TEXT("efficiency"),Efficiency) ||
         !N(TEXT("reeving_parts_per_corner"),Parts) || !N(TEXT("motor_count"),MotorCount) || !N(TEXT("motor_max_torque_nm"),MotorMaxTorque) ||
@@ -20,7 +21,7 @@ bool FSTSDynamicsConfig::Load(TSharedPtr<FJsonObject> Root,FString& Error)
     if(!O->TryGetNumberField(TEXT("wind_x_mps"),Wind.X) || !O->TryGetNumberField(TEXT("wind_y_mps"),Wind.Y) ||
         !O->TryGetNumberField(TEXT("wind_yaw_moment_nm"),WindMoment) || Wind.ContainsNaN() || !FMath::IsFinite(WindMoment) ||
         Efficiency>1 || Parts!=FMath::FloorToDouble(Parts) || MotorCount!=2 || SkewLimit>=10 || GearRatio>1000 || DrumRadius>10 ||
-        Damping>10 || PositionGain>2 || VelocityGain>5 || Wind.Size()>50)
+        Damping>10 || PositionGain>10 || VelocityGain>10 || Wind.Size()>50)
     { Error=TEXT("Inconsistent dynamics assumptions"); return false; }
     const TArray<TSharedPtr<FJsonValue>>* Sensors=nullptr;
     if(!Root->TryGetArrayField(TEXT("sensor_mounts"),Sensors) || Sensors->Num()<1 || Sensors->Num()>32) {Error=TEXT("Expected 1 to 32 sensor mounts");return false;}
@@ -66,12 +67,26 @@ bool FSTSDynamicsConfig::Load(TSharedPtr<FJsonObject> Root,FString& Error)
     return true;
 }
 
+FVector FSTSDynamicsConfig::AerodynamicForce(FVector BodyVelocityMps) const
+{
+    const FVector RelativeWind=Wind-BodyVelocityMps;
+    return .5*1.225*WindDrag*WindArea*RelativeWind.Size()*RelativeWind;
+}
+
+FVector FSTSDynamicsConfig::WindEquilibriumOffset(double LengthM,double MassKg) const
+{
+    if(LengthM<=0 || MassKg<=0) return FVector::ZeroVector;
+    FVector Acceleration=AerodynamicForce(FVector::ZeroVector)/MassKg;
+    Acceleration.Z=0;
+    constexpr double G=9.80665;
+    return Acceleration*LengthM/FMath::Sqrt(G*G+Acceleration.SizeSquared());
+}
+
 void FSTSSuspension::Step(const FSTSDynamicsConfig& C,double Dt,double L,double Ldot,FVector A,FVector V,double M,FVector CoG,double PowerW)
 {
     if(Dt<=0 || M<=0 || L<.1) return;
     constexpr double G=9.80665;
-    const FVector WindRelative=C.Wind-V;
-    const FVector WindForce=.5*1.225*C.WindDrag*C.WindArea*WindRelative.Size()*WindRelative;
+    const FVector WindForce=C.AerodynamicForce(V);
     const FVector OldOffset=Offset;
     for(double Remaining=Dt;Remaining>1.e-9;)
     {

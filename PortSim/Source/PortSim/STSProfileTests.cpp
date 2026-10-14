@@ -27,6 +27,11 @@ bool FSTSProfileTest::RunTest(const FString& Parameters)
     TestFalse(TEXT("Lift envelope rejects high target"),P.ContainsTarget(FVector(0,0,P.LiftAboveRail+1)));
     TestEqual(TEXT("Sensor reference retained"),P.SensorKeys.Num(),14);
     TestTrue(TEXT("Loaded interpolation at 45 LT"),FMath::IsNearlyEqual(P.HoistLimit(45*P.LoadUnitKg,true),64.5f*100/60,0.02f));
+    TestEqual(TEXT("Precision position tolerance converted to cm"),P.PrecisionPositionTolerance,2.f);
+    TestEqual(TEXT("Precision velocity tolerance converted to cm/s"),P.PrecisionVelocityTolerance,3.f);
+    TestEqual(TEXT("Horizontal position gain loaded from assumptions"),P.Dynamics.PositionGain,.03);
+    TestEqual(TEXT("Horizontal velocity gain loaded from assumptions"),P.Dynamics.VelocityGain,.3);
+    TestEqual(TEXT("Anti-sway velocity gain loaded from assumptions"),P.Dynamics.SwayGain,.3);
 
     FSTSObservation S;
     TestFalse(TEXT("Default sample is invalid"),S.IsFresh(0,1));
@@ -51,6 +56,8 @@ bool FSTSProfileTest::RunTest(const FString& Parameters)
     TestFalse(TEXT("Zero sample frequency rejected"),P.Load(Ref,Bad));
     Write(SettingsText.Replace(TEXT("\"sensor_max_age_s\": 0.15"),TEXT("\"sensor_max_age_s\": 0.001")));
     TestFalse(TEXT("Inconsistent timing rejected"),P.Load(Ref,Bad));
+    Write(SettingsText.Replace(TEXT("\"horizontal_position_gain_per_s2\": 0.03"),TEXT("\"horizontal_position_gain_per_s2\": 0")));
+    TestFalse(TEXT("Zero horizontal position gain rejected"),P.Load(Ref,Bad));
     Write(RefText.Replace(TEXT("\"key\": \"landed\""),TEXT("\"key\": \"missing_landed\"")));
     TestFalse(TEXT("Missing required sensor rejects automation profile"),P.Load(Bad,Settings));
     TestFalse(TEXT("Missing file rejects profile"),P.Load(Dir/TEXT("missing.json"),Settings));

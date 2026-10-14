@@ -25,6 +25,7 @@ struct FSTSOperatingProfile
     FVector ContainerCoG = FVector::ZeroVector;
     float SensorPeriod = 0, SensorMaxAge = 0, PositionBias = 0, MassBiasKg = 0;
     float LandingTolerance = 0, SeatingTolerance = 0, SettleSpeed = 0, SettleTime = 0;
+    float PrecisionPositionTolerance = 0, PrecisionVelocityTolerance = 0;
     float AGVTolerance = 0, AGVHeadingTolerance = 0, SupportTolerance = 0;
     float ApproachSpeed = 0, ApproachDistance = 0, StageTimeout = 0, SwayLimitDegrees = 0;
     bool bAutoStart = true;
@@ -48,8 +49,10 @@ struct FSTSObservation
     double Timestamp = -1;
     FVector DrivePosition = FVector::ZeroVector; // trolley, gantry, suspended length
     FVector DriveVelocity = FVector::ZeroVector;
+    FVector WindVelocityMetersPerSecond = FVector::ZeroVector;
     FVector SpreaderPosition = FVector::ZeroVector, SpreaderVelocity = FVector::ZeroVector;
     FVector CargoPosition = FVector::ZeroVector, CargoVelocity = FVector::ZeroVector;
+    FVector CargoAcceleration = FVector::ZeroVector, CargoJerk = FVector::ZeroVector;
     float SwayDegrees = 0;
     float CornerLoadsN[4] = {0,0,0,0}; // analytic virtual load cells including acceleration; not elastic contact reactions
     float CornerHalfWidthCm=100, CornerHalfLengthCm=520;
@@ -58,6 +61,7 @@ struct FSTSObservation
     bool bTargetVisible=false, CornerSeated[4]={false,false,false,false};
     FVector CornerError[4]={FVector::ZeroVector,FVector::ZeroVector,FVector::ZeroVector,FVector::ZeroVector};
     FVector2D SwayRate=FVector2D::ZeroVector;
+    FVector2D SwayAngle=FVector2D::ZeroVector;
     float RelativeYawDegrees=0, TargetTiltDegrees=0, SkewDegrees=0, HoistAcceleration=0;
     bool bStackProfileValid=false, bCraneClear=true;
     float StackTopZ=0, CraneDistance=-1;

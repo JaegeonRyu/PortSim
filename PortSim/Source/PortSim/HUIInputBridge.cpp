@@ -4,6 +4,7 @@
 #include "GameFramework/HUD.h"
 #include "GameFramework/PlayerController.h"
 #include "InputCoreTypes.h"
+#include "QuayCrane.h"
 
 namespace
 {
@@ -32,7 +33,9 @@ namespace
 
                 if (Controller->WasInputKeyJustPressed(EKeys::H))
                 {
-                    if (AHUD* HUD = Controller->GetHUD())
+                    // PortSim's Canvas HUD keeps its visibility button available;
+                    // its pawn owns bHUDVisible. Do not also toggle AHUD::bShowHUD.
+                    if (AHUD* HUD = Controller->GetHUD(); HUD && !Cast<APortSimHUD>(HUD))
                     {
                         HUD->bShowHUD = !HUD->bShowHUD;
                     }

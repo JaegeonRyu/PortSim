@@ -7,12 +7,14 @@ class FJsonObject;
 /** Simulation assumptions, not OEM twistlock or camera specifications. Units: cm, seconds, kg. */
 struct FSTSPickupConfig
 {
-    double CornerTolerance=2, VerticalTolerance=2, RelativeSpeed=3, YawTolerance=.25, TiltTolerance=.5;
+    double CornerTolerance=2, VerticalTolerance=2, RelativeSpeed=3, HorizontalRelativeSpeed=6, YawTolerance=.25, TiltTolerance=.5;
     double SeatTime=.7, LockTime=.3, LockTimeout=2, AlignmentTimeout=90, AcquisitionRadius=100;
-    double TrialHeight=30, TrialHold=1, TrialTimeout=60, MinimumCornerFraction=.03, MassStability=.02;
+    double TrialHeight=30, TrialHorizontalTolerance=10, TrialHold=1, TrialTimeout=60, MinimumCornerFraction=.03, MassStability=.02;
     int32 MaxAttempts=2;
     FVector PoseBias=FVector::ZeroVector;
     bool Load(TSharedPtr<FJsonObject> Root,FString& Error);
+    bool PickupSpeedWithin(const FVector& RelativeVelocity) const
+    { return RelativeVelocity.Size2D()<=HorizontalRelativeSpeed && FMath::Abs(RelativeVelocity.Z)<=RelativeSpeed; }
 };
 
 enum class ESTSPickupPhase : uint8 { Align, Seat, Lock, Attach, TrialLift, TrialHold, Complete, Failed };
@@ -23,7 +25,8 @@ struct FSTSPickupController
     ESTSPickupPhase Phase=ESTSPickupPhase::Align;
     FVector Target=FVector::ZeroVector, TrialOrigin=FVector::ZeroVector, EstimatedCoG=FVector::ZeroVector;
     double EstimatedMass=0, StableTime=0, PhaseTime=0, LastSample=-1, AlignmentTime=0;
-    int32 Attempts=1;
+    double MaximumSeatStableTime=0;
+    int32 Attempts=1, SeatEntries=0, LockEntries=0;
     bool RequestLocks[4]={false,false,false,false};
     bool EstimateValid=false;
     FString Reason=TEXT("Acquiring target pose"), Fault;

@@ -16,6 +16,8 @@ class USpringArmComponent;
 class UCameraComponent;
 class UPortSimTimeStep;
 class UEngineCustomTimeStep;
+class UPortEnvironmentComponent;
+struct FPortWindInputTestState;
 
 enum class ETerminalStage : uint8
 {
@@ -41,6 +43,9 @@ class PORTSIM_API AQuayCrane : public APawn
 
 public:
     AQuayCrane();
+
+    UFUNCTION(BlueprintPure, Category="Environment")
+    UPortEnvironmentComponent* GetEnvironment() const { return Environment; }
 
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaSeconds) override;
@@ -136,6 +141,11 @@ public:
     double ControlsTestTime=0;
 
 private:
+    UPROPERTY(VisibleAnywhere, Category="Environment") TObjectPtr<UPortEnvironmentComponent> Environment;
+#if WITH_DEV_AUTOMATION_TESTS
+    TSharedPtr<FPortWindInputTestState> WindInputTestState;
+    void TickWindInputTest(float Dt);
+#endif
     FSTSOperatingProfile STSProfile;
     FSTSObservation STSObservation;
     double STSSimulationTime = 0;
@@ -163,6 +173,9 @@ private:
     UPROPERTY(VisibleInstanceOnly, Category="Terminal|Actors") TArray<TObjectPtr<APortAGVActor>> AGVActors;
     UPROPERTY(VisibleInstanceOnly, Category="Terminal|Actors") TObjectPtr<APortWorkingCrane> RMGActor;
     UPROPERTY(VisibleInstanceOnly, Category="Terminal|Actors") TObjectPtr<APortShipActor> ShipActor;
+    UPROPERTY(VisibleInstanceOnly, Category="Terminal|Actors") TArray<TObjectPtr<APortShipActor>> VesselActors;
+    TArray<FTransform> VesselBaseTransforms;
+    TArray<FVector> VesselBasePivots;
     APortContainerActor* SpawnContainer(int32 Number, FVector Position);
     bool ValidateTerminalActors(FString& Error) const;
     void DestroyTerminalActors();
@@ -232,8 +245,10 @@ private:
     TArray<FVector> SiteTestPositions;
     UPROPERTY() TObjectPtr<AActor> SiteActor;
     void ResetTerminal();
+    void ApplySeaMotion();
     void ApplyAppearance();
     void UpdateRopes();
+    FVector TerminalShipSlotBase(int32 Index) const;
     FVector TerminalSlot(int32 Index, bool bShip) const;
     void TickAutomatic(float Dt);
     void BeginAutomaticJob();
@@ -340,4 +355,6 @@ public:
 private:
     int32 DragSlider=-2;
     void UpdateSlider(float MouseX);
+    void DrawWindCompass(const UPortEnvironmentComponent& Environment,float Scale);
+    void DrawSeaState(const UPortEnvironmentComponent& Environment,float Scale);
 };

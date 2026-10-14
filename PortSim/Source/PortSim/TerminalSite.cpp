@@ -270,10 +270,13 @@ void AQuayCrane::BuildTerminalSite()
     for (float Y:ShipPositions)
     {
         if(bUnifiedTerminal && VesselIndex>=ConfiguredShips) break;
-        Box(Roads,FVector(-32,Y,-1),FVector(45,bUnifiedTerminal?TerminalLayout::VesselLengthM:285.f,10));
-        Box(Blue,FVector(-32,Y,4.2),FVector(43,bUnifiedTerminal?TerminalLayout::VesselLengthM:285.f,.4));
-        Box(Roads,FVector(-32,Y+(bUnifiedTerminal?108.5f:146.f),-1),FVector(29,7,10));
-        Box(Buildings,FVector(-32,Y-(bUnifiedTerminal?91.f:125.f),14),FVector(38,18,20));
+        if(!bUnifiedTerminal)
+        {
+            Box(Roads,FVector(-32,Y,-1),FVector(45,285,10));
+            Box(Blue,FVector(-32,Y,4.2),FVector(43,285,.4));
+            Box(Roads,FVector(-32,Y+146,-1),FVector(29,7,10));
+            Box(Buildings,FVector(-32,Y-125,14),FVector(38,18,20));
+        }
         const int32 Count=bUnifiedTerminal?ConfiguredCargo[VesselIndex]:ShipRows*ShipBays*ShipTiers;
         for(int32 Index=0;Index<Count;++Index)
                 {

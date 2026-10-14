@@ -180,6 +180,47 @@ APortSiteLogistics::APortSiteLogistics()
     bCargoAlignedHandover=FParse::Param(FCommandLine::Get(),TEXT("PortSimCargoAlignedHandover"));
 }
 
+void APortSiteLogistics::SetWindVelocity(FVector WorldVelocityMetersPerSecond)
+{
+    WindVelocityMetersPerSecond=WorldVelocityMetersPerSecond.ContainsNaN()?FVector::ZeroVector:
+        WorldVelocityMetersPerSecond.GetClampedToMaxSize(50.f);
+    for(const auto& Crane:Equipment) if(IsValid(Crane)) Crane->SetWindVelocity(WindVelocityMetersPerSecond);
+}
+
+void APortSiteLogistics::SetVesselMotions(const TArray<FPortVesselMotion>& Motions,const TArray<FVector>& BasePivots)
+{
+    VesselMotions=Motions;
+    VesselBasePivots=BasePivots;
+}
+
+bool APortSiteLogistics::ResolveVesselTransform(const FSiteShipCargo& Cargo,FVector& Position,FQuat& Rotation,FVector& Velocity,FVector& Acceleration,FVector& Jerk) const
+{
+    const int32 Vessel=LaneCount==9?Cargo.STS/3:INDEX_NONE;
+    if(!VesselMotions.IsValidIndex(Vessel) || !VesselBasePivots.IsValidIndex(Vessel)) return false;
+    const auto& Motion=VesselMotions[Vessel];
+    const FVector Base=Cargo.Transform.GetLocation(),Pivot=VesselBasePivots[Vessel];
+    Position=Motion.TransformPosition(Base,Pivot);
+    Rotation=Motion.TransformRotation(Cargo.Transform.GetRotation());
+    Velocity=Motion.VelocityAtPosition(Base,Pivot);
+    Acceleration=Motion.AccelerationAtPosition(Base,Pivot);
+    Jerk=Motion.JerkAtPosition(Base,Pivot);
+    return true;
+}
+
+void APortSiteLogistics::ApplyVesselMotions(float FrameDurationSeconds)
+{
+    for(auto& Cargo:Manifest)
+    {
+        auto* Actor=Cargo.Actor.Get();
+        if(!IsValid(Actor) || Actor->LocationOwner!=ECargoOwner::Ship || Actor->GetAttachParentActor()) continue;
+        FVector Position,Velocity,Acceleration,Jerk;FQuat Rotation;
+        if(!ResolveVesselTransform(Cargo,Position,Rotation,Velocity,Acceleration,Jerk)) continue;
+        Actor->SetSecuredVesselMotion(Position,Rotation,Velocity,Acceleration,Jerk,FrameDurationSeconds);
+        if(Equipment.IsValidIndex(YardCraneCount+Cargo.STS))
+            Equipment[YardCraneCount+Cargo.STS]->UpdateMovingShipSource(Actor,Position);
+    }
+}
+
 void APortSiteLogistics::AddShipCargo(FVector Position,int32 STS,int32 Wave)
 {
     check(STS>=0 && STS<9);
@@ -1657,6 +1698,8 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
 void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
 {
     if (!bReady) return;
+    ApplyVesselMotions(Dt);
+    for(const auto& Cargo:ShipContainers) if(IsValid(Cargo)) Cargo->ApplyWind(WindVelocityMetersPerSecond,STSProfile.Dynamics.WindDrag);
     if(!Paused && Fault.IsEmpty()) SimulationTime+=Dt;
     ExportDashboard(Paused);
     if(Paused) for(int32 Index:PreparedCargo) if(Index!=INDEX_NONE) Manifest[Index].PreparedPausedSeconds+=Dt;
@@ -1740,10 +1783,19 @@ void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
             Equipment[YardCraneCount+Job.STS]->SetDestinationReady(true);
             Job.Stage=1; break;
         case 1:
+            // Reserve the downstream crane while the STS makes its final transfer.
+            // This keeps a completed handover from occupying the quay lane while
+            // yard selection starts, without delaying the STS if none is free yet.
+            if (Job.Slot==INDEX_NONE && Equipment[YardCraneCount+Job.STS]->Stage>=4) ReserveYard(Lane);
             if (Equipment[YardCraneCount+Job.STS]->IsBusy()) break;
             if (!Cargo || !Cargo->GetActorLocation().Equals(Vehicle->CargoPosition(),10.f) || Vehicle->Speed>0)
             { Stop(TEXT("STS / AGV handover alignment")); return; }
             Cargo->GetBody()->SetSimulatePhysics(false);
+            // The physical landing check accepts up to 10 cm. Resolve that
+            // remaining contact offset onto the AGV deck datum before attaching,
+            // otherwise KeepWorldTransform preserves a mismatch that the 1 cm
+            // ownership invariant rejects on the same frame.
+            Cargo->SetActorLocationAndRotation(Vehicle->CargoPosition(),Vehicle->GetActorRotation(),false,nullptr,ETeleportType::TeleportPhysics);
             Cargo->AttachToComponent(Vehicle->GetRootComponent(),FAttachmentTransformRules::KeepWorldTransform);
             Cargo->SetActorLocationAndRotation(Vehicle->CargoPosition(),Vehicle->GetActorRotation(),false,nullptr,
                 ETeleportType::TeleportPhysics);
@@ -1850,7 +1902,9 @@ void APortSiteLogistics::ResetLogistics()
         check(Actor);
         Actor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
         Actor->GetBody()->SetSimulatePhysics(false);
-        Actor->SetActorLocationAndRotation(Cargo.Transform.GetLocation(),Cargo.Transform.GetRotation(),false,nullptr,ETeleportType::TeleportPhysics);
+        FVector Position=Cargo.Transform.GetLocation(),Velocity=FVector::ZeroVector,Acceleration=FVector::ZeroVector,Jerk=FVector::ZeroVector;FQuat Rotation=Cargo.Transform.GetRotation();
+        ResolveVesselTransform(Cargo,Position,Rotation,Velocity,Acceleration,Jerk);
+        Actor->SetSecuredVesselMotion(Position,Rotation,Velocity,Acceleration,Jerk);
         Actor->LocationOwner=ECargoOwner::Ship;
         Cargo.State=0; Cargo.HandoverMask=0;
         Actor->SetActorHiddenInGame(Cargo.Wave>0); Actor->SetActorEnableCollision(Cargo.Wave==0);
@@ -1959,9 +2013,17 @@ bool APortSiteLogistics::Validate(FString& Error) const
             !FMath::IsFinite(Actor->MassKg) || Actor->MassKg<=0)
         { Error=TEXT("Invalid container size or gross mass specification"); return false; }
         Actors.Add(Actor);
+        FVector ExpectedPosition=Cargo.Transform.GetLocation(),ExpectedVelocity=FVector::ZeroVector,ExpectedAcceleration=FVector::ZeroVector,ExpectedJerk=FVector::ZeroVector;FQuat ExpectedRotation=Cargo.Transform.GetRotation();
+        ResolveVesselTransform(Cargo,ExpectedPosition,ExpectedRotation,ExpectedVelocity,ExpectedAcceleration,ExpectedJerk);
         if (Cargo.State==0 && (Actor->LocationOwner!=ECargoOwner::Ship || Actor->GetAttachParentActor() ||
-            Actor->GetBody()->IsSimulatingPhysics() || !Actor->GetActorLocation().Equals(Cargo.Transform.GetLocation(),.1f)))
-        { Error=TEXT("Secured ship cargo moved or lost its ship state"); return false; }
+            Actor->GetBody()->IsSimulatingPhysics() || !Actor->GetActorLocation().Equals(ExpectedPosition,.5f) ||
+            FQuat::ErrorAutoNormalize(Actor->GetActorQuat(),ExpectedRotation)>.0001f))
+        {
+            Error=FString::Printf(TEXT("Secured ship cargo %d mismatch: owner=%d attached=%d physics=%d position_error_cm=%.4f rotation_error=%.6f"),
+                Cargo.ID,int32(Actor->LocationOwner),Actor->GetAttachParentActor()!=nullptr,Actor->GetBody()->IsSimulatingPhysics(),
+                FVector::Distance(Actor->GetActorLocation(),ExpectedPosition),FQuat::ErrorAutoNormalize(Actor->GetActorQuat(),ExpectedRotation));
+            return false;
+        }
         if (IDs.Contains(Cargo.ID)) { Error=TEXT("Duplicate manifest cargo ID"); return false; }
         if (Cargo.State==2 && Cargo.HandoverMask!=7) { Error=TEXT("Delivered cargo bypassed STS/AGV/RMG handover" ); return false; }
         if (Cargo.State==2 && !Actor->GetActorLocation().Equals(Yard[Cargo.PlannedSlot].Position,10.f))
