@@ -4,6 +4,7 @@
 #include "PortSimTimeStep.h"
 #include "PortEnvironmentComponent.h"
 #include "PortContainerActor.h"
+#include "PortWorkingCrane.h"
 #include "Misc/FileHelper.h"
 #include "HAL/PlatformTime.h"
 #include "HAL/PlatformProcess.h"
@@ -292,7 +293,7 @@ void AQuayCrane::BeginPlay()
     }
     int32 FocusIndex=-1;
     if (bTerminalMode && FParse::Value(FCommandLine::Get(),TEXT("PortSimSiteFocus="),FocusIndex) && FocusIndex>=0 && FocusIndex<WorkingCranes.Num())
-    { SiteCameraIndex=FocusIndex-1; FocusNextSiteCrane(); }
+    { SiteCameraIndex=FocusIndex-1+(bUnifiedTerminal?1+ConfiguredShips:0); FocusNextSiteCrane(); }
     float RequestedPlayback=1.f;
     const bool ExplicitPlayback=FParse::Value(FCommandLine::Get(),TEXT("PortSimPlayback="),RequestedPlayback);
     if ((!bSmokeTest && !bTerminalTest && !FParse::Param(FCommandLine::Get(),TEXT("PortSimSiteTest")) &&
@@ -501,9 +502,6 @@ void AQuayCrane::Tick(float DeltaSeconds)
             PC->SetInputMode(Mode);
             bHUDMouseReady=true;
         }
-        if (PC->WasInputKeyJustPressed(EKeys::H)) ToggleHUD();
-        if (bUnifiedTerminal && PC->WasInputKeyJustPressed(EKeys::F))
-        { bFollowAGV=!bFollowAGV; FollowedAGV=nullptr; }
         if (FParse::Param(FCommandLine::Get(),TEXT("PortSimHUDTest")))
         {
             HUDTestElapsed+=DeltaSeconds;
@@ -523,27 +521,14 @@ void AQuayCrane::Tick(float DeltaSeconds)
             }
         }
         auto Axis = [PC](FKey Positive, FKey Negative) { return float(PC->IsInputKeyDown(Positive)) - float(PC->IsInputKeyDown(Negative)); };
-        if (PC->WasInputKeyJustPressed(EKeys::Add) || PC->WasInputKeyJustPressed(EKeys::Equals)) IncreaseSimulationSpeed();
-        if (PC->WasInputKeyJustPressed(EKeys::Subtract) || PC->WasInputKeyJustPressed(EKeys::Hyphen)) DecreaseSimulationSpeed();
         const bool Ctrl=PC->IsInputKeyDown(EKeys::LeftControl) || PC->IsInputKeyDown(EKeys::RightControl);
         if (Ctrl && PC->WasInputKeyJustPressed(EKeys::Zero)) Environment->ToggleWind();
         else if (Ctrl && PC->WasInputKeyJustPressed(EKeys::One)) Environment->ToggleSeaMotion();
-        else if (PC->WasInputKeyJustPressed(EKeys::Zero) || PC->WasInputKeyJustPressed(EKeys::NumPadZero)) ResetSimulationSpeed();
-        if (PC->WasInputKeyJustPressed(EKeys::U)) StartAutomatic(false);
-        if (PC->WasInputKeyJustPressed(EKeys::L)) StartAutomatic(true);
-        if (PC->WasInputKeyJustPressed(EKeys::P)) bAutoPaused=!bAutoPaused;
-        if (PC->WasInputKeyJustPressed(EKeys::R)) ResetSimulation();
-        if (PC->WasInputKeyJustPressed(EKeys::SpaceBar))
-        {
-            bEmergencyStop = !bEmergencyStop;
-            Status = bEmergencyStop ? TEXT("E-STOP: drives stopped; load physics remain active. Space to resume.") : TEXT("Drives enabled.");
-        }
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::Home))
-        { bFollowAGV=false; bFreeCamera=false; CameraArm->SetRelativeLocation(FVector(35000,0,0)); CameraArm->TargetArmLength=185000.f; CameraArm->SetRelativeRotation(FRotator(-52,38,0)); }
+        { CameraViewName=TEXT("전체"); bFollowAGV=false; bFreeCamera=false; CameraArm->SetRelativeLocation(FVector(35000,0,0)); CameraArm->TargetArmLength=185000.f; CameraArm->SetRelativeRotation(FRotator(-52,38,0)); }
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::End))
-        { bFollowAGV=false; bFreeCamera=false; CameraArm->SetRelativeLocation(FVector(12000,0,500)); CameraArm->TargetArmLength=bUnifiedTerminal?65000.f:22000.f; }
+        { CameraViewName=TEXT("근접"); bFollowAGV=false; bFreeCamera=false; CameraArm->SetRelativeLocation(FVector(12000,0,500)); CameraArm->TargetArmLength=bUnifiedTerminal?65000.f:22000.f; }
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::Tab)) FocusNextSiteCrane();
-        TickFreeCamera(WallDt);
         if (!bFreeCamera && !FParse::Param(FCommandLine::Get(),TEXT("PortSimPlanView")) && !FParse::Param(FCommandLine::Get(),TEXT("PortSimAerialView")))
         {
         const float Orbit = Axis(EKeys::Right, EKeys::Left);
@@ -786,18 +771,56 @@ APortSimGameMode::APortSimGameMode()
     HUDClass = APortSimHUD::StaticClass();
 }
 
+FString AQuayCrane::GetEquipmentFault() const
+{
+    TArray<FString> Errors;
+    for (const auto& Crane:WorkingCranes)
+        if (IsValid(Crane) && !Crane->Fault.IsEmpty())
+            Errors.Add(Crane->GetName()+TEXT(": ")+Crane->Fault);
+    if (IsValid(SiteLogistics) && !SiteLogistics->Fault.IsEmpty())
+        Errors.AddUnique(SiteLogistics->Fault);
+    if (AutoStage==ETerminalStage::Fault) Errors.AddUnique(Status);
+    return FString::Join(Errors,TEXT("\n"));
+}
+
 void APortSimHUD::DrawHUD()
 {
     Super::DrawHUD();
     auto* CranePawn = GetOwningPlayerController() ? Cast<AQuayCrane>(GetOwningPlayerController()->GetPawn()) : nullptr;
     if (!Canvas || !CranePawn) return;
     if (!CranePawn->bHUDVisible && FParse::Param(FCommandLine::Get(),TEXT("PortSimCapture"))) return;
-    const float Scale = FMath::Clamp(Canvas->SizeX / 1440.f, 0.65f, 1.4f);
-    const FVector2D TogglePosition(Canvas->SizeX-154.f*Scale,16.f);
-    const FVector2D ToggleSize(138.f*Scale,30.f*Scale);
+    const float Scale = FMath::Clamp(FMath::Min(Canvas->SizeX / 1440.f, Canvas->SizeY / 900.f), 0.5f, 1.4f);
+    const float TextScale = Scale * 1.25f;
+    auto DrawFault=[&](float Y,float Width)
+    {
+        const FString Fault=CranePawn->GetEquipmentFault();
+        if (Fault.IsEmpty()) return;
+        const float X=30.f, Padding=12.f*Scale, RowHeight=25.f*Scale;
+        Width=FMath::Min(Width,float(Canvas->SizeX)-X-Padding);
+        TArray<FString> Lines;
+        Lines.Add(TEXT("장비 오류로 정지"));
+        FString Line;
+        for (TCHAR Character:Fault)
+        {
+            float W=0,H=0;
+            GetTextSize(Line+FString::Chr(Character),W,H,GEngine->GetSmallFont(),TextScale);
+            if (Character==TEXT('\n') || (W>Width-2*Padding && !Line.IsEmpty()))
+            { Lines.Add(Line); Line.Empty(); }
+            if (Character!=TEXT('\n')) Line.AppendChar(Character);
+        }
+        if (!Line.IsEmpty()) Lines.Add(Line);
+        DrawRect(FLinearColor(.22f,.025f,.025f,.97f),X,Y,Width,Lines.Num()*RowHeight+2*Padding);
+        for (const FString& Message:Lines)
+        {
+            DrawText(Message,FLinearColor(1.f,.65f,.6f),X+Padding,Y+Padding,GEngine->GetSmallFont(),TextScale);
+            Y+=RowHeight;
+        }
+    };
+    const FVector2D TogglePosition(Canvas->SizeX-188.f*Scale,16.f);
+    const FVector2D ToggleSize(172.f*Scale,30.f*Scale);
     DrawRect(FLinearColor(0.04f,0.18f,0.24f,0.96f),TogglePosition.X,TogglePosition.Y,ToggleSize.X,ToggleSize.Y);
-    DrawText(CranePawn->bHUDVisible?TEXT("HUD 숨기기 [H]"):TEXT("HUD 표시 [H]"),FLinearColor(0.4f,1.f,1.f),
-        TogglePosition.X+10.f*Scale,TogglePosition.Y+7.f*Scale,GEngine->GetSmallFont(),Scale);
+    DrawText(CranePawn->bHUDVisible?TEXT("HUD 숨기기"):TEXT("HUD 표시"),FLinearColor(0.4f,1.f,1.f),
+        TogglePosition.X+10.f*Scale,TogglePosition.Y+7.f*Scale,GEngine->GetSmallFont(),TextScale);
     AddHitBox(TogglePosition,ToggleSize,TEXT("TogglePortHUD"),true,100);
     if (!CranePawn->bHUDVisible) return;
     if (const auto* Environment=CranePawn->GetEnvironment())
@@ -811,12 +834,12 @@ void APortSimHUD::DrawHUD()
             { if(PC->GetMousePosition(MX,MY)) UpdateSlider(MX); }
             else { DragSlider=-2; CranePawn->SaveRunSettings(); }
         }
-        DrawRect(FLinearColor(.015f,.03f,.05f,.94f),16,16,650*Scale,(351+CranePawn->PendingShips*62)*Scale);
+        DrawRect(FLinearColor(.015f,.03f,.05f,.94f),16,16,680*Scale,(351+CranePawn->PendingShips*66)*Scale);
         float Y=28;
         auto Text=[&](const FString& T,FLinearColor C=FLinearColor::White)
-        { DrawText(T,C,30,Y,GEngine->GetSmallFont(),Scale); Y+=26*Scale; };
+        { DrawText(T,C,30,Y,GEngine->GetSmallFont(),TextScale); Y+=30*Scale; };
         Text(TEXT("항만 시뮬레이터"),FLinearColor(.2f,.8f,1));
-        Text(TEXT("다음 실행 설정 · 시뮬레이터를 다시 실행하면 적용"),FLinearColor(.7f,.8f,.9f));
+        Text(TEXT("설정 변경 후 리셋"),FLinearColor(.7f,.8f,.9f));
         auto Slider=[&](const FString& Label,int32 Value,int32 Maximum,FName Name)
         {
             Text(Label);
@@ -830,52 +853,53 @@ void APortSimHUD::DrawHUD()
             {
                 const float BX=X+(500+Sign*40)*Scale;
                 DrawRect(FLinearColor(.06f,.28f,.35f),BX,Y-2*Scale,32*Scale,26*Scale);
-                DrawText(Sign?TEXT("+"):TEXT("−"),FLinearColor::White,BX+10*Scale,Y+3*Scale,GEngine->GetSmallFont(),Scale);
+                DrawText(Sign?TEXT("+"):TEXT("−"),FLinearColor::White,BX+10*Scale,Y+3*Scale,GEngine->GetSmallFont(),TextScale);
                 AddHitBox(FVector2D(BX,Y-2*Scale),FVector2D(32*Scale,26*Scale),FName(*(Name.ToString()+(Sign?TEXT("Plus"):TEXT("Minus")))),true,55);
             }
             Y+=36*Scale;
         };
-        Slider(FString::Printf(TEXT("선박 수: %d대 (1–3대)"),CranePawn->PendingShips),CranePawn->PendingShips,3,TEXT("ShipsSlider"));
+        Slider(FString::Printf(TEXT("선박 %d대"),CranePawn->PendingShips),CranePawn->PendingShips,3,TEXT("ShipsSlider"));
         for(int32 I=0;I<CranePawn->PendingShips;++I)
-            Slider(FString::Printf(TEXT("선박 %d 컨테이너: %d개 · 선택 가능 1–%d개"),I+1,CranePawn->PendingCargo[I],CranePawn->PendingCargoLimit(I)),
+            Slider(FString::Printf(TEXT("선박 %d · 컨테이너 %d개"),I+1,CranePawn->PendingCargo[I]),
                 CranePawn->PendingCargo[I],CranePawn->PendingCargoLimit(I),FName(*FString::Printf(TEXT("CargoSlider%d"),I)));
-        Text(FString::Printf(TEXT("총 합계: %d / 5,594개 · %s"),CranePawn->PendingCargoTotal(),
-            CranePawn->bRunSettingsSaved?TEXT("설정 자동 저장"):TEXT("저장 실패 — 다시 조정해 주세요")),FLinearColor(1,.85f,.25f));
         int32 ActiveTotal=0; for(int32 I=0;I<CranePawn->ConfiguredShips;++I) ActiveTotal+=CranePawn->ConfiguredCargo[I];
-        Text(FString::Printf(TEXT("현재 실행: 선박 %d대 · %d개 / 하역 완료 %d개"),CranePawn->ConfiguredShips,ActiveTotal,CranePawn->Deliveries));
+        Text(FString::Printf(TEXT("현재 %d척 · %d개 / 완료 %d개"),CranePawn->ConfiguredShips,ActiveTotal,CranePawn->Deliveries));
         const float BY=Y;
         auto Button=[&](float X,float W,const TCHAR* Label,const TCHAR* Name)
         {
             DrawRect(FLinearColor(.06f,.28f,.35f),X,BY,W*Scale,32*Scale);
-            DrawText(Label,FLinearColor::White,X+8*Scale,BY+8*Scale,GEngine->GetSmallFont(),Scale);
+            DrawText(Label,FLinearColor::White,X+8*Scale,BY+8*Scale,GEngine->GetSmallFont(),TextScale);
             AddHitBox(FVector2D(X,BY),FVector2D(W*Scale,32*Scale),Name,true,60);
         };
         Button(30,84,TEXT("실행"),TEXT("RunSimulation"));
         Button(30+94*Scale,100,CranePawn->bAutoPaused?TEXT("재개"):TEXT("일시정지"),TEXT("PauseSimulation"));
-        Button(30+204*Scale,84,TEXT("정지"),TEXT("StopSimulation"));
+        Button(30+204*Scale,84,TEXT("리셋"),TEXT("ResetSimulation"));
         Button(30+298*Scale,70,TEXT("배속 −"),TEXT("SpeedDown"));
         Button(30+378*Scale,70,TEXT("배속 +"),TEXT("SpeedUp"));
         Y+=43*Scale;
-        Text(FString::Printf(TEXT("배속: %.0f배 · 실행시간: %s"),CranePawn->SimulationSpeed,*CranePawn->ElapsedText()),FLinearColor(1,.85f,.25f));
-        Text(CranePawn->Status,FLinearColor(.65f,.85f,.7f));
-        Text(CranePawn->bEmergencyStop?TEXT("비상 정지"):!CranePawn->bAutoRunning?TEXT("대기 / 정지"):CranePawn->bAutoPaused?TEXT("일시정지"):TEXT("실행 중"));
-        Text(TEXT("H HUD · WASD 이동 · 우클릭 시점 · 선내 대기 물량 순차 하역"),FLinearColor(.6f,.7f,.8f));
+        Text(FString::Printf(TEXT("설정 배속: %.0f배 · 실제 배속: %.2f배"),CranePawn->SimulationSpeed,CranePawn->GetActualPlaybackRate()),FLinearColor(1,.85f,.25f));
+        Text(FString::Printf(TEXT("실행시간 (배속 반영): %s"),*CranePawn->ElapsedText()),FLinearColor(1,.85f,.25f));
+        Text(FString::Printf(TEXT("%s · %s"),CranePawn->bEmergencyStop?TEXT("비상 정지"):!CranePawn->bAutoRunning?TEXT("대기"):CranePawn->bAutoPaused?TEXT("일시정지"):TEXT("실행 중"),*CranePawn->CameraViewName));
+        Text(TEXT("방향키 회전 · PgUp/PgDn 확대·축소"),FLinearColor(.6f,.7f,.8f));
+        Text(TEXT("Tab 대기소·안벽·크레인 / Home 전체 / End 근접"),FLinearColor(.6f,.7f,.8f));
+        if(!CranePawn->bRunSettingsSaved) Text(TEXT("설정 저장 실패"),FLinearColor(1,.4f,.3f));
+        DrawFault(Y,652.f*Scale);
         return;
     }
     DrawRect(FLinearColor(.015f,.03f,.05f,.88f),16,16,850*Scale,310*Scale);
     float Y=28;
-    auto Line=[this,Scale,&Y](const FString& Text,FLinearColor Color,float FontScale=1.f)
-    { DrawText(Text,Color,30,Y,GEngine->GetSmallFont(),Scale*FontScale); Y+=25*Scale; };
+    auto Line=[this,Scale,TextScale,&Y](const FString& Text,FLinearColor Color,float FontScale=1.f)
+    { DrawText(Text,Color,30,Y,GEngine->GetSmallFont(),TextScale*FontScale); Y+=25*Scale; };
     Line(TEXT("항만 시뮬레이터"),FLinearColor(.2f,.8f,1),1.4f);
     if (CranePawn->bTerminalMode)
     {
         Line(CranePawn->GetFleetStatus(), FLinearColor(0.3f,0.8f,1.f));
-        Line(TEXT("U 자동 하역   L 자동 적재   P 일시정지/재개   R 전체 초기화 24"), FLinearColor(0.3f,1.f,0.7f));
+        Line(TEXT("Tab 대기소·안벽·크레인 / Home 전체 / End 근접"), FLinearColor(0.3f,1.f,0.7f));
         Line(FString::Printf(TEXT("선박 %d/24 | 완료 %d | C%02d | %s %s | %.1f s"),
             CranePawn->GetShipCargoCount(),CranePawn->AutoCompleted,CranePawn->ActiveCargoIndex+1,
             CranePawn->GetAutoStageName(),CranePawn->bAutoPaused?TEXT("[일시정지]"):TEXT(""),CranePawn->AutoElapsed),FLinearColor::White);
     }
-    Line(TEXT("Space 비상 정지   화살표 회전   PgUp/PgDn 줌"), FLinearColor::White);
+    Line(TEXT("방향키 회전 · PgUp/PgDn 확대·축소"), FLinearColor::White);
     Line(FString::Printf(TEXT("로프 %.1f m   화물 높이 %.1f m   흔들림 %.1f deg   적재 완료 %d"),
         CranePawn->RopeLength / 100.f, CranePawn->GetLoadHeight(), CranePawn->GetSwayDegrees(), CranePawn->Deliveries), FLinearColor::White);
     Line(FString::Printf(TEXT("트위스트 락: %s   구동: %s   화물: %.1f t"),
@@ -883,6 +907,7 @@ void APortSimHUD::DrawHUD()
     if(CranePawn->bTerminalMode) Line(CranePawn->GetSTSStatus(),FLinearColor(0.5f,0.85f,1.f),0.85f);
     Line(CranePawn->Status, FLinearColor(0.4f, 1.f, 0.65f));
     Line(TEXT("등가 현수·수평 스프레더 | LT 환산·센서 모델은 가정 설정 적용"), FLinearColor(0.6f, 0.7f, 0.8f), 0.85f);
+    DrawFault(Y,822.f*Scale);
 }
 
 int32 AQuayCrane::GetSimulationSpeedStep() const
@@ -935,7 +960,7 @@ void APortSimHUD::NotifyHitBoxClick(FName BoxName)
     if(BoxName==TEXT("TogglePortHUD")) { C->SaveRunSettings(); DragSlider=-2; C->ToggleHUD(); return; }
     if(BoxName==TEXT("RunSimulation")) C->StartAutomatic(false);
     else if(BoxName==TEXT("PauseSimulation") && C->bAutoRunning) C->bAutoPaused=!C->bAutoPaused;
-    else if(BoxName==TEXT("StopSimulation")) C->StopSimulation();
+    else if(BoxName==TEXT("ResetSimulation") || BoxName==TEXT("StopSimulation")) C->StopSimulation();
     else if(BoxName==TEXT("SpeedDown")) C->DecreaseSimulationSpeed();
     else if(BoxName==TEXT("SpeedUp")) C->IncreaseSimulationSpeed();
     else

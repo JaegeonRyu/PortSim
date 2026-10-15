@@ -5,7 +5,7 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const num=(v,d=1)=>Number.isFinite(v)?v.toLocaleString('ko-KR',{maximumFractionDigits:d}):'—';
 const vector=(v,d=2)=>Array.isArray(v)?v.map(n=>num(n,d)).join(' / '):'—';
 const types={sts:['STS 크레인','crane','#159681'],agv:['AGV 운반차','agv','#779bbc'],rmg:['야드 크레인','crane','#c69757'],vessel:['컨테이너선','ship','#627f94'],yard:['야드 블록','grid','#84a998'],container:['컨테이너','box','#9eafb0'],other:['기타 액터','grid','#aab6b0']};
-const labels={working:'작업 중',idle:'대기',paused:'일시정지',fault:'오류',fms_hold:'FMS 대기',lidar_stop:'LiDAR 안전정지',available:'정상',complete:'완료',Ship:'선박',STS:'STS 운반',AGV:'AGV 운반',RMG:'RMG 운반',Yard:'야드'};
+const labels={charging:'충전 중',to_charge:'충전소 이동',charge_return:'대기 위치 복귀',charge_wait:'충전 순서 대기',working:'작업 중',idle:'대기',paused:'일시정지',fault:'오류',fms_hold:'FMS 대기',lidar_stop:'LiDAR 안전정지',available:'정상',complete:'완료',Ship:'선박',STS:'STS 운반',AGV:'AGV 운반',RMG:'RMG 운반',Yard:'야드'};
 const stages=['안전 높이 이동','픽업 위치 접근','착좌 · 잠금','화물 인양','인계 위치 이동','하강 · 인계','스프레더 회수','안착 확인'];
 const paths={grid:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',crane:'M3 7h18M7 7V4h5l6 3M7 7v14M4 21h6M13 7v10m-3 0h6v4h-6zM18 7v14m-3 0h6',agv:'M3 9h18v8H3zM6 9V6h12v3M6 17v3m12-3v3M7 13h10',ship:'M3 13l9 4 9-4-3 7H6zM6 13V8h12v5M9 8V4h6v4M2 22l4-1 5 1 6-1 5 1',box:'M3 6h18v13H3zM7 6v13m5-13v13m5-13v13',sensor:'M12 11v2M8 8a6 6 0 0 0 0 8m8-8a6 6 0 0 1 0 8M4 4a11 11 0 0 0 0 16M20 4a11 11 0 0 1 0 16',chart:'M3 3v18h18M7 16l4-6 4 3 6-8',download:'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',search:'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14m5 12 6 6',clock:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18m0 4v6l4 2'};
 function icon(name){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name]||paths.grid}"/></svg>`;}
@@ -15,6 +15,20 @@ const emptyBaseline={hours:'',count:'',cranes:'3',source:'',vessel:'vessel-1',bo
 let baseline={...emptyBaseline};
 try{baseline={...baseline,...JSON.parse(localStorage.getItem('portsim-baseline-v1')||'{}')};}catch{}
 const actors=()=>state?.actors||[];
+let lastFaultSignature='';
+function updateFaultDialog(){
+ if(!state)return;
+ const faults=actors().filter(a=>a.fault).map(a=>`${a.name||a.id}: ${a.fault}`).sort();
+ if(state.fault)faults.unshift(state.fault);
+ const dialog=$('#fault-dialog');
+ if(!faults.length){lastFaultSignature='';if(dialog.open)dialog.close();return;}
+ const signature=JSON.stringify([state.run_id,faults]);
+ if(signature===lastFaultSignature)return;
+ lastFaultSignature=signature;
+ $('#fault-details').textContent=faults.join('\n\n');
+ $('#fault-title').textContent=live?'장비 오류로 정지했습니다':'최근 실행 기록에 장비 오류가 있습니다';
+ if(!dialog.open)dialog.showModal();
+}
 const current=()=>actors().find(a=>a.id===selected);
 const ref=()=>state?.applied_profile?.reference||reference;
 const config=(a)=>a?.type==='rmg'?(a.applied_crane_profile?.simulation_assumptions||{}):(state?.applied_profile?.simulation_assumptions||settings||{});
@@ -117,7 +131,7 @@ function overviewDetails(a){
  if(a.fault)html=`<div class="fault-message">${esc(a.fault)}</div>`+html;
  html+=`<div class="detail-subhead">현재 동작 <span>${live?'실행 데이터':'저장 기록'}</span></div>`;
  if(['sts','rmg'].includes(a.type))html+=kv('작업 단계',a.busy?`${a.stage+1}. ${stages[a.stage]}`:'작업 대기')+kv('인계 준비',a.destination_ready?'준비됨':'AGV 복귀 대기')+(a.agv_alignment_wait_seconds>0?kv('AGV 정렬 재확인',`${num(a.agv_alignment_wait_seconds,2)} s`):'')+kv('목표까지 직선거리',`${num(a.distance_to_destination_m)} m`)+kv('스프레더 좌표 X / Y / Z',`${vector(a.head_position_m)} m`)+kv('스프레더 현재 / 목표 길이',`${num(a.spreader_length_m,3)} / ${num(a.spreader_target_length_m,3)} m`)+kv('신축 체결 준비',a.telescope_ready?'완료':'조정 중');
- if(a.type==='agv')html+=kv('현재 속도',`${num(a.speed_mps,2)} m/s`)+kv('남은 경로 거리',`${num(a.route_remaining_m)} m`)+kv('교통 대기 누적',`${num(a.traffic_wait_seconds,1)} s`)+kv('야드 대기 누적',`${num(a.yard_wait_seconds,1)} s`)+(a.return_sts?kv('복귀 목적지',`STS-${a.return_sts}`):'')+kv('작업 단계',['대기','STS 인계 대기','야드 진입 대기','야드 이동','RMG 인계',a.return_sts?'STS 직접 복귀':'주차장 복귀','STS 접근','STS 대기열 이동','STS 배차 대기','야드 입구 RMG 대기'][a.stage]||'—')+kv('위치추정 오차',`${num(a.position_error_mm,1)} / ±${num(a.position_accuracy_limit_mm,0)} mm`)+kv('현재 FMS 노드',a.fms_node_count?`${num(a.fms_node_index+1,0)} / ${num(a.fms_node_count,0)}`:'배차 대기')+kv('안전 제어',a.controlled_stop?'LiDAR Controlled Stop':a.fms_hold?'FMS 도로예약 대기':'주행 허용');
+ if(a.type==='agv')html+=kv('배터리',`${num(a.battery_percent,1)}% / 충전 상한 80%`)+kv('배터리 상태',a.charging?'충전 중':a.needs_charge?'충전 필요':'작업 가능')+(a.charging_bay?kv('충전 구역',`${a.charging_bay}번`):'')+kv('현재 속도',`${num(a.speed_mps,2)} m/s`)+kv('남은 경로 거리',`${num(a.route_remaining_m)} m`)+kv('교통 대기 누적',`${num(a.traffic_wait_seconds,1)} s`)+kv('야드 대기 누적',`${num(a.yard_wait_seconds,1)} s`)+(a.return_sts?kv('복귀 목적지',`STS-${a.return_sts}`):'')+kv('작업 단계',['대기','STS 인계 대기','야드 진입 대기','야드 이동','RMG 인계',a.return_sts?'STS 직접 복귀':'주차장 복귀','STS 접근','STS 대기열 이동','STS 배차 대기','야드 입구 RMG 대기','충전소 이동','대기 위치 복귀','충전 중'][a.stage]||'—')+kv('위치추정 오차',`${num(a.position_error_mm,1)} / ±${num(a.position_accuracy_limit_mm,0)} mm`)+kv('현재 FMS 노드',a.fms_node_count?`${num(a.fms_node_index+1,0)} / ${num(a.fms_node_count,0)}`:'배차 대기')+kv('안전 제어',a.controlled_stop?'LiDAR Controlled Stop':a.fms_hold?'FMS 도로예약 대기':'주행 허용');
  html+=kv('위치 X / Y / Z',`${vector(a.position_m)} m`);
  if(a.cargo && a.cargo!=='None')html+=`<div class="kv-row"><span>연결 화물</span>${actorLink(a.cargo)}</div>`;
  if(a.agv && a.agv!=='None')html+=`<div class="kv-row"><span>인계 AGV</span>${actorLink(a.agv)}</div>`;
@@ -209,6 +223,7 @@ async function poll(){
  try{
   const response=await fetch('/api/state');if(!response.ok)throw Error();const payload=await response.json();
   state=payload.state;live=payload.live;age=payload.age_seconds;
+  updateFaultDialog();
   if(!current())selected=actors().find(a=>a.type==='sts')?.id||null;
   renderChrome();
   if(lastRendered!==`${state?.generated_at}|${live}`&&!pointerHeld&&(!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName)||(view==='sensors'&&document.activeElement?.id==='sensor-actor'))&&!document.querySelector('details[open]')&&!window.getSelection()?.toString()){

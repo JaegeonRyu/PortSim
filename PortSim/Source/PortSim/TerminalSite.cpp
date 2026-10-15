@@ -331,18 +331,27 @@ void AQuayCrane::BuildTerminalSite()
     // 2 is on the quay-side strip, clear of the operational AGV lanes.
     Building(TEXT("2 작업자 대기소"),Rest.X,Rest.Y,FVector(14,44,5));
 
-    // Open paved staff parking east of the rest building, below maintenance.
-    // Two rows of 5 m-deep bays flank a generous central circulation apron.
-    Box(Roads,FVector(72,393,.24),FVector(74,110,.06));
-    RoadSegment(Roads,{108,355},{145,355},14);
-    RoadSegment(Roads,{108,431},{145,431},14);
-    for(float X:{45.f,99.f})
+    // Sixty independent standby/charging positions, with alternating one-way
+    // aisles. Expand the former staff parking northward beside the empty yard.
+    Box(Roads,FVector(78,500.5f,.24),FVector(80,280,.06));
+    RoadSegment(Roads,{125,347},{125,TerminalLayout::AGVStandbyNorthY/100.f},14);
+    RoadSegment(Roads,{140,TerminalLayout::AGVStandbyNorthY/100.f},{140,347},14);
+    for(int32 Aisle=0;Aisle<=TerminalLayout::AGVStandbyRows;++Aisle)
     {
-        for(int32 Bay=0;Bay<=16;++Bay)
-            Box(White,FVector(X,350+Bay*5,.31),FVector(10,.15,.03));
-        Box(White,FVector(X+(X<72?-5:5),390,.31),FVector(.25,80,.03));
+        const float Y=(TerminalLayout::AGVStandbyY(0)-TerminalLayout::AGVStandbyPitchY*.5f+
+            Aisle*TerminalLayout::AGVStandbyPitchY)/100.f;
+        RoadSegment(Roads,{48,Y},{Aisle%2?140.f:125.f,Y},18);
     }
-    Label(TEXT("직원 주차장"),FVector(72,391,.4),2.5f);
+    for(int32 Bay=0;Bay<TerminalLayout::AGVChargeBays;++Bay)
+    {
+        const float X=TerminalLayout::AGVStandbyX(Bay)/100.f,Y=TerminalLayout::AGVStandbyY(Bay)/100.f;
+        Box(Green,FVector(X,Y,.32),FVector(4.8,17,.04));
+        for(float Side:{-2.5f,2.5f})
+            Box(White,FVector(X+Side,Y,.36),FVector(.1,18,.04));
+        Box(Blue,FVector(X+3.1f,Y,1.2),FVector(.6,1,2.4));
+        Box(Green,FVector(X+3.1f,Y-.55f,1.7),FVector(.5,.08,.5));
+    }
+    Label(TEXT("AGV 대기·충전소 · 60대"),FVector(78,642,.5),2.5f);
 
     // Three distinct blue roofs identified in close-up 2.
     // Shared maintenance apron: retain parking markings without an oversized perimeter box.

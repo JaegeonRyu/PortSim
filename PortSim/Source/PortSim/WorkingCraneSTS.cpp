@@ -42,16 +42,6 @@ void APortWorkingCrane::UpdateMovingShipSource(APortContainerActor* Cargo,FVecto
     if(Pads.IsValidIndex(SourceSlot)) Pads[SourceSlot]->SetWorldLocation(WorldPosition-FVector(0,0,139.5f));
 }
 
-void APortWorkingCrane::SetDestinationReady(bool Ready)
-{
-    if(bDestinationReady==Ready) return;
-    bDestinationReady=Ready;
-    // Logistics marks the destination ready immediately after the AGV snaps to
-    // its handover pose. Refresh the 20 Hz observation at that event so the
-    // 60 Hz interlock cannot consume the previous in-transit sample.
-    if(bSTS && bJobActive) SampleSTS(true);
-}
-
 void APortWorkingCrane::ClearSTSState()
 {
     AxisVelocity=PlantAcceleration=FVector::ZeroVector;
@@ -285,7 +275,7 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
             // a*L/g. Move the support by the opposite amount so the spreader,
             // not merely the drive, follows the accelerating vessel target.
             const double AccelerationOffset=I<2 && Stage==2 && !bCarrying?
-                PredictedTargetAcceleration*Length/9.80665:0.;
+                -PredictedTargetAcceleration*Length/9.80665:0.;
             const double ControlTarget=I<2?PredictedTarget-WindOffset[I]-AccelerationOffset:PredictedTarget;
             // The pendulum follows a changing acceleration equilibrium with a
             // phase lag. Do not differentiate that quasi-static offset into a
@@ -320,6 +310,15 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
                     Observation.SwayRate[I],Observation.SwayAngle[I],EquilibriumAngle,WindTrackingGain)*100+
                     PredictedTargetAcceleration;
                 AxisVelocity[I]=FMath::Clamp(AxisVelocity[I]+FMath::Clamp(Command,-Acceleration,Acceleration)*Step,-double(Limits[I]),double(Limits[I]));
+            }
+            else if(Stage==2 && !bCarrying)
+            {
+                // Track vessel heave with acceleration feed-forward. A velocity
+                // target alone lags wave reversals and loses four-corner contact.
+                const double VelocityError=PredictedTargetVelocity-MeasuredVelocity[I];
+                const double Command=PredictedTargetAcceleration+4.*Error+4.*VelocityError;
+                AxisVelocity[I]=FMath::Clamp(AxisVelocity[I]+FMath::Clamp(Command,-Acceleration,Acceleration)*Step,
+                    -double(Limits[I]),double(Limits[I]));
             }
             else AxisVelocity[I]=FMath::FInterpConstantTo(AxisVelocity[I],FMath::Clamp(Desired,-double(Limits[I]),double(Limits[I])),Step,Acceleration);
             Head[I]+=AxisVelocity[I]*Step;
