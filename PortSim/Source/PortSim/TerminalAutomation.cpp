@@ -120,23 +120,7 @@ void AQuayCrane::BuildTerminal()
     if (bUnifiedTerminal)
     {
         BuildTerminalSite();
-        FActorSpawnParameters ShipParams;
-        ShipParams.Owner=this;
-        ShipParams.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-        for(int32 Vessel=0;Vessel<ConfiguredShips;++Vessel)
-        {
-            const FVector BasePosition(-1800.f,TerminalLayout::VesselCenterY(Vessel)*100.f,250.f);
-            auto* VesselActor=GetWorld()->SpawnActor<APortShipActor>(BasePosition,FRotator::ZeroRotator,ShipParams);
-            check(VesselActor);
-#if WITH_EDITOR
-            VesselActor->SetActorLabel(FString::Printf(TEXT("Ship_%02d"),Vessel+1));
-            VesselActor->SetFolderPath(TEXT("PortSim/Equipment"));
-#endif
-            VesselActor->SetActorScale3D(FVector(1.f,TerminalLayout::VesselLengthM/285.f,1.f));
-            VesselActors.Add(VesselActor);
-            VesselBaseTransforms.Add(VesselActor->GetActorTransform());
-            VesselBasePivots.Add(BasePosition);
-        }
+        BuildConfiguredVessels();
         CameraArm->TargetArmLength=205000.f;
         CameraArm->SetRelativeLocation(FVector(43000,0,0));
         CameraArm->SetRelativeRotation(FRotator(-52,38,0));
@@ -207,6 +191,27 @@ void AQuayCrane::ApplySeaMotion()
             Motion.TransformRotation(FQuat::Identity),Motion.VelocityAtPosition(Base,VesselBasePivots[0]),
             Motion.AccelerationAtPosition(Base,VesselBasePivots[0]),Motion.JerkAtPosition(Base,VesselBasePivots[0]));
     }
+}
+
+void AQuayCrane::BuildConfiguredVessels()
+{
+        FActorSpawnParameters ShipParams;
+        ShipParams.Owner=this;
+        ShipParams.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        for(int32 Vessel=0;Vessel<ConfiguredShips;++Vessel)
+        {
+            const FVector BasePosition(-1800.f,TerminalLayout::VesselCenterY(Vessel)*100.f,250.f);
+            auto* VesselActor=GetWorld()->SpawnActor<APortShipActor>(BasePosition,FRotator::ZeroRotator,ShipParams);
+            check(VesselActor);
+#if WITH_EDITOR
+            VesselActor->SetActorLabel(FString::Printf(TEXT("Ship_%02d"),Vessel+1));
+            VesselActor->SetFolderPath(TEXT("PortSim/Equipment"));
+#endif
+            VesselActor->SetActorScale3D(FVector(1.f,TerminalLayout::VesselLengthM/285.f,1.f));
+            VesselActors.Add(VesselActor);
+            VesselBaseTransforms.Add(VesselActor->GetActorTransform());
+            VesselBasePivots.Add(BasePosition);
+        }
 }
 
 void AQuayCrane::ResetTerminal()

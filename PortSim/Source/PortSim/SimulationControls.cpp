@@ -76,8 +76,18 @@ bool AQuayCrane::SaveRunSettings()
 }
 void AQuayCrane::StopSimulation()
 {
+    SaveRunSettings();
+    if (bUnifiedTerminal)
+    {
+        bAutoRunning=false; bAutoPaused=false;
+        DestroyTerminalActors();
+        ConfiguredShips=PendingShips;
+        for(int32 I=0;I<3;++I) ConfiguredCargo[I]=PendingCargo[I];
+        BuildTerminalSite();
+        BuildConfiguredVessels();
+    }
     ResetSimulation(); bAutoRunning=false; bAutoPaused=false;
-    AutoElapsed=0; Status=TEXT("정지 — 실행 버튼을 누르면 현재 설정으로 시작합니다.");
+    AutoElapsed=0; Status=TEXT("리셋 완료 — 설정 적용됨. 실행 버튼으로 시작하세요.");
     if(SiteLogistics) SiteLogistics->ExportDashboard(true,true);
 }
 FString AQuayCrane::ElapsedText() const

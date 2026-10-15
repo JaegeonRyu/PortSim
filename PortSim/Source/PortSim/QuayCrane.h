@@ -214,9 +214,9 @@ private:
 
     void BuildYard();
     void BuildTerminal();
+    void BuildConfiguredVessels();
     void BuildTerminalSite();
     void BuildSupportFleet();
-    void TickFreeCamera(float WallDt);
     void MoveFreeCamera(FVector Input, FVector2D Look, float WallDt, bool Fast);
     void TestEquipmentAndCamera();
     bool bPickupTest=false, bPickupSawTrial=false;

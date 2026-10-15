@@ -45,24 +45,6 @@ void AQuayCrane::MoveFreeCamera(FVector Input,FVector2D Look,float WallDt,bool F
     CameraArm->AddWorldOffset(Direction.GetClampedToMaxSize(1.f)*(Fast?30000.f:6000.f)*WallDt);
 }
 
-void AQuayCrane::TickFreeCamera(float WallDt)
-{
-    auto* PC=Cast<APlayerController>(GetController());
-    if (!PC || !bUnifiedTerminal) return;
-    const bool Looking=PC->IsInputKeyDown(EKeys::RightMouseButton);
-    if (Looking!=bMouseLooking)
-    {
-        bMouseLooking=Looking; PC->bShowMouseCursor=!Looking;
-        if (Looking) { FInputModeGameOnly Mode; PC->SetInputMode(Mode); }
-        else { FInputModeGameAndUI Mode; Mode.SetHideCursorDuringCapture(false); PC->SetInputMode(Mode); }
-    }
-    auto Axis=[PC](FKey Plus,FKey Minus) { return float(PC->IsInputKeyDown(Plus))-float(PC->IsInputKeyDown(Minus)); };
-    const FVector Input(Axis(EKeys::W,EKeys::S),Axis(EKeys::D,EKeys::A),Axis(EKeys::E,EKeys::Q));
-    FVector2D Look=FVector2D::ZeroVector;
-    if (Looking) PC->GetInputMouseDelta(Look.X,Look.Y);
-    if (Looking || !Input.IsNearlyZero()) MoveFreeCamera(Input,Look,WallDt,PC->IsInputKeyDown(EKeys::LeftShift));
-}
-
 void AQuayCrane::TestEquipmentAndCamera()
 {
     FString Error;
