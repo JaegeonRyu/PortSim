@@ -18,9 +18,23 @@ bool FContainerSpecificationTest::RunTest(const FString& Parameters)
             (S.LengthFt==40 && FMath::IsNearlyEqual(S.LengthCm,1219.2f)) ||
             (S.LengthFt==45 && FMath::IsNearlyEqual(S.LengthCm,1371.6f)));
     }
-    TestEqual(TEXT("20 ft share"),Counts.FindRef(20),180);
-    TestEqual(TEXT("40 ft share"),Counts.FindRef(40),300);
-    TestEqual(TEXT("45 ft share"),Counts.FindRef(45),120);
+    TestEqual(TEXT("20 ft 28 percent share"),Counts.FindRef(20),168);
+    TestEqual(TEXT("40 ft 70 percent share"),Counts.FindRef(40),420);
+    TestEqual(TEXT("45 ft 2 percent share"),Counts.FindRef(45),12);
+    for(int32 Total:{1,2,7,37,200,600,601})
+    {
+        FIntVector Actual=FIntVector::ZeroValue;
+        for(int32 I=0;I<Total;++I)
+        {
+            const auto S=PortContainerSpecification::ForSequence(2000+I,I,Total);
+            if(S.LengthFt==20) ++Actual.X; else if(S.LengthFt==40) ++Actual.Y; else ++Actual.Z;
+        }
+        TestEqual(TEXT("Arbitrary manifest preserves rounded quotas"),Actual,PortContainerSpecification::CountsForManifest(Total));
+        TestEqual(TEXT("No container lost to percentage rounding"),Actual.X+Actual.Y+Actual.Z,Total);
+        TestTrue(TEXT("20ft rounding stays within one box"),FMath::Abs(Actual.X-Total*.28)<1.);
+        TestTrue(TEXT("40ft rounding stays within one box"),FMath::Abs(Actual.Y-Total*.70)<1.);
+        TestTrue(TEXT("45ft rounding stays within one box"),FMath::Abs(Actual.Z-Total*.02)<1.);
+    }
     float Length=PortSpreaderTelescope::Length20Cm;
     for(int32 Step=0;Step<299;++Step)
         Length=PortSpreaderTelescope::Advance(Length,PortSpreaderTelescope::Length45Cm,.1f);
@@ -49,6 +63,21 @@ bool FAGVDispatchPolicyTest::RunTest(const FString& Parameters)
     const double NearUsedClose=AGVDispatchPolicy::Score(FVector(6500,0,0),Target,4,6,5);
     const double NearUnused=AGVDispatchPolicy::Score(FVector(6500,3000,0),Target,4,5,5);
     TestTrue(TEXT("Fairness resolves close ETA choices toward the less-used AGV"),NearUnused<NearUsedClose);
+    TestEqual(TEXT("Workload fairness cannot outweigh more than 48 seconds of travel"),
+        AGVDispatchPolicy::Score(FVector(6500,0,0),Target,4,100,0)-
+        AGVDispatchPolicy::Score(FVector(6500,0,0),Target,4,0,0),48.);
+    TArray<AGVDispatchPolicy::FRequest> Requests={
+        {10,0,0,true,false}, // First box cannot yet be stacked: keep it aboard.
+        {11,1,0,false,true}, // An inaccessible lower ship box cannot be picked.
+        {12,2,10,true,true},
+        {13,3,20,true,true}};
+    TestEqual(TEXT("Blocked head does not idle an executable STS/AGV job"),AGVDispatchPolicy::SelectExecutable(Requests),12);
+    Requests[0].YardReady=true;
+    TestEqual(TEXT("Old request regains priority once its support/RMG is ready"),AGVDispatchPolicy::SelectExecutable(Requests),10);
+    for(auto& R:Requests) R.YardReady=false;
+    TestEqual(TEXT("No pickup if all downstream admissions are blocked"),AGVDispatchPolicy::SelectExecutable(Requests),INDEX_NONE);
+    TestFalse(TEXT("A distant return cannot pin an STS with a closer idle AGV"),AGVDispatchPolicy::UseDirectReturn(300.,45.));
+    TestTrue(TEXT("Reuse a return that reaches pickup before a parked AGV"),AGVDispatchPolicy::UseDirectReturn(40.,90.));
     return true;
 }
 #endif

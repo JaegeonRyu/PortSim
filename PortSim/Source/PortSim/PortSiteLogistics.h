@@ -3,6 +3,7 @@
 #include "GameFramework/Actor.h"
 #include "STSOperatingProfile.h"
 #include "PortEnvironmentComponent.h"
+#include "ShipStowagePlanning.h"
 #include "Async/Future.h"
 #include "UObject/UnrealType.h"
 #include "TrafficSpatialIndex.h"
@@ -20,6 +21,7 @@ struct FSiteYardSlot
     int32 Block=0, Half=0, Crane=0, Color=0, Instance=INDEX_NONE;
     FVector Handover=FVector::ZeroVector;
     int32 Below=INDEX_NONE;
+    int32 Cell=INDEX_NONE, LengthFt=40, Subslot=0, Partner=INDEX_NONE;
     bool Reserved=false, Occupied=true, Central=false;
     TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent> Mesh;
 };
@@ -28,6 +30,13 @@ struct FSiteShipCargo
     FTransform Transform;
     TWeakObjectPtr<APortContainerActor> Actor;
     int32 Wave=0;
+    int32 PlannedPair=INDEX_NONE;
+    int32 PlanningOrder=INDEX_NONE;
+    double STSHandoverAt=-1, STSServiceSeconds=0;
+    double STSWaitingForVehicleSeconds=0;
+    double DispatchEligibleAt=-1, VehicleAssignedAt=-1;
+    double EstimatedPairSavingSeconds=0;
+    double PlannedPairSavingSeconds=0;
     int32 STS=0, ID=0, State=0, PlannedSlot=INDEX_NONE; // same actor: 0 aboard, 1 transfer, 2 yard
     uint8 HandoverMask=0; // STS->AGV, AGV->RMG, RMG->yard
     double StartedAt=0, PreparedPausedSeconds=0;
@@ -35,6 +44,12 @@ struct FSiteShipCargo
 struct FSiteTransfer
 {
     int32 Cargo=INDEX_NONE, Slot=INDEX_NONE, RMG=INDEX_NONE, STS=INDEX_NONE, Stage=0, Waypoint=0;
+    int32 ExtraCargo=INDEX_NONE;
+    bool bLoadingExtra=false;
+    int32 TripID=0;
+    int32 TripCargoOrdinal=1;
+    bool bPairedTrip=false;
+    float CargoDeckOffsetCm=0;
     double Time=0, StartedAt=0, PausedSeconds=0, HandoverAt=-1, STSSeconds=0;
     float StationaryTime=0;
     FVector LastPosition=FVector::ZeroVector;
@@ -100,6 +115,7 @@ public:
     UPROPERTY() TArray<TObjectPtr<APortAGVActor>> TrafficVehicles;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 PeakMovingVehicles=0;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 PrefetchedJobs=0;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 PairedTrips=0;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TArray<TObjectPtr<APortContainerActor>> ShipContainers;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TArray<TObjectPtr<APortContainerActor>> PlacedContainers;
     UPROPERTY() TArray<TObjectPtr<APortWorkingCrane>> Equipment;
@@ -119,6 +135,9 @@ private:
     bool SaveReports() const;
     void BeginReport();
     TArray<FSiteShipCargo> Manifest;
+    TArray<TArray<int32>> SourceAbove;
+    FPortShipStowageAssumptions ShipStowageAssumptions;
+    TArray<FPortShipStowageResult> ShipStowagePlans;
     TArray<FSiteYardSlot> Yard;
     TArray<int32> CentralSlots;
     int32 CentralReservation=INDEX_NONE, CentralPending=INDEX_NONE;
@@ -144,6 +163,7 @@ private:
     TSet<int32> FinishedRoadSegments;
     TArray<bool> SlotAssigned;
     int32 CentralCount=0, Dispatched=0, LaneCount=8, YardCraneCount=46;
+    int32 NextTripID=1;
     int32 ReturnRouteCounts[3]={0,0,0};
     bool bReady=false, bWasPaused=false;
     bool bCargoAlignedHandover=true;
@@ -157,6 +177,9 @@ private:
     void ActivateVehicle(int32 Vehicle,int32 STS,bool FromQueue);
     void AssignReturnSTS(int32 Vehicle);
     void PrepareNextCargo(int32 Lane);
+    bool SourceAccessible(int32 Cargo) const;
+    void PrepareExecutableCargo(int32 Lane);
+    FString YardAdmissionReason(int32 Cargo) const;
     bool ReserveYardApproach(int32 Lane);
     bool YardApproachAvailable(int32 Cargo) const;
     void AdvanceStep(float Dt,bool Paused);
@@ -165,12 +188,14 @@ private:
     int32 YardApproachKey(const FSiteYardSlot& Slot) const { return LaneCount==9?Slot.Crane:Slot.Block; }
     bool ReserveYard(int32 Lane);
     bool PlanYardDestinations();
+    bool PlanLegacyYardDestinations();
     void PrepareRoute(int32 Lane,bool Return);
     bool PlanRoadRoute(int32 Lane,bool Congested);
     bool Drive(int32 Lane,float Dt);
     void Freeze(bool Paused);
     void Stop(const FString& Reason);
     FVector QuayPark(int32 Lane) const;
+    FVector QueueQuay(int32 STS) const;
     FVector CargoQuay(int32 CargoIndex) const;
     FVector FleetPark(int32 Vehicle) const;
     FVector YardHandover(const FSiteYardSlot& Slot) const;

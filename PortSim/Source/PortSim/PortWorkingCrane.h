@@ -31,6 +31,8 @@ public:
     FSTSObservation Observation;
     void SetDestinationReady(bool Ready);
     void SetHandoverVehicle(APortAGVActor* Vehicle);
+    bool SetAGVLandingTarget(FVector Target);
+    bool IsWaitingForAGV() const;
     APortAGVActor* GetHandoverVehicle() const;
     bool IsBusy() const { return bJobActive; }
     UFUNCTION(BlueprintCallable, Category="Operation") void ResetOperation();
@@ -78,6 +80,7 @@ private:
     double AGVAlignmentWait=0;
     bool CornerLocked[4]={false,false,false,false};
     bool bSensorFault=false;
+    FString SensorInvalidReason;
     int32 LockFault=INDEX_NONE;
     void SampleSTS(bool Force=false);
     bool MoveSTS(FVector Target,float Dt);

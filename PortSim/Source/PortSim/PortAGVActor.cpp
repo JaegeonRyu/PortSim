@@ -59,6 +59,8 @@ void APortAGVActor::InitializeVehicle(int32 Number)
 
 void APortAGVActor::ResetVehicle(FVector Position)
 {
+    ActiveDeckOffsetCm=0;
+    DeckCoGOffsetCm=FVector::ZeroVector;
     Speed=0; CompletedJobs=0; PayloadKg=0;
     // Park along the marked bay. Adjacent rows are separated for the vehicle
     // width in this pose; the steering controller then turns into the crossroad
@@ -72,7 +74,12 @@ void APortAGVActor::ResetVehicle(FVector Position)
 
 FVector APortAGVActor::CargoPosition() const
 {
-    return GetActorLocation()+FVector(0,0,349.5f);
+    return DeckPosition(ActiveDeckOffsetCm);
+}
+
+FVector APortAGVActor::DeckPosition(float OffsetCm) const
+{
+    return GetActorLocation()+GetActorRightVector()*OffsetCm+FVector(0,0,349.5f);
 }
 
 bool APortAGVActor::MoveToX(float X,float Dt)

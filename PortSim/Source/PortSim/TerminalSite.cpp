@@ -175,30 +175,32 @@ void AQuayCrane::BuildTerminalSite()
         {
             if (!TerminalLayout::IsOperationalYardBay(MarkBay)) continue;
             const float MX=TerminalLayout::YardBayX(MarkBay);
+            const int32 Size=bUnifiedTerminal?TerminalLayout::YardSizeFt(MarkBay):40;
+            const float CellLength=Size==20?12.192f:TerminalLayout::YardLengthCm(Size)/100.f;
             for(int32 Edge=0;Edge<=7;++Edge)
-                OrientedBox(White,FVector(MX,Y-10.5f+Edge*3.f,.39),FVector(12.2f,.12f,.025f),0);
+                OrientedBox(White,FVector(MX,Y-10.5f+Edge*3.f,.39),FVector(CellLength,.12f,.025f),0);
             for(float Side:{-1.f,1.f})
-                OrientedBox(White,FVector(MX+Side*6.1f,Y,.39),FVector(.12f,21.f,.025f),0);
+                OrientedBox(White,FVector(MX+Side*CellLength*.5f,Y,.39),FVector(.12f,21.f,.025f),0);
+            if(Size==20) OrientedBox(White,FVector(MX,Y,.39),FVector(.12f,21.f,.025f),0);
+            if(bUnifiedTerminal) Label(Size==20?TEXT("20ft x2"):Size==45?TEXT("45ft"):TEXT("40ft"),
+                FVector(205.f+MarkBay*13.f,Y-11.6f,.45f),1.1f);
         }
         for (int32 Bay=0;Bay<30;Bay+=2)
             for (int32 Row=0;Row<7;++Row)
-                for (int32 Tier=0;Tier<2+(Bay+Row+Block)%3;++Tier)
+                for (int32 Tier=0;Tier<TerminalLayout::YardTiers(Block,Bay,Row);++Tier)
                 {
-                    if (!TerminalLayout::IsOperationalYardBay(Bay)) continue;
-                    const bool FormerSource=(Bay==4 || Bay==23) && Row==2;
-                    const bool FormerDestination=(Bay==6 || Bay==25) && Row==4;
-                    constexpr bool FourZones=false;
-                    if (FourZones && (Bay==6 || Bay==14 || Bay==21)) continue;
-                    if (FormerDestination || (FormerSource && Tier>0)) continue;
-                    if (!FormerSource && (Bay*7+Row+Block)%11==0) continue;
-                    FSiteYardSlot Slot;
-                    Slot.Position=FVector(TerminalLayout::YardBayX(Bay)*100,(Y+(Row-3)*3)*100,149.5f+Tier*259);
-                    Slot.Block=Block; Slot.Half=Bay>=15?1:0; Slot.Color=(Bay+Row+Block)%4;
-                    const int32 Zone=FourZones?(Bay<7?0:Bay<15?1:Bay<22?2:3):Slot.Half;
-                    Slot.Crane=WorkingCranes.Num()+Zone;
-                    const float DockX=FourZones?(205.f+(Zone==0?0:Zone==1?7:Zone==2?15:22)*13.f):(Slot.Half?420.f:180.f);
-                    Slot.Handover=FVector((FourZones?TerminalLayout::SiteX(DockX):TerminalLayout::RMGHandoverX(Slot.Half))*100,TerminalLayout::RMGHandoverY(Block)*100,0);
-                    YardSlots.Add(Slot);
+                    const int32 Size=bUnifiedTerminal?TerminalLayout::YardSizeFt(Bay):40;
+                    for(int32 Pad=0;Pad<TerminalLayout::YardPads(Size);++Pad)
+                    {
+                        FSiteYardSlot Slot;
+                        Slot.Position=FVector(TerminalLayout::YardBayX(Bay)*100+TerminalLayout::YardPadOffsetCm(Size,Pad),
+                            (Y+(Row-3)*3)*100,149.5f+Tier*259);
+                        Slot.Block=Block; Slot.Half=Bay>=15?1:0; Slot.Color=(Bay+Row+Block)%4;
+                        Slot.Cell=TerminalLayout::YardCell(Block,Bay,Row); Slot.LengthFt=Size; Slot.Subslot=Pad;
+                        Slot.Crane=WorkingCranes.Num()+Slot.Half;
+                        Slot.Handover=FVector(TerminalLayout::RMGHandoverX(Slot.Half)*100,TerminalLayout::RMGHandoverY(Block)*100,0);
+                        YardSlots.Add(Slot);
+                    }
                 }
         // Two disjoint work reservations per block: no shared gantry travel zone.
         constexpr int32 ZoneCount=2;

@@ -1,0 +1,15 @@
+{
+  "basis": "simulation_assumptions_not_vessel_approved",
+  "lightship_kg": 30000000,
+  "lightship_kg_m": 9,
+  "km_m": 12,
+  "free_surface_moment_kg_m": 3000000,
+  "minimum_gm_m": 0.5,
+  "maximum_gm_m": 4.5,
+  "maximum_heel_deg": 5,
+  "maximum_stack_kg": 150000,
+  "maximum_lashing_n": 200000,
+  "lateral_acceleration_mps2": 1.47,
+  "deck_height_m": 12,
+  "notes": "Preview inputs only. Constant KM and four-way static lashing moment proxy; not a vessel-approved hydrostatic or cargo securing manual. Hazard zones are conservative simulation categories, not an IMDG substance segregation matrix."
+}

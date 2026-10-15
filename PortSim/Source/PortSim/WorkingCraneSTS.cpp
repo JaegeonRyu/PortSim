@@ -1,4 +1,5 @@
 #include "PortWorkingCrane.h"
+#include "CraneTravelBraking.h"
 #include "PortContainerActor.h"
 #include "PortAGVActor.h"
 #include "AGVReference.h"
@@ -24,7 +25,7 @@ void APortWorkingCrane::SetDestinationReady(bool Ready)
     // Fleet movement is updated after cranes.  Refresh immediately when the
     // dispatcher reports arrival so the first handover step cannot consume the
     // previous sensor sample from while the AGV was still approaching.
-    if(Ready && bSTS && bJobActive) SampleSTS(true);
+    if(bSTS && bJobActive) SampleSTS(true);
 }
 
 APortAGVActor* APortWorkingCrane::GetHandoverVehicle() const { return HandoverAGV.Get(); }
@@ -40,16 +41,6 @@ void APortWorkingCrane::UpdateMovingShipSource(APortContainerActor* Cargo,FVecto
     if(!bSTS || !bJobActive || bCarrying || CargoActor!=Cargo || Stage>2 || SourceSlot<0 || SourceSlot>1) return;
     Slots[SourceSlot]=WorldPosition;
     if(Pads.IsValidIndex(SourceSlot)) Pads[SourceSlot]->SetWorldLocation(WorldPosition-FVector(0,0,139.5f));
-}
-
-void APortWorkingCrane::SetDestinationReady(bool Ready)
-{
-    if(bDestinationReady==Ready) return;
-    bDestinationReady=Ready;
-    // Logistics marks the destination ready immediately after the AGV snaps to
-    // its handover pose. Refresh the 20 Hz observation at that event so the
-    // 60 Hz interlock cannot consume the previous in-transit sample.
-    if(bSTS && bJobActive) SampleSTS(true);
 }
 
 void APortWorkingCrane::ClearSTSState()
@@ -166,6 +157,9 @@ void APortWorkingCrane::SampleSTS(bool Force)
     if(!STSProfile.bReady || !IsValid(CargoActor) || (!Force && SimulationTime<NextSample)) return;
     NextSample=SimulationTime+STSProfile.SensorPeriod;
     auto& S=Observation; S.Timestamp=SimulationTime; S.bValid=!bSensorFault;
+    SensorInvalidReason=bSensorFault?TEXT("Injected sensor fault"):TEXT("");
+    auto InvalidSensor=[&](const FString& Reason)
+    { S.bValid=false; if(SensorInvalidReason.IsEmpty()) SensorInvalidReason=Reason; };
     S.DrivePosition=Head+FVector(STSProfile.PositionBias);
     S.DriveVelocity=AxisVelocity;
     S.WindVelocityMetersPerSecond=Orientation.UnrotateVector(WindVelocityMetersPerSecond);
@@ -205,16 +199,22 @@ void APortWorkingCrane::SampleSTS(bool Force)
         {
             Value=Mount.ReadPosition(S.DrivePosition.X*.01);
             S.DrivePosition.X=(Value+Mount.MeasurementOrigin)*100;
-            if(Mount.MaxTraversingSpeed>0 && FMath::Abs(S.DriveVelocity.X)*.01>Mount.MaxTraversingSpeed) S.bValid=false;
+            if(Mount.MaxTraversingSpeed>0 && FMath::Abs(S.DriveVelocity.X)*.01>Mount.MaxTraversingSpeed)
+                InvalidSensor(FString::Printf(TEXT("%s speed %.3f exceeds %.3f m/s"),*Mount.Key,FMath::Abs(S.DriveVelocity.X)*.01,Mount.MaxTraversingSpeed));
         }
         else if(Mount.Key==TEXT("gantry_encoder")) Value=S.DrivePosition.Y*.01;
         else if(Mount.Key==TEXT("sway_sensor")) Value=S.SwayDegrees;
         else if(Mount.Key==TEXT("hoist_encoder")) Value=(BeamZ-Head.Z)*.01;
         else if(Mount.Key==TEXT("telescope_encoder")) Value=TelescopeLengthCm*.01;
         else if(Mount.Key==TEXT("wind")) Value=S.WindVelocityMetersPerSecond.Size();
-        else if(Mount.Key==TEXT("twistlock_load")) for(double Load:S.CornerLoadsN) {if(Load<Mount.Minimum || Load>Mount.Maximum) S.bValid=false;}
+        else if(Mount.Key==TEXT("twistlock_load"))
+        {
+            for(double Load:S.CornerLoadsN) if(Load<Mount.Minimum || Load>Mount.Maximum)
+                InvalidSensor(FString::Printf(TEXT("%s %.3f outside [%.3f, %.3f]"),*Mount.Key,Load,Mount.Minimum,Mount.Maximum));
+        }
         else Required=false;
-        if(Required && Mount.Key!=TEXT("twistlock_load") && (Value<Mount.Minimum || Value>Mount.Maximum)) S.bValid=false;
+        if(Required && Mount.Key!=TEXT("twistlock_load") && (Value<Mount.Minimum || Value>Mount.Maximum))
+            InvalidSensor(FString::Printf(TEXT("%s %.3f outside [%.3f, %.3f]"),*Mount.Key,Value,Mount.Minimum,Mount.Maximum));
     }
 }
 
@@ -251,6 +251,12 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
     const FVector TargetJerk=Stage==2 && !bCarrying?
         Orientation.UnrotateVector(Observation.CargoJerk):FVector::ZeroVector;
     const double Age=FMath::Max(0.,SimulationTime-Observation.Timestamp);
+    double SensorSwayAngle=PI*.5;
+    for(const auto& Mount:C.Mounts) if(Mount.Key==TEXT("sway_sensor") && Mount.Maximum>0)
+        SensorSwayAngle=FMath::Min(SensorSwayAngle,FMath::DegreesToRadians(Mount.Maximum));
+    const double BrakingStroke=FMath::Max(FMath::Square(double(Limits.X))/(2*Accelerations.X),
+        FMath::Square(double(Limits.Y))/(2*Accelerations.Y));
+    const double SwingStroke=(.5*STSProfile.Pickup.AcquisitionRadius+BrakingStroke)*.01;
     const FVector CoG=bCarrying?CargoActor->CoGOffsetCm*.01*(Payload/Mass):FVector::ZeroVector;
     // Equal slices avoid a nanosecond remainder from float tick durations.
     // Interpolation can snap on that remainder and amplify acceleration/rope force.
@@ -260,6 +266,7 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
     for(int32 Substep=0;Substep<Substeps;++Substep)
     {
         const FVector Previous=AxisVelocity;
+        FVector2D TravelAcceleration=FVector2D::ZeroVector;
         const double Length=FMath::Max(.1,(BeamZ-Head.Z)*.01);
         auto SensorConfig=C;
         SensorConfig.Wind=Observation.WindVelocityMetersPerSecond;
@@ -303,6 +310,11 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
                 if(BaseTorque>C.MotorMaxTorque) {Stop(TEXT("Hoist motor cannot hold suspended mass"));return false;}
                 const double AccelLimit=FMath::Max(0.,(TorqueLimit-BaseTorque)/(Mass/(ShaftFactor*C.Efficiency*C.MotorCount)+C.MotorInertia*ShaftFactor));
                 Acceleration=FMath::Min(Acceleration,AccelLimit*100.);
+                // Vessel velocity feed-forward must not raise a held spreader
+                // through the reserved travel ceiling. Brake within the
+                // remaining stroke using the actual motor acceleration limit.
+                const double UpwardStroke=FMath::Max(0.,double(SafeZ)-Head.Z);
+                Desired=FMath::Min(Desired,FMath::Sqrt(2.*Acceleration*UpwardStroke));
             }
             if(I<2)
             {
@@ -319,9 +331,35 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
                     (Observation.DriveVelocity[I]-ControlTargetVelocity)*.01,FMath::Max(.1,(BeamZ-Observation.DrivePosition.Z)*.01),
                     Observation.SwayRate[I],Observation.SwayAngle[I],EquilibriumAngle,WindTrackingGain)*100+
                     PredictedTargetAcceleration;
-                AxisVelocity[I]=FMath::Clamp(AxisVelocity[I]+FMath::Clamp(Command,-Acceleration,Acceleration)*Step,-double(Limits[I]),double(Limits[I]));
+                // Reserve half of the acquisition stroke for drive correction
+                // and the remainder for the suspended motion. The stopping
+                // band limits the anti-sway command without disabling it or
+                // changing the reserved corridor/physical acceleration limit.
+                const double SafeCommand=CraneTravelBraking::Acceleration(Error,
+                    AxisVelocity[I]-ControlTargetVelocity,Command,Acceleration,
+                    .5*STSProfile.Pickup.AcquisitionRadius,Step);
+                TravelAcceleration[I]=SafeCommand*.01;
             }
-            else AxisVelocity[I]=FMath::FInterpConstantTo(AxisVelocity[I],FMath::Clamp(Desired,-double(Limits[I]),double(Limits[I])),Step,Acceleration);
+            else
+            {
+                AxisVelocity[I]=FMath::FInterpConstantTo(AxisVelocity[I],FMath::Clamp(Desired,-double(Limits[I]),double(Limits[I])),Step,Acceleration);
+                Head[I]+=AxisVelocity[I]*Step;
+            }
+        }
+        const double PredictionTime=Age+Substep*Step;
+        const double ObservedLength=FMath::Max(.1,(BeamZ-Observation.DrivePosition.Z-
+            Observation.DriveVelocity.Z*PredictionTime)*.01);
+        const auto MeasuredAngle=Observation.SwayAngle+Observation.SwayRate*PredictionTime;
+        const FVector WindAcceleration=SensorConfig.AerodynamicForce(
+            Orientation.UnrotateVector(Observation.SpreaderVelocity)*.01)/FMath::Max(1.,STSProfile.SpreaderMassKg+ControlPayload);
+        const double MaximumAngle=FMath::Min(SensorSwayAngle,FMath::Asin(FMath::Clamp(SwingStroke/ObservedLength,0.,.95)));
+        TravelAcceleration=CraneTravelBraking::SwayAcceleration(MeasuredAngle,Observation.SwayRate,
+            FVector2D(WindAcceleration.X,WindAcceleration.Y),TravelAcceleration,
+            FVector2D(Accelerations.X*.01,Accelerations.Y*.01),ObservedLength,-AxisVelocity.Z*.01,
+            C.Damping,MaximumAngle,Step);
+        for(int32 I=0;I<2;++I)
+        {
+            AxisVelocity[I]=FMath::Clamp(AxisVelocity[I]+TravelAcceleration[I]*100*Step,-double(Limits[I]),double(Limits[I]));
             Head[I]+=AxisVelocity[I]*Step;
         }
         PlantAcceleration=(AxisVelocity-Previous)/Step;

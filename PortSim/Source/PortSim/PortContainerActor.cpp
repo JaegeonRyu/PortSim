@@ -1,5 +1,8 @@
 #include "PortContainerActor.h"
 #include "PortEnvironmentComponent.h"
+#include "PortAGVActor.h"
+#include "PortWorkingCrane.h"
+#include "AGVReference.h"
 #include "TerminalLayout.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
@@ -82,13 +85,20 @@ void APortContainerActor::SetSecuredVesselMotion(FVector Position,FQuat Rotation
     SecuredFrameDurationSeconds=bHasSecuredMotionFrame && !WasSimulating && FMath::IsFinite(FrameDurationSeconds)?
         FMath::Max(0.,FrameDurationSeconds):0.;
     bHasSecuredMotionFrame=true;
+    SecuredWindowStart=0; SecuredWindowEnd=1;
     ApplySecuredMotionFraction(1.);
+}
+
+void APortContainerActor::SetSecuredMotionWindow(double Start,double End)
+{
+    SecuredWindowStart=FMath::Clamp(Start,0.,1.);
+    SecuredWindowEnd=FMath::Clamp(End,SecuredWindowStart,1.);
 }
 
 void APortContainerActor::ApplySecuredMotionFraction(double Fraction)
 {
     if(!bHasSecuredMotionFrame || Body->IsSimulatingPhysics()) return;
-    const double Alpha=FMath::Clamp(Fraction,0.,1.);
+    const double Alpha=FMath::Lerp(SecuredWindowStart,SecuredWindowEnd,FMath::Clamp(Fraction,0.,1.));
     FVector Position,Velocity;
     if(SecuredFrameDurationSeconds>UE_SMALL_NUMBER)
     {
@@ -116,17 +126,29 @@ void APortContainerActor::ApplySecuredMotionFraction(double Fraction)
 
 FVector APortContainerActor::GetMotionVelocity() const
 {
-    return Body->IsSimulatingPhysics()?Body->GetPhysicsLinearVelocity():KinematicVelocityCentimetersPerSecond;
+    if(Body->IsSimulatingPhysics()) return Body->GetPhysicsLinearVelocity();
+    if(LocationOwner==ECargoOwner::Ship && !GetAttachParentActor()) return KinematicVelocityCentimetersPerSecond;
+    if(const auto* Vehicle=Cast<APortAGVActor>(GetAttachParentActor()))
+    {
+        const float SignedSpeed=Vehicle->Speed*(Vehicle->Sensors.bReversing?-1.f:1.f);
+        const float YawRate=SignedSpeed*FMath::Tan(FMath::DegreesToRadians(Vehicle->Sensors.SteeringAngleDegrees))/AGVReference::EffectiveWheelbaseCm;
+        const FVector Arm=GetActorLocation()-Vehicle->GetActorLocation();
+        return Vehicle->GetActorRightVector()*SignedSpeed+FVector(-YawRate*Arm.Y,YawRate*Arm.X,0);
+    }
+    if(const auto* Crane=Cast<APortWorkingCrane>(GetAttachParentActor())) return Crane->Observation.SpreaderVelocity;
+    return FVector::ZeroVector;
 }
 
 FVector APortContainerActor::GetMotionAcceleration() const
 {
-    return Body->IsSimulatingPhysics()?FVector::ZeroVector:KinematicAccelerationCentimetersPerSecondSquared;
+    return !Body->IsSimulatingPhysics() && LocationOwner==ECargoOwner::Ship && !GetAttachParentActor()?
+        KinematicAccelerationCentimetersPerSecondSquared:FVector::ZeroVector;
 }
 
 FVector APortContainerActor::GetMotionJerk() const
 {
-    return Body->IsSimulatingPhysics()?FVector::ZeroVector:KinematicJerkCentimetersPerSecondCubed;
+    return !Body->IsSimulatingPhysics() && LocationOwner==ECargoOwner::Ship && !GetAttachParentActor()?
+        KinematicJerkCentimetersPerSecondCubed:FVector::ZeroVector;
 }
 
 void APortContainerActor::InitializeContainer(int32 Number)

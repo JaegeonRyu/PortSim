@@ -18,6 +18,7 @@ public class PortSim : ModuleRules
         string Reference = Path.GetFullPath(Path.Combine(ProjectRoot, "../Document/STS/STS_ReferenceData.json"));
         RuntimeDependencies.Add("$(ProjectDir)/Content/STS/STS_ReferenceData.json", Reference, StagedFileType.UFS);
         RuntimeDependencies.Add("$(ProjectDir)/Config/STS_Simulation.json", StagedFileType.NonUFS);
+        RuntimeDependencies.Add("$(ProjectDir)/Config/Stowage_Planning.json", StagedFileType.NonUFS);
 
 		// Uncomment if you are using Slate UI
 		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });

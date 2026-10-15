@@ -1,8 +1,13 @@
 param([string]$Engine = 'C:\Program Files\Epic Games\UE_5.6',
     [ValidateSet('All','Normal','Full','Faults','SensorFault','LockFault','Overload','AGVFault')][string]$Mode = 'All',
     [ValidateRange(1,60)][int]$FixedFPS = 10,
-    [ValidateRange(1,120)][int]$TimeoutMinutes = 30)
+    # 0 keeps the repeatable unpaced fixed-step benchmark; 4 is normal test playback.
+    [ValidateSet(0,1,2,4,8,16)][int]$PlaybackRate = 4,
+    [ValidateRange(1,120)][int]$TimeoutMinutes = 30,
+    [switch]$CheckStowage, [switch]$RequirePairedTrip,
+    [switch]$CheckDispatch, [string]$DispatchBaselineReport)
 $ErrorActionPreference = 'Stop'
+if($RequirePairedTrip) { $CheckStowage=$true }
 $root = Split-Path $PSScriptRoot -Parent
 $project = Join-Path $root 'PortSim.uproject'
 $editor = Join-Path $Engine 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
@@ -16,6 +21,7 @@ foreach ($case in $cases) {
     $testLog = Join-Path $root "Saved\Logs\SiteTest_${case}_$PID.log"
     if (Test-Path -LiteralPath $testLog) { Remove-Item -LiteralPath $testLog -Force }
     $arguments = @("`"$project`"", '/Engine/Maps/Entry','-game','-nullrhi','-nosound','-unattended','-nosplash','-benchmark',"-fps=$FixedFPS",'-PortSimSiteTest',"`"-abslog=$testLog`"")
+    if($PlaybackRate -gt 0) { $arguments += "-PortSimPlayback=$PlaybackRate" }
     if($case -eq 'Full') { $arguments += '-PortSimFullUnloadTest' }
     $expectedShipments=if($case -eq 'Full') {600} else {120}
     $expected = $null
@@ -32,7 +38,7 @@ foreach ($case in $cases) {
         $arguments += "`"-PortSimSTSSettings=$path`""
         $expected = 'Payload exceeds resolved STS reference capacity'
     }
-    Write-Output "RUN Site $case"
+    Write-Output "RUN Site $case (playback=$PlaybackRate; 0=unpaced benchmark)"
     $process = Start-Process -FilePath $editor -ArgumentList $arguments -WindowStyle Hidden -PassThru
     $null = $process.Handle
     $timeoutMs = if ($case -in @('Normal','Full')) { $TimeoutMinutes*60000 } else { 900000 }
@@ -70,6 +76,12 @@ foreach ($case in $cases) {
                     [int]$row.LengthFt -notin @(20,40,45) -or [int]$row.PlannedYardBlock -lt 1 -or [int]$row.PlannedYardBlock -gt 23) {
                     throw "Site timing/mass mismatch: $($row.ContainerID)"
                 }
+            }
+            if($CheckStowage) {
+                & (Join-Path $PSScriptRoot 'AssertStowageReport.ps1') -ReportPath $report.FullName -LogPath $testLog -RequirePairedTrip:$RequirePairedTrip
+            }
+            if($CheckDispatch -or $DispatchBaselineReport) {
+                & (Join-Path $PSScriptRoot 'AssertDispatchReport.ps1') -ReportPath $report.FullName -BaselineReport $DispatchBaselineReport
             }
             $snapshot = Get-Content -LiteralPath ($report.FullName.Replace('.csv','_profile.json')) -Raw | ConvertFrom-Json
             if ($snapshot.sts_profile.reference.geometry.rail_gauge.value -ne 30.48) { throw 'Site reference snapshot missing' }

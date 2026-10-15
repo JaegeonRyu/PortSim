@@ -254,7 +254,12 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
     {
         SampleSTS();
         if(!STSProfile.bReady || !Observation.IsFresh(SimulationTime,STSProfile.SensorMaxAge))
-        { Stop(bSTS?TEXT("Required STS sensor observation invalid/stale"):TEXT("Required RMG sensor observation invalid/stale")); return; }
+        {
+            Stop(FString::Printf(TEXT("Required %s sensor observation invalid/stale: %s (age=%.4fs limit=%.4fs)"),
+                bSTS?TEXT("STS"):TEXT("RMG"),SensorInvalidReason.IsEmpty()?TEXT("Freshness/profile check"):*SensorInvalidReason,
+                SimulationTime-Observation.Timestamp,double(STSProfile.SensorMaxAge)));
+            return;
+        }
         if(bCarrying && (!Observation.AllLocked() || Observation.DynamicPayloadEstimateKg()>STSProfile.RatedPayloadKg))
         { Stop(TEXT("Loaded hoist interlock: locks/load observation invalid")); return; }
     }
@@ -412,6 +417,26 @@ void APortWorkingCrane::EndPlay(const EEndPlayReason::Type Reason)
     if (!bExternalJobs && IsValid(CargoActor)) CargoActor->Destroy();
     CargoActor=nullptr;
     Super::EndPlay(Reason);
+}
+
+bool APortWorkingCrane::SetAGVLandingTarget(FVector Target)
+{
+    if(!bSTS || !bExternalJobs || !bJobActive || bDestinationReady || Stage>5 ||
+        !STSProfile.ContainsTarget(Local(Target)+FVector(0,0,WorkingCrane::LiftOffset))) return false;
+    // STS stage 5 can be waiting at travel height with descent interlocked.
+    // Bind the deck datum there too, while the load is safely above the pad.
+    if(Stage==5 && Head.Z<Local(Target).Z+WorkingCrane::LiftOffset+100.f) return false;
+    Slots[1-SourceSlot]=Target;
+    Pads[1-SourceSlot]->SetWorldLocation(Target-FVector(0,0,139.5f));
+    SampleSTS(true);
+    return true;
+}
+
+bool APortWorkingCrane::IsWaitingForAGV() const
+{
+    return bSTS && bJobActive && !bDestinationReady &&
+        (Stage==5 || (Stage==4 && AxisVelocity.Size2D()<=1.f &&
+            (Local(Slots[1-SourceSlot])-(Head+SuspendedOffset)).Size2D()<=STSProfile.LandingTolerance));
 }
 
 bool APortWorkingCrane::AssignCargo(APortContainerActor* Cargo,FVector Source,FVector Destination,bool SourceSupport,bool DestinationSupport,APortAGVActor* HandoverVehicle)

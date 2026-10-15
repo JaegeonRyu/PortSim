@@ -351,10 +351,21 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     Root->SetStringField(TEXT("fault"),Fault);
     Root->SetNumberField(TEXT("delivered"),Delivered);
     Root->SetNumberField(TEXT("initial_ship"),InitialShipCount());
+    auto SizeMix=Object(); int32 Sizes[3]={0,0,0};
+    for(const auto& C:ShipContainers) ++Sizes[C->LengthFt==20?0:C->LengthFt==40?1:2];
+    SizeMix->SetNumberField(TEXT("20"),Sizes[0]); SizeMix->SetNumberField(TEXT("40"),Sizes[1]); SizeMix->SetNumberField(TEXT("45"),Sizes[2]);
+    Root->SetObjectField(TEXT("container_size_counts"),SizeMix);
     Root->SetNumberField(TEXT("initial_yard"),InitialYard);
     Root->SetNumberField(TEXT("receiving_capacity"),ReceivingCapacity);
     Root->SetNumberField(TEXT("peak_moving_agvs"),PeakMovingVehicles);
     Root->SetNumberField(TEXT("prefetched_jobs"),PrefetchedJobs);
+    Root->SetNumberField(TEXT("paired_20ft_trips"),PairedTrips);
+    Root->SetStringField(TEXT("dispatch_policy"),TEXT("oldest executable source + supported yard + AGV admission before pickup"));
+    int32 IdleVehicles=0; for(const auto& J:Jobs) IdleVehicles+=J.Stage==0;
+    Root->SetNumberField(TEXT("idle_agvs"),IdleVehicles);
+    Root->SetStringField(TEXT("yard_stacking_policy"),TEXT("outbound_order > handling/hazard zones > compatible size > heavy below light"));
+    Root->SetStringField(TEXT("cargo_information_basis"),TEXT("synthetic_simulation_booking"));
+    Root->SetStringField(TEXT("paired_transport_mode"),TEXT("two sequential verified crane lifts, one AGV journey"));
     TArray<TSharedPtr<FJsonValue>> ReturnCorridors;
     static const TCHAR* ReturnNames[]={TEXT("south"),TEXT("central"),TEXT("north")};
     for(int32 Corridor=0;Corridor<TerminalLayout::AGVReturnCorridorCount;++Corridor)
@@ -376,9 +387,20 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
         if (IsValid(Cargo)) if (auto* Parent=Cargo->GetAttachParentActor()) AttachedCargo.Add(Parent,Cargo);
     auto CargoPlan=[this](const TSharedRef<FJsonObject>& O,const APortContainerActor* C)
     {
+        const auto& Booking=C->CargoInformation;
+        O->SetStringField(TEXT("goods"),Booking.Goods);
+        O->SetStringField(TEXT("handling_type"),Booking.HandlingType);
+        O->SetStringField(TEXT("hazard_group"),Booking.HazardGroup);
+        O->SetNumberField(TEXT("outbound_order"),Booking.OutboundOrder);
+        O->SetStringField(TEXT("destination_port"),Booking.DestinationPort);
+        O->SetNumberField(TEXT("port_call_order"),Booking.PortCallOrder);
+        O->SetNumberField(TEXT("temperature_c"),Booking.TemperatureC);
+        O->SetNumberField(TEXT("permitted_superimposed_kg"),Booking.PermittedSuperimposedKg);
+        O->SetStringField(TEXT("cargo_data_basis"),Booking.DataBasis);
         O->SetNumberField(TEXT("container_length_ft"),C->LengthFt);
         O->SetNumberField(TEXT("tare_kg"),C->TareMassKg);
         O->SetNumberField(TEXT("cargo_mass_kg"),C->CargoMassKg);
+        O->SetNumberField(TEXT("container_gross_kg"),C->MassKg);
         Vector(O,TEXT("dimensions_m"),C->ExternalDimensionsCm,.01f);
         const int32 ManifestIndex=Manifest.IndexOfByPredicate([C](const FSiteShipCargo& Entry){return Entry.Actor.Get()==C;});
         if(Manifest.IsValidIndex(ManifestIndex) && Yard.IsValidIndex(Manifest[ManifestIndex].PlannedSlot))
@@ -386,7 +408,21 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             const int32 Slot=Manifest[ManifestIndex].PlannedSlot;
             O->SetNumberField(TEXT("planned_yard_block"),Yard[Slot].Block+1);
             O->SetNumberField(TEXT("planned_yard_slot"),Slot);
+            O->SetNumberField(TEXT("planned_yard_cell"),Yard[Slot].Cell);
+            O->SetNumberField(TEXT("yard_slot_length_ft"),Yard[Slot].LengthFt);
+            O->SetNumberField(TEXT("yard_subslot"),Yard[Slot].LengthFt==20?Yard[Slot].Subslot+1:0);
+            O->SetNumberField(TEXT("yard_pads_per_cell"),TerminalLayout::YardPads(Yard[Slot].LengthFt));
             O->SetNumberField(TEXT("planned_rmg"),Yard[Slot].Crane+1);
+            int32 Tier=1;
+            for(int32 Lower=Yard[Slot].Below;Lower!=INDEX_NONE;Lower=Yard[Lower].Below) ++Tier;
+            O->SetNumberField(TEXT("planned_yard_tier"),Tier);
+            const int32 Mate=Manifest[ManifestIndex].PlannedPair;
+            if(Manifest.IsValidIndex(Mate)) O->SetStringField(TEXT("planned_pair_cargo"),Manifest[Mate].Actor->ContainerID.ToString());
+            O->SetNumberField(TEXT("estimated_pair_saving_seconds"),Manifest[ManifestIndex].EstimatedPairSavingSeconds);
+            const auto& Entry=Manifest[ManifestIndex];
+            O->SetNumberField(TEXT("dispatch_wait_seconds"),Entry.DispatchEligibleAt<0?0:
+                FMath::Max(0.,(Entry.VehicleAssignedAt<0?SimulationTime:Entry.VehicleAssignedAt)-Entry.DispatchEligibleAt));
+            O->SetNumberField(TEXT("sts_waiting_for_agv_seconds"),Entry.STSWaitingForVehicleSeconds);
             Vector(O,TEXT("planned_yard_position_m"),Yard[Slot].Position,.01f);
         }
     };
@@ -402,6 +438,38 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             O->SetStringField(TEXT("name"),FString::Printf(TEXT("%s-%02d"),STS?TEXT("STS"):TEXT("RMG"),STS?Crane->CraneID-YardCraneCount:Crane->CraneID));
             auto Data=Crane->DashboardState();
             for(const auto& P:Data->Values) O->SetField(P.Key,P.Value);
+            if(STS && LaneCount==9)
+            {
+                const int32 S=Crane->CraneID-YardCraneCount-1;
+                int32 Ready=0,Support=0,RMG=0,Oldest=INDEX_NONE,Active=INDEX_NONE;
+                for(int32 I=0;I<Manifest.Num();++I)
+                {
+                    const auto& C=Manifest[I]; if(C.STS!=S) continue;
+                    if(C.Actor.Get()==Crane->CargoActor) Active=I;
+                    if((C.State!=0 && PreparedCargo[S]!=I) || !SourceAccessible(I)) continue;
+                    const FString Reason=YardAdmissionReason(I);
+                    Ready+=Reason.IsEmpty(); Support+=Reason==TEXT("yard_support_pending");
+                    RMG+=Reason==TEXT("rmg_approach_reserved") || Reason==TEXT("rmg_turn_clearance");
+                    if(Oldest==INDEX_NONE || C.PlanningOrder<Manifest[Oldest].PlanningOrder) Oldest=I;
+                }
+                FString Reason=TEXT("source_not_ready");
+                const int32 Vehicle=STSOwners[S]!=INDEX_NONE?STSOwners[S]:NextVehicles[S];
+                if(STSOwners[S]!=INDEX_NONE) Reason=Crane->IsWaitingForAGV()?TEXT("agv_approaching"):TEXT("admitted");
+                else if(Ready>0) Reason=NextVehicles[S]!=INDEX_NONE?TEXT("agv_returning"):TEXT("vehicle_pending");
+                else if(Oldest!=INDEX_NONE) Reason=YardAdmissionReason(Oldest);
+                O->SetStringField(TEXT("dispatch_wait_reason"),Reason);
+                O->SetNumberField(TEXT("dispatch_ready_cargo_count"),Ready);
+                O->SetNumberField(TEXT("dispatch_support_blocked_count"),Support);
+                O->SetNumberField(TEXT("dispatch_rmg_blocked_count"),RMG);
+                O->SetNumberField(TEXT("sts_waiting_for_agv_seconds"),Active==INDEX_NONE?0:Manifest[Active].STSWaitingForVehicleSeconds);
+                if(Vehicles.IsValidIndex(Vehicle)) O->SetStringField(TEXT("assigned_agv"),Vehicles[Vehicle]->GetName());
+                if(Oldest!=INDEX_NONE)
+                {
+                    O->SetStringField(TEXT("oldest_dispatch_cargo"),Manifest[Oldest].Actor->ContainerID.ToString());
+                    O->SetNumberField(TEXT("dispatch_wait_seconds"),Manifest[Oldest].DispatchEligibleAt<0?0:
+                        FMath::Max(0.,SimulationTime-Manifest[Oldest].DispatchEligibleAt));
+                }
+            }
         }
         else if(auto* V=Cast<APortAGVActor>(A))
         {
@@ -443,7 +511,18 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             O->SetBoolField(TEXT("lidar_clear"),V->Sensors.bLiDARClear);
             O->SetBoolField(TEXT("controlled_stop"),V->Sensors.bControlledStop);
             if (auto* const* C=AttachedCargo.Find(V))
-            { O->SetStringField(TEXT("cargo"),(*C)->GetName()); O->SetNumberField(TEXT("payload_kg"),(*C)->MassKg); CargoPlan(O,*C); }
+            { O->SetStringField(TEXT("cargo"),(*C)->GetName()); CargoPlan(O,*C); }
+            TArray<TSharedPtr<FJsonValue>> OnDeck;
+            for(const auto& Box:ShipContainers) if(IsValid(Box) && Box->GetAttachParentActor()==V)
+            {
+                auto Item=Object(); Item->SetStringField(TEXT("id"),Box->GetName());
+                Item->SetStringField(TEXT("name"),Box->ContainerID.ToString()); Item->SetNumberField(TEXT("mass_kg"),Box->MassKg);
+                CargoPlan(Item,Box); Vector(Item,TEXT("position_m"),Box->GetActorLocation(),.01f);
+                OnDeck.Add(Value(Item));
+            }
+            O->SetArrayField(TEXT("cargo_items"),OnDeck);
+            O->SetNumberField(TEXT("on_deck_count"),OnDeck.Num());
+            Vector(O,TEXT("deck_cog_offset_m"),V->DeckCoGOffsetCm,.01f);
             const int32 Lane=Vehicles.IndexOfByKey(V);
             if(Jobs.IsValidIndex(Lane))
             {
@@ -494,6 +573,36 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
         O->SetStringField(TEXT("class"),TEXT("Logical vessel / manifest group"));
         Vector(O,TEXT("position_m"),FVector(-34,TerminalLayout::VesselCenterY(V),0));
         O->SetNumberField(TEXT("initial_count"),Total);
+        if(ShipStowagePlans.IsValidIndex(V))
+        {
+            const auto& Plan=ShipStowagePlans[V];
+            auto Preview=Object();
+            Preview->SetStringField(TEXT("basis"),ShipStowageAssumptions.Basis);
+            Preview->SetBoolField(TEXT("feasible"),Plan.Feasible);
+            Preview->SetStringField(TEXT("reason"),Plan.Reason);
+            Preview->SetNumberField(TEXT("planned_containers"),Plan.Placements.Num());
+            Preview->SetNumberField(TEXT("corrected_gm_m"),Plan.CorrectedGMM);
+            Preview->SetNumberField(TEXT("heel_deg"),Plan.HeelDegrees);
+            Preview->SetNumberField(TEXT("km_m"),ShipStowageAssumptions.KMM);
+            Preview->SetNumberField(TEXT("lightship_kg"),ShipStowageAssumptions.LightshipKg);
+            Preview->SetNumberField(TEXT("lightship_kg_m"),ShipStowageAssumptions.LightshipKGM);
+            Preview->SetNumberField(TEXT("free_surface_moment_kg_m"),ShipStowageAssumptions.FreeSurfaceMomentKgM);
+            Preview->SetNumberField(TEXT("minimum_gm_m"),ShipStowageAssumptions.MinimumGMM);
+            Preview->SetNumberField(TEXT("maximum_gm_m"),ShipStowageAssumptions.MaximumGMM);
+            Preview->SetNumberField(TEXT("maximum_stack_kg"),ShipStowageAssumptions.MaximumStackKg);
+            Preview->SetNumberField(TEXT("maximum_lashing_n"),ShipStowageAssumptions.MaximumLashingN);
+            TArray<TSharedPtr<FJsonValue>> Slots;
+            for(const auto& P:Plan.Placements)
+            {
+                auto S=Object(); S->SetStringField(TEXT("cargo"),FString::Printf(TEXT("C%d"),P.CargoID));
+                S->SetNumberField(TEXT("bay"),P.Bay); S->SetNumberField(TEXT("row"),P.Row); S->SetNumberField(TEXT("tier"),P.Tier);
+                S->SetNumberField(TEXT("gm_after_m"),P.CorrectedGMM); S->SetNumberField(TEXT("heel_after_deg"),P.HeelDegrees);
+                S->SetNumberField(TEXT("stack_kg"),P.StackKg); S->SetNumberField(TEXT("lashing_n"),P.LashingN);
+                Slots.Add(Value(S));
+            }
+            Preview->SetArrayField(TEXT("placements"),Slots);
+            O->SetObjectField(TEXT("ship_loading_preview"),Preview);
+        }
         O->SetNumberField(TEXT("unloaded"),Unloaded); O->SetNumberField(TEXT("placed"),Placed);
         O->SetNumberField(TEXT("started_at"),VesselStarted[V]);
         O->SetNumberField(TEXT("unloaded_at"),VesselUnloaded[V]);
@@ -513,6 +622,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
         O->SetStringField(TEXT("class"),TEXT("Instanced yard block"));
         Vector(O,TEXT("position_m"),FVector(TerminalLayout::SiteX(300),TerminalLayout::BlockY(B),0));
         O->SetNumberField(TEXT("slots"),Total); O->SetNumberField(TEXT("occupied"),Occupied);
+        O->SetStringField(TEXT("size_layout"),TEXT("20ft x2: Bay 1/19; 40ft: Bay 3-27 except 19; 45ft: Bay 29"));
         O->SetStringField(TEXT("state"),TEXT("available")); Actors.Add(Value(O));
     }
     Root->SetArrayField(TEXT("actors"),Actors); Root->SetArrayField(TEXT("vessels"),Vessels);

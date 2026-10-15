@@ -81,6 +81,26 @@ namespace TerminalLayout
     // Bay 14 used to leave only 18.3 m to the far crane's AGV handover.
     constexpr bool IsOperationalYardBay(int Bay) { return Bay>=0 && Bay<30 && Bay%2==0 && Bay!=14 && Bay!=16; }
     constexpr float YardBayX(int Bay) { return SiteX(205.f+Bay*13.f); }
+    // Dedicated size bays in every handling/outbound zone. Two longitudinal
+    // 20ft pads occupy one 40ft cell; 40ft and 45ft never share these columns.
+    constexpr int YardSizeFt(int Bay) { return Bay==0 || Bay==18?20:Bay==28?45:40; }
+    constexpr float YardLengthCm(int Ft) { return Ft==20?605.8f:Ft==45?1371.6f:1219.2f; }
+    constexpr int YardPads(int Ft) { return Ft==20?2:1; }
+    constexpr float YardPadOffsetCm(int Ft,int Pad) { return Ft==20?(Pad==0?-306.7f:306.7f):0.f; }
+    constexpr int YardCell(int Block,int Bay,int Row) { return (Block*30+Bay)*7+Row; }
+    constexpr int YardTiers(int Block,int Bay,int Row)
+    {
+        if(!IsOperationalYardBay(Bay) || (Bay==6 && Row==4)) return 0;
+        if(Bay==4 && Row==2) return 1;
+        return (Bay*7+Row+Block)%11==0?0:2+(Bay+Row+Block)%3;
+    }
+    constexpr int ReceivingSlotCount(bool Split20=true)
+    {
+        int Count=0;
+        for(int Block=0;Block<YardBlockCount;++Block) for(int Bay=0;Bay<30;Bay+=2)
+            for(int Row=0;Row<7;++Row) Count+=YardTiers(Block,Bay,Row)*(Split20?YardPads(YardSizeFt(Bay)):1);
+        return Count;
+    }
     constexpr float RMGHomeX(int Half) { return SiteX(Half?517.f:270.f); }
     constexpr float RMGHandoverX(int Half) { return SiteX(Half?420.f:180.f); }
     constexpr float RMGHalfGaugeM=16.f; // Physical rail gauge: 32 m, never scaled.
