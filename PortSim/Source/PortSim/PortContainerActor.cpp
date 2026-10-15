@@ -1,4 +1,5 @@
 #include "PortContainerActor.h"
+#include "PortAGVActor.h"
 #include "PortEnvironmentComponent.h"
 #include "PortAGVActor.h"
 #include "PortWorkingCrane.h"
@@ -127,6 +128,7 @@ void APortContainerActor::ApplySecuredMotionFraction(double Fraction)
 FVector APortContainerActor::GetMotionVelocity() const
 {
     if(Body->IsSimulatingPhysics()) return Body->GetPhysicsLinearVelocity();
+    // Cached vessel motion only applies while the cargo is secured aboard.
     if(LocationOwner==ECargoOwner::Ship && !GetAttachParentActor()) return KinematicVelocityCentimetersPerSecond;
     if(const auto* Vehicle=Cast<APortAGVActor>(GetAttachParentActor()))
     {

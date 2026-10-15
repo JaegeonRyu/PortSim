@@ -78,6 +78,19 @@ bool FAGVDispatchPolicyTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("No pickup if all downstream admissions are blocked"),AGVDispatchPolicy::SelectExecutable(Requests),INDEX_NONE);
     TestFalse(TEXT("A distant return cannot pin an STS with a closer idle AGV"),AGVDispatchPolicy::UseDirectReturn(300.,45.));
     TestTrue(TEXT("Reuse a return that reaches pickup before a parked AGV"),AGVDispatchPolicy::UseDirectReturn(40.,90.));
+    const auto DepotPosition=[](int32 Bay)
+    {
+        return FVector(TerminalLayout::SiteCmX(TerminalLayout::AGVStandbyX(Bay)),
+            TerminalLayout::AGVStandbyY(Bay),0);
+    };
+    const double FirstRow=AGVDispatchPolicy::EstimatedApproachDistanceCm(DepotPosition(0),Target,4,0);
+    const double SecondRow=AGVDispatchPolicy::EstimatedApproachDistanceCm(DepotPosition(8),Target,4,8);
+    TestEqual(TEXT("Opposite depot rows sharing an exit have equal approach cost, despite different straight-line distances"),
+        FirstRow,SecondRow);
+    TestTrue(TEXT("The next depot aisle incurs more travel on the southbound spine"),
+        AGVDispatchPolicy::EstimatedApproachDistanceCm(DepotPosition(16),Target,4,16)>FirstRow);
+    TestTrue(TEXT("Depot ETA includes its mandatory exit detour instead of straight-line pickup distance"),
+        FirstRow>FVector::Dist2D(DepotPosition(0),Target));
     return true;
 }
 #endif

@@ -61,6 +61,14 @@ public:
     void SetSteeringLookAhead(FVector Target,bool Enabled) { SteeringLookAhead=Target; bSteeringLookAhead=Enabled; }
     float AccelerationCmPerSecondSquared() const;
     bool PayloadWithinReferenceLimit() const;
+    // Usable 60 percentage points: 8 operating hours, 30-minute fast charge.
+    static constexpr double LowBatteryPercent=20.;
+    static constexpr double ChargeLimitPercent=80.;
+    void AdvanceBattery(double Seconds,bool Operating,bool Charging);
+    bool CanAcceptWork() const { return BatteryPercent>LowBatteryPercent && !bNeedsCharge && !bCharging; }
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV|Battery") double BatteryPercent=80.;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV|Battery") bool bNeedsCharge=false;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV|Battery") bool bCharging=false;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV") int32 VehicleID=1;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV") float Speed=0;
@@ -70,6 +78,9 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV") FVector DeckCoGOffsetCm=FVector::ZeroVector;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV") FAGVSensorState Sensors;
 private:
+    void RefreshBatteryLabel();
+    int32 DisplayedBattery=-1;
+    bool bDisplayedCharging=false;
     void UpdateOdometry(FVector PreviousPosition);
     void CorrectAtTransponder(FVector Position);
     float FMSAcceptanceCm=800.f;

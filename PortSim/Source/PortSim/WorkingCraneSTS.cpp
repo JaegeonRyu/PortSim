@@ -292,7 +292,7 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
             // a*L/g. Move the support by the opposite amount so the spreader,
             // not merely the drive, follows the accelerating vessel target.
             const double AccelerationOffset=I<2 && Stage==2 && !bCarrying?
-                PredictedTargetAcceleration*Length/9.80665:0.;
+                -PredictedTargetAcceleration*Length/9.80665:0.;
             const double ControlTarget=I<2?PredictedTarget-WindOffset[I]-AccelerationOffset:PredictedTarget;
             // The pendulum follows a changing acceleration equilibrium with a
             // phase lag. Do not differentiate that quasi-static offset into a
@@ -342,7 +342,21 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
             }
             else
             {
-                AxisVelocity[I]=FMath::FInterpConstantTo(AxisVelocity[I],FMath::Clamp(Desired,-double(Limits[I]),double(Limits[I])),Step,Acceleration);
+                if(Stage==2 && !bCarrying)
+                {
+                    // Track heave acceleration while the existing horizontal
+                    // stroke and sway braking continue to constrain travel.
+                    const double VelocityError=PredictedTargetVelocity-MeasuredVelocity[I];
+                    const double Requested=PredictedTargetAcceleration+4.*Error+4.*VelocityError;
+                    const double NextStroke=FMath::Max(0.,double(AxisVelocity[I]))*Step+
+                        .5*Acceleration*Step*Step;
+                    const double UpwardLimit=FMath::Sqrt(2.*Acceleration*
+                        FMath::Max(0.,double(SafeZ)-Head.Z-NextStroke));
+                    const double Command=FMath::Min(Requested,(UpwardLimit-AxisVelocity[I])/Step);
+                    AxisVelocity[I]=FMath::Clamp(AxisVelocity[I]+FMath::Clamp(Command,-Acceleration,Acceleration)*Step,
+                        -double(Limits[I]),double(Limits[I]));
+                }
+                else AxisVelocity[I]=FMath::FInterpConstantTo(AxisVelocity[I],FMath::Clamp(Desired,-double(Limits[I]),double(Limits[I])),Step,Acceleration);
                 Head[I]+=AxisVelocity[I]*Step;
             }
         }

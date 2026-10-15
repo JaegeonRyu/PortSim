@@ -26,5 +26,11 @@
   </main>
 </div>
 <div id="toast" role="status" hidden></div>
+<dialog id="fault-dialog" aria-labelledby="fault-title" aria-describedby="fault-description">
+  <h2 id="fault-title">장비 오류로 정지했습니다</h2>
+  <p id="fault-description">오류 원인을 확인해 주세요. 확인 버튼은 알림만 닫으며 장비를 재가동하지 않습니다.</p>
+  <pre id="fault-details"></pre>
+  <form method="dialog"><button class="button primary" autofocus>확인</button></form>
+</dialog>
 <script type="module" src="/app.mjs"></script>
 </body></html>

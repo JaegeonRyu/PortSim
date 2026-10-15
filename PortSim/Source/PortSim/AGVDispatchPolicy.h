@@ -35,8 +35,19 @@ namespace AGVDispatchPolicy
         return Best?Best->Cargo:INDEX_NONE;
     }
 
-    inline double EstimatedApproachDistanceCm(FVector From,FVector Target,int32 STS)
+    inline double EstimatedApproachDistanceCm(FVector From,FVector Target,int32 STS,int32 DepotBay=INDEX_NONE)
     {
+        if(DepotBay>=0 && DepotBay<TerminalLayout::AGVChargeBays && From.Y>36000.)
+        {
+            // Leave the bay longitudinally through its one-way row aisle,
+            // then use the depot's southbound spine before entering the quay.
+            // Odd/even rows have different exit ends; the old quay parking
+            // estimate understated this detour and favoured distant idle AGVs.
+            const double ExitY=TerminalLayout::AGVStandbyExitY(DepotBay);
+            const double ExitX=TerminalLayout::SiteCmX(14000.f);
+            return FMath::Abs(From.Y-ExitY)+FMath::Abs(From.X-ExitX)+
+                FMath::Abs(ExitY-Target.Y)+FMath::Abs(ExitX-Target.X);
+        }
         const double ParkAisleX=TerminalLayout::SiteCmX(TerminalLayout::AGVParkAisleX(0));
         const double BerthApproachX=TerminalLayout::SiteCmX(TerminalLayout::AGVBerthApproachX);
         const double CrossY=TerminalLayout::AGVInboundCrossY(STS);
@@ -45,9 +56,10 @@ namespace AGVDispatchPolicy
             FMath::Abs(Target.X-BerthApproachX);
     }
 
-    inline double Score(FVector From,FVector Target,int32 STS,int32 CompletedJobs,int32 MinimumCompletedJobs)
+    inline double Score(FVector From,FVector Target,int32 STS,int32 CompletedJobs,int32 MinimumCompletedJobs,
+        int32 DepotBay=INDEX_NONE)
     {
-        const double PickupSeconds=EstimatedApproachDistanceCm(From,Target,STS)/CruiseSpeedCmPerSecond;
+        const double PickupSeconds=EstimatedApproachDistanceCm(From,Target,STS,DepotBay)/CruiseSpeedCmPerSecond;
         const int32 ExtraJobs=FMath::Clamp(CompletedJobs-MinimumCompletedJobs,0,4);
         return PickupSeconds+ExtraJobs*FairnessSecondsPerExtraJob;
     }

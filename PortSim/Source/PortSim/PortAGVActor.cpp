@@ -50,7 +50,7 @@ APortAGVActor::APortAGVActor()
 void APortAGVActor::InitializeVehicle(int32 Number)
 {
     VehicleID=Number;
-    NameLabel->SetText(FText::FromString(FString::Printf(TEXT("AGV %d"),Number)));
+    DisplayedBattery=-1; RefreshBatteryLabel();
 #if WITH_EDITOR
     SetActorLabel(FString::Printf(TEXT("AGV_%02d"),Number));
     SetFolderPath(TEXT("PortSim/Equipment"));
@@ -62,6 +62,8 @@ void APortAGVActor::ResetVehicle(FVector Position)
     ActiveDeckOffsetCm=0;
     DeckCoGOffsetCm=FVector::ZeroVector;
     Speed=0; CompletedJobs=0; PayloadKg=0;
+    BatteryPercent=ChargeLimitPercent; bNeedsCharge=bCharging=false;
+    DisplayedBattery=-1; RefreshBatteryLabel();
     // Park along the marked bay. Adjacent rows are separated for the vehicle
     // width in this pose; the steering controller then turns into the crossroad
     // through the 33 m gap between vehicles without any lateral crab motion.
@@ -70,6 +72,29 @@ void APortAGVActor::ResetVehicle(FVector Position)
     DockingAxis=FVector::ZeroVector;
     FMSApproachSpeedLimit=MAX_flt;
     bSteeringLookAhead=false;
+}
+
+void APortAGVActor::RefreshBatteryLabel()
+{
+    const int32 Percent=FMath::FloorToInt(BatteryPercent);
+    if(DisplayedBattery==Percent && bDisplayedCharging==bCharging) return;
+    DisplayedBattery=Percent; bDisplayedCharging=bCharging;
+    NameLabel->SetText(FText::FromString(FString::Printf(TEXT("AGV %d | %d%% %s"),VehicleID,Percent,
+        bCharging?TEXT("CHARGING"):TEXT(""))));
+    NameLabel->SetTextRenderColor(bCharging?FColor::Cyan:BatteryPercent<=LowBatteryPercent?FColor::Red:FColor::White);
+}
+
+void APortAGVActor::AdvanceBattery(double Seconds,bool Operating,bool Charging)
+{
+    bCharging=Charging && BatteryPercent<ChargeLimitPercent;
+    if(Seconds>0)
+    {
+        if(bCharging) BatteryPercent=FMath::Min(ChargeLimitPercent,BatteryPercent+Seconds*60./1800.);
+        else if(Operating) BatteryPercent=FMath::Max(0.,BatteryPercent-Seconds*60./28800.);
+    }
+    if(BatteryPercent<=LowBatteryPercent) bNeedsCharge=true;
+    if(BatteryPercent>=ChargeLimitPercent) { bNeedsCharge=false; bCharging=false; }
+    RefreshBatteryLabel();
 }
 
 FVector APortAGVActor::CargoPosition() const

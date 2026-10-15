@@ -372,6 +372,10 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
 
 bool APortWorkingCrane::ValidateOperation(FString& Error) const
 {
+    // An empty yard is a valid idle state only when the crane profile loaded.
+    // ResetOperation clears transient faults, but cannot repair invalid settings.
+    if (bConfigured && !STSProfile.bReady)
+    { Error=FString::Printf(TEXT("Crane %d: profile unavailable: %s"),CraneID,*STSProfile.Error); return false; }
     if (bConfigured && bExternalJobs && !bJobActive && Fault.IsEmpty()) return true;
     if (!bConfigured || !IsValid(CargoActor) || (!bExternalJobs && CargoActor->GetOwner()!=this) || !Fault.IsEmpty())
     { Error=FString::Printf(TEXT("Crane %d: configuration/cargo/fault: %s"),CraneID,*Fault); return false; }

@@ -43,6 +43,8 @@ struct FSiteShipCargo
 };
 struct FSiteTransfer
 {
+    // Stage 10 is the second STS pickup of a paired 20 ft trip.
+    static constexpr int32 ToCharge=11, ReturnToStandby=12, Charging=13;
     int32 Cargo=INDEX_NONE, Slot=INDEX_NONE, RMG=INDEX_NONE, STS=INDEX_NONE, Stage=0, Waypoint=0;
     int32 ExtraCargo=INDEX_NONE;
     bool bLoadingExtra=false;
@@ -54,6 +56,7 @@ struct FSiteTransfer
     float StationaryTime=0;
     FVector LastPosition=FVector::ZeroVector;
     int32 LastStage=-1;
+    int32 ChargingBay=INDEX_NONE; // dedicated depot bay during ToCharge / Charging
     TWeakObjectPtr<APortContainerActor> Actor;
     TArray<FVector> Route;
     bool bYardReleased=false, bRMGReserved=false, bParkingDeparture=false;
@@ -174,6 +177,8 @@ private:
     void ApplyVesselMotions(float FrameDurationSeconds=0);
     void Dispatch(int32 Lane);
     void ScheduleFleet();
+    void AdvanceFleetBatteries(float Dt);
+    FVector ChargingBayPosition(int32 Bay) const;
     void ActivateVehicle(int32 Vehicle,int32 STS,bool FromQueue);
     void AssignReturnSTS(int32 Vehicle);
     void PrepareNextCargo(int32 Lane);
