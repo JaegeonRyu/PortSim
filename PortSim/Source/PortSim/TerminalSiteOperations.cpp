@@ -157,8 +157,8 @@ void AQuayCrane::FocusNextSiteCrane()
     SiteCameraIndex=(SiteCameraIndex+1)%ViewCount;
     if(bUnifiedTerminal && SiteCameraIndex==0)
     {
-        CameraArm->SetRelativeLocation(FVector(TerminalLayout::SiteCmX(7800),46800,0));
-        CameraArm->TargetArmLength=35000.f;
+        CameraArm->SetRelativeLocation(FVector(TerminalLayout::SiteCmX(7800),50050,0));
+        CameraArm->TargetArmLength=42000.f;
         CameraArm->SetRelativeRotation(FRotator(-65,38,0));
         CameraViewName=TEXT("AGV 대기소");
         return;

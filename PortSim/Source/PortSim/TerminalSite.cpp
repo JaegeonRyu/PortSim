@@ -333,7 +333,7 @@ void AQuayCrane::BuildTerminalSite()
 
     // Sixty independent standby/charging positions, with alternating one-way
     // aisles. Expand the former staff parking northward beside the empty yard.
-    Box(Roads,FVector(78,468,.24),FVector(80,220,.06));
+    Box(Roads,FVector(78,500.5f,.24),FVector(80,280,.06));
     RoadSegment(Roads,{125,347},{125,TerminalLayout::AGVStandbyNorthY/100.f},14);
     RoadSegment(Roads,{140,TerminalLayout::AGVStandbyNorthY/100.f},{140,347},14);
     for(int32 Aisle=0;Aisle<=TerminalLayout::AGVStandbyRows;++Aisle)
@@ -351,7 +351,7 @@ void AQuayCrane::BuildTerminalSite()
         Box(Blue,FVector(X+3.1f,Y,1.2),FVector(.6,1,2.4));
         Box(Green,FVector(X+3.1f,Y-.55f,1.7),FVector(.5,.08,.5));
     }
-    Label(TEXT("AGV 대기·충전소 · 60대"),FVector(78,575,.5),2.5f);
+    Label(TEXT("AGV 대기·충전소 · 60대"),FVector(78,642,.5),2.5f);
 
     // Three distinct blue roofs identified in close-up 2.
     // Shared maintenance apron: retain parking markings without an oversized perimeter box.

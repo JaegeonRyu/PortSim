@@ -118,18 +118,23 @@ namespace TerminalLayout
     constexpr float AGVSouthReturnY = -50250.f;
     // All 60 AGVs start and wait in this depot. Alternate entry/exit aisles
     // serve pairs of rows in one direction, keeping opposing traffic apart.
-    constexpr int AGVStandbyColumns=10, AGVStandbyRows=6;
-    constexpr int AGVChargeBays=AGVStandbyColumns*AGVStandbyRows;
+    constexpr int AGVStandbyColumns=8, AGVStandbyRows=8;
+    constexpr int AGVChargeBays=60; // last row uses four of its eight bays
+    constexpr float AGVStandbyPitchX=900.f;
     constexpr float AGVStandbyPitchY=3300.f;
-    constexpr float AGVStandbyX(int Bay) { return 4800.f+(Bay%AGVStandbyColumns)*620.f; }
+    constexpr float AGVStandbyX(int Bay) { return 4800.f+(Bay%AGVStandbyColumns)*AGVStandbyPitchX; }
     constexpr float AGVStandbyY(int Bay) { return 38500.f+(Bay/AGVStandbyColumns)*AGVStandbyPitchY; }
     constexpr float AGVStandbyEntryY(int Bay)
     { return AGVStandbyY(Bay)+((Bay/AGVStandbyColumns)%2?1.f:-1.f)*AGVStandbyPitchY*.5f; }
     constexpr float AGVStandbyExitY(int Bay)
     { return AGVStandbyY(Bay)-((Bay/AGVStandbyColumns)%2?1.f:-1.f)*AGVStandbyPitchY*.5f; }
-    constexpr float AGVStandbyNorthY=56650.f;
+    constexpr float AGVStandbyNorthY=63250.f;
     static_assert(AGVChargeBays==60,"Every AGV needs its own depot bay");
-    static_assert(SiteCmX(620.f)>2*210.f+100.f,"Depot columns clear physical AGV widths");
+    // Road reservations expand BOTH moving corridors by 170 cm at turns.
+    // Physical chassis clearance alone admitted bays that could never depart.
+    static_assert(SiteCmX(AGVStandbyPitchX)>2*(210.f+170.f)+50.f,
+        "Depot columns clear adjacent reserved driving corridors");
+    static_assert(AGVChargeBays<=AGVStandbyColumns*AGVStandbyRows,"Depot fits the full fleet");
     static_assert(AGVStandbyPitchY*.5f>2*730.f+150.f,"Depot aisles clear adjacent parked AGVs");
     constexpr float AGVParkFirstY = -46000.f;
     // Three 20-bay rows leave room for a full AGV envelope between parked bays.
@@ -217,7 +222,7 @@ namespace TerminalLayout
     }
     inline bool AGVEnvelopeInside(double MinX,double MaxX,double MinY,double MaxY)
     {
-        if (MinX<QuayLeftX || MaxX>SiteCmX(66000.f) || MinY<-52000.f || MaxY>58000.f)
+        if (MinX<QuayLeftX || MaxX>SiteCmX(66000.f) || MinY<-52000.f || MaxY>64500.f)
             return false;
         if(MaxY>36000.f && (MinX<SiteCmX(4000.f) || MaxX>SiteCmX(15000.f))) return false;
         // Only the quay/spine corridor extends beyond the operational yard.
