@@ -331,18 +331,23 @@ void AQuayCrane::BuildTerminalSite()
     // 2 is on the quay-side strip, clear of the operational AGV lanes.
     Building(TEXT("2 작업자 대기소"),Rest.X,Rest.Y,FVector(14,44,5));
 
-    // Open paved staff parking east of the rest building, below maintenance.
-    // Two rows of 5 m-deep bays flank a generous central circulation apron.
+    // Drive-through charging: separate south entry and north exit, no reversing across bays.
     Box(Roads,FVector(72,393,.24),FVector(74,110,.06));
-    RoadSegment(Roads,{108,355},{145,355},14);
-    RoadSegment(Roads,{108,431},{145,431},14);
-    for(float X:{45.f,99.f})
+    RoadSegment(Roads,{125,347},{125,365},14);
+    RoadSegment(Roads,{125,365},{45,365},14);
+    RoadSegment(Roads,{45,421},{140,421},14);
+    RoadSegment(Roads,{140,421},{140,347},14);
+    for(int32 Bay=0;Bay<TerminalLayout::AGVChargeBays;++Bay)
     {
-        for(int32 Bay=0;Bay<=16;++Bay)
-            Box(White,FVector(X,350+Bay*5,.31),FVector(10,.15,.03));
-        Box(White,FVector(X+(X<72?-5:5),390,.31),FVector(.25,80,.03));
+        const float X=TerminalLayout::AGVChargeBayX(Bay)/100.f;
+        Box(Green,FVector(X,393,.32),FVector(6,19,.04));
+        for(float Side:{-3.2f,3.2f})
+            Box(White,FVector(X+Side,393,.36),FVector(.15,20,.04));
+        Box(Blue,FVector(X+4,393,1.2),FVector(1.2,1,2.4));
+        Box(Green,FVector(X+4,392.45,1.7),FVector(.8,.08,.5));
+        Label(FString::Printf(TEXT("충전 %d"),Bay+1),FVector(X,393,.5),1.2f);
     }
-    Label(TEXT("직원 주차장"),FVector(72,391,.4),2.5f);
+    Label(TEXT("AGV 대기소 · 충전소"),FVector(72,440,.5),2.5f);
 
     // Three distinct blue roofs identified in close-up 2.
     // Shared maintenance apron: retain parking markings without an oversized perimeter box.

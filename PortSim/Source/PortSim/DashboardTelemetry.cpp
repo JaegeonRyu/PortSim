@@ -407,6 +407,11 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
         {
             O->SetStringField(TEXT("type"),TEXT("agv"));
             O->SetStringField(TEXT("name"),FString::Printf(TEXT("AGV-%03d"),V->VehicleID));
+            O->SetNumberField(TEXT("battery_percent"),V->BatteryPercent);
+            O->SetBoolField(TEXT("charging"),V->bCharging);
+            O->SetBoolField(TEXT("needs_charge"),V->bNeedsCharge);
+            O->SetBoolField(TEXT("dispatch_eligible"),V->CanAcceptWork());
+            O->SetNumberField(TEXT("charge_limit_percent"),APortAGVActor::ChargeLimitPercent);
             O->SetNumberField(TEXT("speed_mps"),V->Speed*.01);
             O->SetNumberField(TEXT("speed_limit_mps"),V->SpeedLimitCmPerSecond()*.01);
             O->SetNumberField(TEXT("acceleration_mps2"),V->AccelerationCmPerSecondSquared()*.01);
@@ -459,6 +464,15 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
                 O->SetStringField(TEXT("state"),!Fault.IsEmpty()?TEXT("fault"):(Paused?TEXT("paused"):
                     (V->Sensors.bControlledStop?TEXT("lidar_stop"):(V->Sensors.bFMSHold?TEXT("fms_hold"):(J.Stage?TEXT("working"):TEXT("idle"))))));
                 if(J.STS!=INDEX_NONE) O->SetStringField(TEXT("sts"),Equipment[YardCraneCount+J.STS]->GetName());
+                O->SetBoolField(TEXT("dispatch_eligible"),J.Stage==0 && V->CanAcceptWork());
+                if(Fault.IsEmpty() && !Paused && !V->Sensors.bControlledStop && !V->Sensors.bFMSHold)
+                {
+                    if(J.Stage==10) O->SetStringField(TEXT("state"),TEXT("to_charge"));
+                    else if(J.Stage==12) O->SetStringField(TEXT("state"),TEXT("charging"));
+                    else if(J.Stage==11) O->SetStringField(TEXT("state"),TEXT("charge_return"));
+                    else if(J.Stage==0 && V->bNeedsCharge) O->SetStringField(TEXT("state"),TEXT("charge_wait"));
+                }
+                O->SetNumberField(TEXT("charging_bay"),J.ChargingBay==INDEX_NONE?0:J.ChargingBay+1);
                 O->SetNumberField(TEXT("job_seconds"),J.Time);
                 if(J.ReturnCorridor!=INDEX_NONE)
                     O->SetStringField(TEXT("return_corridor"),ReturnNames[J.ReturnCorridor]);

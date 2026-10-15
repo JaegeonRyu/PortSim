@@ -116,6 +116,10 @@ namespace TerminalLayout
     constexpr float AGVNorthCrossY = 34700.f;
     constexpr float AGVSouthLoadedY = -48750.f;
     constexpr float AGVSouthReturnY = -50250.f;
+    // Six drive-through fast-charge bays replace staff parking beside the rest building.
+    constexpr int AGVChargeBays=6;
+    constexpr float AGVChargeEntryY=36500.f, AGVChargeExitY=42100.f, AGVChargeBayY=39300.f;
+    constexpr float AGVChargeBayX(int Bay) { return 4500.f+Bay*1000.f; }
     constexpr float AGVParkFirstY = -46000.f;
     // Three 20-bay rows leave room for a full AGV envelope between parked bays.
     constexpr int AGVParkRows=3, AGVParkBays=20;
@@ -202,8 +206,9 @@ namespace TerminalLayout
     }
     inline bool AGVEnvelopeInside(double MinX,double MaxX,double MinY,double MaxY)
     {
-        if (MinX<QuayLeftX || MaxX>SiteCmX(66000.f) || MinY<-52000.f || MaxY>36000.f)
+        if (MinX<QuayLeftX || MaxX>SiteCmX(66000.f) || MinY<-52000.f || MaxY>43500.f)
             return false;
+        if(MaxY>36000.f && (MinX<SiteCmX(3500.f) || MaxX>SiteCmX(15000.f))) return false;
         // Only the quay/spine corridor extends beyond the operational yard.
         return MaxX<=SiteCmX(18000.f) || (MinY>=-51700.f && MaxY<=35500.f);
     }
