@@ -136,6 +136,7 @@ public:
     int32 PendingCargoTotal() const;
     void StopSimulation();
     FString ElapsedText() const;
+    FString CameraViewName=TEXT("전체");
     bool bRunSettingsSaved=true;
     void TickControlsTest(float Dt);
     int32 ControlsTestStage=0, ControlsTestFrames=0;
@@ -214,9 +215,9 @@ private:
 
     void BuildYard();
     void BuildTerminal();
+    void BuildConfiguredVessels();
     void BuildTerminalSite();
     void BuildSupportFleet();
-    void TickFreeCamera(float WallDt);
     void MoveFreeCamera(FVector Input, FVector2D Look, float WallDt, bool Fast);
     void TestEquipmentAndCamera();
     bool bPickupTest=false, bPickupSawTrial=false;
