@@ -4,6 +4,7 @@
 #include "PortSimTimeStep.h"
 #include "PortEnvironmentComponent.h"
 #include "PortContainerActor.h"
+#include "PortWorkingCrane.h"
 #include "Misc/FileHelper.h"
 #include "HAL/PlatformTime.h"
 #include "HAL/PlatformProcess.h"
@@ -786,6 +787,18 @@ APortSimGameMode::APortSimGameMode()
     HUDClass = APortSimHUD::StaticClass();
 }
 
+FString AQuayCrane::GetEquipmentFault() const
+{
+    TArray<FString> Errors;
+    for (const auto& Crane:WorkingCranes)
+        if (IsValid(Crane) && !Crane->Fault.IsEmpty())
+            Errors.Add(Crane->GetName()+TEXT(": ")+Crane->Fault);
+    if (IsValid(SiteLogistics) && !SiteLogistics->Fault.IsEmpty())
+        Errors.AddUnique(SiteLogistics->Fault);
+    if (AutoStage==ETerminalStage::Fault) Errors.AddUnique(Status);
+    return FString::Join(Errors,TEXT("\n"));
+}
+
 void APortSimHUD::DrawHUD()
 {
     Super::DrawHUD();
@@ -793,6 +806,31 @@ void APortSimHUD::DrawHUD()
     if (!Canvas || !CranePawn) return;
     if (!CranePawn->bHUDVisible && FParse::Param(FCommandLine::Get(),TEXT("PortSimCapture"))) return;
     const float Scale = FMath::Clamp(Canvas->SizeX / 1440.f, 0.65f, 1.4f);
+    auto DrawFault=[&](float Y,float Width)
+    {
+        const FString Fault=CranePawn->GetEquipmentFault();
+        if (Fault.IsEmpty()) return;
+        const float X=30.f, Padding=12.f*Scale, RowHeight=20.f*Scale;
+        Width=FMath::Min(Width,float(Canvas->SizeX)-X-Padding);
+        TArray<FString> Lines;
+        Lines.Add(TEXT("장비 오류로 정지"));
+        FString Line;
+        for (TCHAR Character:Fault)
+        {
+            float W=0,H=0;
+            GetTextSize(Line+FString::Chr(Character),W,H,GEngine->GetSmallFont(),Scale);
+            if (Character==TEXT('\n') || (W>Width-2*Padding && !Line.IsEmpty()))
+            { Lines.Add(Line); Line.Empty(); }
+            if (Character!=TEXT('\n')) Line.AppendChar(Character);
+        }
+        if (!Line.IsEmpty()) Lines.Add(Line);
+        DrawRect(FLinearColor(.22f,.025f,.025f,.97f),X,Y,Width,Lines.Num()*RowHeight+2*Padding);
+        for (const FString& Message:Lines)
+        {
+            DrawText(Message,FLinearColor(1.f,.65f,.6f),X+Padding,Y+Padding,GEngine->GetSmallFont(),Scale);
+            Y+=RowHeight;
+        }
+    };
     const FVector2D TogglePosition(Canvas->SizeX-154.f*Scale,16.f);
     const FVector2D ToggleSize(138.f*Scale,30.f*Scale);
     DrawRect(FLinearColor(0.04f,0.18f,0.24f,0.96f),TogglePosition.X,TogglePosition.Y,ToggleSize.X,ToggleSize.Y);
@@ -860,6 +898,7 @@ void APortSimHUD::DrawHUD()
         Text(CranePawn->Status,FLinearColor(.65f,.85f,.7f));
         Text(CranePawn->bEmergencyStop?TEXT("비상 정지"):!CranePawn->bAutoRunning?TEXT("대기 / 정지"):CranePawn->bAutoPaused?TEXT("일시정지"):TEXT("실행 중"));
         Text(TEXT("H HUD · WASD 이동 · 우클릭 시점 · 선내 대기 물량 순차 하역"),FLinearColor(.6f,.7f,.8f));
+        DrawFault(Y,622.f*Scale);
         return;
     }
     DrawRect(FLinearColor(.015f,.03f,.05f,.88f),16,16,850*Scale,310*Scale);
@@ -883,6 +922,7 @@ void APortSimHUD::DrawHUD()
     if(CranePawn->bTerminalMode) Line(CranePawn->GetSTSStatus(),FLinearColor(0.5f,0.85f,1.f),0.85f);
     Line(CranePawn->Status, FLinearColor(0.4f, 1.f, 0.65f));
     Line(TEXT("등가 현수·수평 스프레더 | LT 환산·센서 모델은 가정 설정 적용"), FLinearColor(0.6f, 0.7f, 0.8f), 0.85f);
+    DrawFault(Y,822.f*Scale);
 }
 
 int32 AQuayCrane::GetSimulationSpeedStep() const

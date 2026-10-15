@@ -1,4 +1,5 @@
 #include "PortContainerActor.h"
+#include "PortAGVActor.h"
 #include "PortEnvironmentComponent.h"
 #include "TerminalLayout.h"
 #include "Components/StaticMeshComponent.h"
@@ -116,17 +117,26 @@ void APortContainerActor::ApplySecuredMotionFraction(double Fraction)
 
 FVector APortContainerActor::GetMotionVelocity() const
 {
-    return Body->IsSimulatingPhysics()?Body->GetPhysicsLinearVelocity():KinematicVelocityCentimetersPerSecond;
+    if(Body->IsSimulatingPhysics()) return Body->GetPhysicsLinearVelocity();
+    // Vessel samples remain cached after handover; only ship-secured cargo may use them.
+    if(LocationOwner==ECargoOwner::Ship && !GetAttachParentActor())
+        return KinematicVelocityCentimetersPerSecond;
+    if(LocationOwner==ECargoOwner::AGV)
+        if(const auto* Vehicle=Cast<APortAGVActor>(GetAttachParentActor()))
+            return Vehicle->PlannedMotionDirection(Vehicle->Sensors.FMSNextNode)*Vehicle->Speed;
+    return GetAttachParentActor()?GetAttachParentActor()->GetVelocity():FVector::ZeroVector;
 }
 
 FVector APortContainerActor::GetMotionAcceleration() const
 {
-    return Body->IsSimulatingPhysics()?FVector::ZeroVector:KinematicAccelerationCentimetersPerSecondSquared;
+    return !Body->IsSimulatingPhysics() && LocationOwner==ECargoOwner::Ship && !GetAttachParentActor()?
+        KinematicAccelerationCentimetersPerSecondSquared:FVector::ZeroVector;
 }
 
 FVector APortContainerActor::GetMotionJerk() const
 {
-    return Body->IsSimulatingPhysics()?FVector::ZeroVector:KinematicJerkCentimetersPerSecondCubed;
+    return !Body->IsSimulatingPhysics() && LocationOwner==ECargoOwner::Ship && !GetAttachParentActor()?
+        KinematicJerkCentimetersPerSecondCubed:FVector::ZeroVector;
 }
 
 void APortContainerActor::InitializeContainer(int32 Number)

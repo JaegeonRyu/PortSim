@@ -171,6 +171,7 @@ private:
     void Freeze(bool Paused);
     void Stop(const FString& Reason);
     FVector QuayPark(int32 Lane) const;
+    FVector QueueQuay(int32 STS) const;
     FVector CargoQuay(int32 CargoIndex) const;
     FVector FleetPark(int32 Vehicle) const;
     FVector YardHandover(const FSiteYardSlot& Slot) const;
