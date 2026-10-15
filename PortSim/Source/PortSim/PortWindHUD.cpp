@@ -42,7 +42,7 @@ void APortSimHUD::DrawWindCompass(const UPortEnvironmentComponent& Environment,f
         Enabled?Environment.GetEffectiveWindSpeedMetersPerSecond():0.f),75,104,Ink);
     if(Enabled && Environment.IsGustActive())
         Text(FString::Printf(TEXT("GUST +%.1f m/s"),Environment.GetGustSpeedMetersPerSecond()),75,119,FLinearColor(1.f,.72f,.2f));
-
+    Text(Enabled?TEXT("[Ctrl+0] OFF"):TEXT("[Ctrl+0] ON"),75,134,FLinearColor(.7f,.77f,.82f));
 }
 
 void APortSimHUD::DrawSeaState(const UPortEnvironmentComponent& Environment,float Scale)
@@ -62,5 +62,5 @@ void APortSimHUD::DrawSeaState(const UPortEnvironmentComponent& Environment,floa
     Text(FString::Printf(TEXT("Hs %.2f m | W %.1fs S %.1fs"),Environment.GetSignificantWaveHeightMeters(),
         Environment.GetWavePeriodSeconds(),Environment.GetSwellPeriodSeconds()),24,Ink);
     Text(FString::Printf(TEXT("heave %+.2fm | roll %+.2f deg"),Motion.HeaveMeters,Motion.RollDegrees),43,Ink);
-
+    Text(Enabled?TEXT("[Ctrl+1] OFF"):TEXT("[Ctrl+1] ON"),62,FLinearColor(.7f,.77f,.82f));
 }

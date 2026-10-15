@@ -521,6 +521,9 @@ void AQuayCrane::Tick(float DeltaSeconds)
             }
         }
         auto Axis = [PC](FKey Positive, FKey Negative) { return float(PC->IsInputKeyDown(Positive)) - float(PC->IsInputKeyDown(Negative)); };
+        const bool Ctrl=PC->IsInputKeyDown(EKeys::LeftControl) || PC->IsInputKeyDown(EKeys::RightControl);
+        if (Ctrl && PC->WasInputKeyJustPressed(EKeys::Zero)) Environment->ToggleWind();
+        else if (Ctrl && PC->WasInputKeyJustPressed(EKeys::One)) Environment->ToggleSeaMotion();
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::Home))
         { bFollowAGV=false; bFreeCamera=false; CameraArm->SetRelativeLocation(FVector(35000,0,0)); CameraArm->TargetArmLength=185000.f; CameraArm->SetRelativeRotation(FRotator(-52,38,0)); }
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::End))
