@@ -72,7 +72,7 @@ void AQuayCrane::TestEquipmentAndCamera()
         FVector Center,Extent;
         It->GetActorBounds(false,Center,Extent);
         MaxAGVY=FMath::Max(MaxAGVY,Center.Y+Extent.Y);
-        ParkingPass &= Center.Y+Extent.Y<23800 && Center.Y-Extent.Y>-52500;
+        ParkingPass &= Center.Y+Extent.Y<58000 && Center.Y-Extent.Y>36000;
         const FBox Bounds(Center-Extent,Center+Extent);
         for(const FBox& Other:AGVBounds)
             ParkingPass &= Bounds.Max.X<Other.Min.X || Bounds.Min.X>Other.Max.X
@@ -81,7 +81,7 @@ void AQuayCrane::TestEquipmentAndCamera()
     }
     ParkingPass &= WorldAGVCount==60;
     Pass &= ParkingPass;
-    UE_LOG(LogTemp,Display,TEXT("AGV_PARKING_%s: actual actors=%d; eastmost vehicle edge=%.2f m; worker-rest apron starts at 238 m; no parked overlap"),
+    UE_LOG(LogTemp,Display,TEXT("AGV_PARKING_%s: actual actors=%d; eastmost vehicle edge=%.2f m; all vehicles inside standby depot at Y=360..580 m; no parked overlap"),
         ParkingPass?TEXT("PASS"):TEXT("FAIL"),WorldAGVCount,MaxAGVY/100.);
     auto* SitePolygon=FindComponentByClass<UProceduralMeshComponent>();
     Pass &= SitePolygon && SitePolygon->GetNumSections()==1 &&

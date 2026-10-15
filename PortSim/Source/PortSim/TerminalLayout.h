@@ -116,10 +116,21 @@ namespace TerminalLayout
     constexpr float AGVNorthCrossY = 34700.f;
     constexpr float AGVSouthLoadedY = -48750.f;
     constexpr float AGVSouthReturnY = -50250.f;
-    // Six drive-through fast-charge bays replace staff parking beside the rest building.
-    constexpr int AGVChargeBays=6;
-    constexpr float AGVChargeEntryY=36500.f, AGVChargeExitY=42100.f, AGVChargeBayY=39300.f;
-    constexpr float AGVChargeBayX(int Bay) { return 4500.f+Bay*1000.f; }
+    // All 60 AGVs start and wait in this depot. Alternate entry/exit aisles
+    // serve pairs of rows in one direction, keeping opposing traffic apart.
+    constexpr int AGVStandbyColumns=10, AGVStandbyRows=6;
+    constexpr int AGVChargeBays=AGVStandbyColumns*AGVStandbyRows;
+    constexpr float AGVStandbyPitchY=3300.f;
+    constexpr float AGVStandbyX(int Bay) { return 4800.f+(Bay%AGVStandbyColumns)*620.f; }
+    constexpr float AGVStandbyY(int Bay) { return 38500.f+(Bay/AGVStandbyColumns)*AGVStandbyPitchY; }
+    constexpr float AGVStandbyEntryY(int Bay)
+    { return AGVStandbyY(Bay)+((Bay/AGVStandbyColumns)%2?1.f:-1.f)*AGVStandbyPitchY*.5f; }
+    constexpr float AGVStandbyExitY(int Bay)
+    { return AGVStandbyY(Bay)-((Bay/AGVStandbyColumns)%2?1.f:-1.f)*AGVStandbyPitchY*.5f; }
+    constexpr float AGVStandbyNorthY=56650.f;
+    static_assert(AGVChargeBays==60,"Every AGV needs its own depot bay");
+    static_assert(SiteCmX(620.f)>2*210.f+100.f,"Depot columns clear physical AGV widths");
+    static_assert(AGVStandbyPitchY*.5f>2*730.f+150.f,"Depot aisles clear adjacent parked AGVs");
     constexpr float AGVParkFirstY = -46000.f;
     // Three 20-bay rows leave room for a full AGV envelope between parked bays.
     constexpr int AGVParkRows=3, AGVParkBays=20;
@@ -206,9 +217,9 @@ namespace TerminalLayout
     }
     inline bool AGVEnvelopeInside(double MinX,double MaxX,double MinY,double MaxY)
     {
-        if (MinX<QuayLeftX || MaxX>SiteCmX(66000.f) || MinY<-52000.f || MaxY>43500.f)
+        if (MinX<QuayLeftX || MaxX>SiteCmX(66000.f) || MinY<-52000.f || MaxY>58000.f)
             return false;
-        if(MaxY>36000.f && (MinX<SiteCmX(3500.f) || MaxX>SiteCmX(15000.f))) return false;
+        if(MaxY>36000.f && (MinX<SiteCmX(4000.f) || MaxX>SiteCmX(15000.f))) return false;
         // Only the quay/spine corridor extends beyond the operational yard.
         return MaxX<=SiteCmX(18000.f) || (MinY>=-51700.f && MaxY<=35500.f);
     }

@@ -136,6 +136,7 @@ public:
     int32 PendingCargoTotal() const;
     void StopSimulation();
     FString ElapsedText() const;
+    FString CameraViewName=TEXT("전체");
     bool bRunSettingsSaved=true;
     void TickControlsTest(float Dt);
     int32 ControlsTestStage=0, ControlsTestFrames=0;

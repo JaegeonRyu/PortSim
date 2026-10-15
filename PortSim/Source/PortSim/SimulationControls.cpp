@@ -85,6 +85,7 @@ void AQuayCrane::StopSimulation()
         for(int32 I=0;I<3;++I) ConfiguredCargo[I]=PendingCargo[I];
         BuildTerminalSite();
         BuildConfiguredVessels();
+        SiteCameraIndex=-1;
     }
     ResetSimulation(); bAutoRunning=false; bAutoPaused=false;
     AutoElapsed=0; Status=TEXT("리셋 완료 — 설정 적용됨. 실행 버튼으로 시작하세요.");

@@ -293,7 +293,7 @@ void AQuayCrane::BeginPlay()
     }
     int32 FocusIndex=-1;
     if (bTerminalMode && FParse::Value(FCommandLine::Get(),TEXT("PortSimSiteFocus="),FocusIndex) && FocusIndex>=0 && FocusIndex<WorkingCranes.Num())
-    { SiteCameraIndex=FocusIndex-1; FocusNextSiteCrane(); }
+    { SiteCameraIndex=FocusIndex-1+(bUnifiedTerminal?1+ConfiguredShips:0); FocusNextSiteCrane(); }
     float RequestedPlayback=1.f;
     const bool ExplicitPlayback=FParse::Value(FCommandLine::Get(),TEXT("PortSimPlayback="),RequestedPlayback);
     if ((!bSmokeTest && !bTerminalTest && !FParse::Param(FCommandLine::Get(),TEXT("PortSimSiteTest")) &&
@@ -525,9 +525,9 @@ void AQuayCrane::Tick(float DeltaSeconds)
         if (Ctrl && PC->WasInputKeyJustPressed(EKeys::Zero)) Environment->ToggleWind();
         else if (Ctrl && PC->WasInputKeyJustPressed(EKeys::One)) Environment->ToggleSeaMotion();
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::Home))
-        { bFollowAGV=false; bFreeCamera=false; CameraArm->SetRelativeLocation(FVector(35000,0,0)); CameraArm->TargetArmLength=185000.f; CameraArm->SetRelativeRotation(FRotator(-52,38,0)); }
+        { CameraViewName=TEXT("전체"); bFollowAGV=false; bFreeCamera=false; CameraArm->SetRelativeLocation(FVector(35000,0,0)); CameraArm->TargetArmLength=185000.f; CameraArm->SetRelativeRotation(FRotator(-52,38,0)); }
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::End))
-        { bFollowAGV=false; bFreeCamera=false; CameraArm->SetRelativeLocation(FVector(12000,0,500)); CameraArm->TargetArmLength=bUnifiedTerminal?65000.f:22000.f; }
+        { CameraViewName=TEXT("근접"); bFollowAGV=false; bFreeCamera=false; CameraArm->SetRelativeLocation(FVector(12000,0,500)); CameraArm->TargetArmLength=bUnifiedTerminal?65000.f:22000.f; }
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::Tab)) FocusNextSiteCrane();
         if (!bFreeCamera && !FParse::Param(FCommandLine::Get(),TEXT("PortSimPlanView")) && !FParse::Param(FCommandLine::Get(),TEXT("PortSimAerialView")))
         {
@@ -879,9 +879,9 @@ void APortSimHUD::DrawHUD()
         Y+=43*Scale;
         Text(FString::Printf(TEXT("설정 배속: %.0f배 · 실제 배속: %.2f배"),CranePawn->SimulationSpeed,CranePawn->GetActualPlaybackRate()),FLinearColor(1,.85f,.25f));
         Text(FString::Printf(TEXT("실행시간 (배속 반영): %s"),*CranePawn->ElapsedText()),FLinearColor(1,.85f,.25f));
-        Text(CranePawn->bEmergencyStop?TEXT("비상 정지"):!CranePawn->bAutoRunning?TEXT("대기 / 정지"):CranePawn->bAutoPaused?TEXT("일시정지"):TEXT("실행 중"));
+        Text(FString::Printf(TEXT("%s · %s"),CranePawn->bEmergencyStop?TEXT("비상 정지"):!CranePawn->bAutoRunning?TEXT("대기"):CranePawn->bAutoPaused?TEXT("일시정지"):TEXT("실행 중"),*CranePawn->CameraViewName));
         Text(TEXT("방향키 회전 · PgUp/PgDn 확대·축소"),FLinearColor(.6f,.7f,.8f));
-        Text(TEXT("Tab 크레인 · Home 전체 · End 근접"),FLinearColor(.6f,.7f,.8f));
+        Text(TEXT("Tab 대기소·안벽·크레인 / Home 전체 / End 근접"),FLinearColor(.6f,.7f,.8f));
         if(!CranePawn->bRunSettingsSaved) Text(TEXT("설정 저장 실패"),FLinearColor(1,.4f,.3f));
         DrawFault(Y,652.f*Scale);
         return;
@@ -894,7 +894,7 @@ void APortSimHUD::DrawHUD()
     if (CranePawn->bTerminalMode)
     {
         Line(CranePawn->GetFleetStatus(), FLinearColor(0.3f,0.8f,1.f));
-        Line(TEXT("Tab 크레인 · Home 전체 · End 근접"), FLinearColor(0.3f,1.f,0.7f));
+        Line(TEXT("Tab 대기소·안벽·크레인 / Home 전체 / End 근접"), FLinearColor(0.3f,1.f,0.7f));
         Line(FString::Printf(TEXT("선박 %d/24 | 완료 %d | C%02d | %s %s | %.1f s"),
             CranePawn->GetShipCargoCount(),CranePawn->AutoCompleted,CranePawn->ActiveCargoIndex+1,
             CranePawn->GetAutoStageName(),CranePawn->bAutoPaused?TEXT("[일시정지]"):TEXT(""),CranePawn->AutoElapsed),FLinearColor::White);

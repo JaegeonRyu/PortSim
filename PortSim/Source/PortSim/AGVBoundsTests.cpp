@@ -13,7 +13,7 @@ bool FAGVBoundsTest::RunTest(const FString& Parameters)
     auto Fits=[](float X,float Y,float EX,float EY) { return AGVEnvelopeInside(X-EX,X+EX,Y-EY,Y+EY); };
     Check(!Fits(SiteCmX(16500),51500,210,730),"old right-side route is forbidden");
     Check(!Fits(SiteCmX(14500),-55000,730,210),"old off-map return is forbidden");
-    Check(!Fits(SiteCmX(5500),46000,210,730),"worker-rest site is excluded");
+    Check(!Fits(SiteCmX(2500),56000,210,730),"worker-rest site is excluded");
     Check(!Fits(SiteCmX(42000),37000,730,210),"unused cargo apron is excluded");
     Check(Fits(SiteCmX(AGVInlandInboundX),0,210,730),"inland inbound service lane is inside road bounds");
     Check(Fits(SiteCmX(AGVInlandReturnX),0,210,730),"inland return service lane is inside road bounds");
@@ -34,7 +34,7 @@ bool FAGVBoundsTest::RunTest(const FString& Parameters)
     for(float X:{5500.f,16500.f}) Check(Fits(SiteCmX(X),AGVNorthCrossY,210,730),"north crossing footprint");
     for(float X:{AGVQuayOutboundLaneX,AGVQuayInboundLaneX,12500.f}) Check(Fits(SiteCmX(X),AGVSouthLoadedY,210,730),"south loaded footprint");
     for(float X:{10000.f,14500.f}) Check(Fits(SiteCmX(X),AGVSouthReturnY,730,210),"return crossing footprint");
-    for(int I=0;I<60;++I) Check(Fits(SiteCmX(AGVParkX(I)),AGVParkY(I),210,730),"fleet parking footprint");
+    for(int I=0;I<60;++I) Check(Fits(SiteCmX(AGVStandbyX(I)),AGVStandbyY(I),210,730),"fleet parking footprint");
     Check(AGVParkY(AGVParkBays-1)+730 < AGVNorthCrossY-730,"north crossing clears parked fleet");
     Check(AGVSouthLoadedY-AGVSouthReturnY>1460,"south crossings clear full vehicle lengths");
     Check(AGVParkFirstY-AGVSouthLoadedY>1460,"south crossing clears idle parking");
