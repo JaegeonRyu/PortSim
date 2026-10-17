@@ -27,15 +27,18 @@ void AQuayCrane::SetPendingShips(int32 Count)
 {
     const int32 Old=PendingShips;
     PendingShips=FMath::Clamp(Count,1,3);
-    for(int32 I=Old;I<PendingShips;++I) PendingCargo[I]=1;
+    for(int32 I=Old;I<PendingShips;++I) PendingCargo[I]=GetPendingVesselInput(I)?GetPendingVesselInput(I)->Rows.Num():ManualCargo[I];
     int32 Excess=PendingCargoTotal()-5594;
     for(int32 I=0;I<PendingShips && Excess>0;++I)
-    { const int32 Take=FMath::Min(Excess,PendingCargo[I]-1); PendingCargo[I]-=Take; Excess-=Take; }
+    { if(GetPendingVesselInput(I)) continue; const int32 Take=FMath::Min(Excess,PendingCargo[I]-1); PendingCargo[I]-=Take; Excess-=Take; }
 }
 void AQuayCrane::SetPendingCargo(int32 Vessel,int32 Count)
 {
-    if(Vessel>=0 && Vessel<PendingShips)
+    if(Vessel>=0 && Vessel<PendingShips && !PendingFileMode[Vessel])
+    {
         PendingCargo[Vessel]=FMath::Clamp(Count,1,PendingCargoLimit(Vessel));
+        ManualCargo[Vessel]=PendingCargo[Vessel];
+    }
 }
 void AQuayCrane::LoadRunSettings()
 {
@@ -46,20 +49,40 @@ void AQuayCrane::LoadRunSettings()
         double Ships=3; Object->TryGetNumberField(TEXT("ships"),Ships);
         PendingShips=FMath::IsFinite(Ships)?int32(FMath::Clamp(Ships,1.,3.)):3;
         int32 Budget=5594;
-        for(int32 I=0;I<PendingShips;++I)
+        for(int32 I=0;I<3;++I)
         {
             double Count=200; Object->TryGetNumberField(FString::Printf(TEXT("cargo_%d"),I+1),Count);
-            PendingCargo[I]=FMath::IsFinite(Count)?int32(FMath::Clamp(Count,1.,double(Budget-(PendingShips-I-1)))):1;
-            Budget-=PendingCargo[I];
+            PendingCargo[I]=FMath::IsFinite(Count)?int32(FMath::Clamp(Count,1.,double(I<PendingShips?Budget-(PendingShips-I-1):5594))):1;
+            if(I<PendingShips) Budget-=PendingCargo[I];
         }
     }
+    for(int32 I=0;I<3;++I)
+    {
+        ManualCargo[I]=PendingCargo[I];
+        if(Object.IsValid())
+        {
+            Object->TryGetBoolField(FString::Printf(TEXT("file_mode_%d"),I+1),PendingFileMode[I]);
+            double Manual=ManualCargo[I];
+            if(Object->TryGetNumberField(FString::Printf(TEXT("manual_cargo_%d"),I+1),Manual) && FMath::IsFinite(Manual))
+                ManualCargo[I]=int32(FMath::Clamp(Manual,1.,5594.));
+        }
+    }
+    if(bUnifiedTerminal && Object.IsValid()) RestoreVesselInputs(*Object);
     // Command-line overrides allow repeatable tests without changing saved settings.
     int32 Ships=PendingShips;
     FParse::Value(FCommandLine::Get(),TEXT("PortSimShips="),Ships); SetPendingShips(Ships);
     for(int32 I=0;I<PendingShips;++I)
     {
         int32 Count=PendingCargo[I];
-        if(FParse::Value(FCommandLine::Get(),*FString::Printf(TEXT("PortSimCargo%d="),I+1),Count)) SetPendingCargo(I,Count);
+        if(FParse::Value(FCommandLine::Get(),*FString::Printf(TEXT("PortSimCargo%d="),I+1),Count))
+        { PendingFileMode[I]=false; SetPendingCargo(I,Count); }
+    }
+    if(bUnifiedTerminal && !ApplyPendingVesselInputs())
+    {
+        // Invalid saved combinations must not partially apply to the live scene.
+        for(int32 I=0;I<3;++I) PendingFileMode[I]=false;
+        SetPendingShips(PendingShips);
+        ApplyPendingVesselInputs();
     }
     ConfiguredShips=PendingShips;
     for(int32 I=0;I<3;++I) ConfiguredCargo[I]=PendingCargo[I];
@@ -67,7 +90,13 @@ void AQuayCrane::LoadRunSettings()
 bool AQuayCrane::SaveRunSettings()
 {
     auto Object=MakeShared<FJsonObject>(); Object->SetNumberField(TEXT("ships"),PendingShips);
-    for(int32 I=0;I<3;++I) Object->SetNumberField(FString::Printf(TEXT("cargo_%d"),I+1),PendingCargo[I]);
+    for(int32 I=0;I<3;++I)
+    {
+        Object->SetNumberField(FString::Printf(TEXT("cargo_%d"),I+1),PendingCargo[I]);
+        Object->SetNumberField(FString::Printf(TEXT("manual_cargo_%d"),I+1),ManualCargo[I]);
+        Object->SetBoolField(FString::Printf(TEXT("file_mode_%d"),I+1),PendingFileMode[I]);
+    }
+    SaveVesselInputs(*Object);
     FString Json; FJsonSerializer::Serialize(Object,TJsonWriterFactory<>::Create(&Json));
     const FString Path=RunSettingsPath();
     bRunSettingsSaved=FFileHelper::SaveStringToFile(Json,*(Path+TEXT(".tmp")),FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM) &&
@@ -76,6 +105,7 @@ bool AQuayCrane::SaveRunSettings()
 }
 void AQuayCrane::StopSimulation()
 {
+    if(bUnifiedTerminal && !ApplyPendingVesselInputs()) return;
     SaveRunSettings();
     if (bUnifiedTerminal)
     {

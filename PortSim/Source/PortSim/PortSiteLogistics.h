@@ -26,6 +26,7 @@ struct FSiteYardSlot
 struct FSiteShipCargo
 {
     FTransform Transform;
+    FName ContainerName;
     TWeakObjectPtr<APortContainerActor> Actor;
     int32 Wave=0;
     int32 STS=0, ID=0, State=0, PlannedSlot=INDEX_NONE; // same actor: 0 aboard, 1 transfer, 2 yard
@@ -58,7 +59,7 @@ class PORTSIM_API APortSiteLogistics : public AActor
 public:
     APortSiteLogistics();
     void SetSTSProfile(const FSTSOperatingProfile& Profile) { STSProfile=Profile; }
-    void AddShipCargo(FVector Position,int32 STS,int32 Wave=0);
+    void AddShipCargo(FVector Position,int32 STS,int32 Wave=0,FName ContainerName=NAME_None);
     int32 ConfiguredShips=3;
     int32 ConfiguredCargo[3]={200,200,200};
     void Initialize(const TArray<TObjectPtr<APortWorkingCrane>>& Cranes,TArray<FSiteYardSlot> Slots,

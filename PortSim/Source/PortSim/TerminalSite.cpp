@@ -277,17 +277,22 @@ void AQuayCrane::BuildTerminalSite()
             Box(Roads,FVector(-32,Y+146,-1),FVector(29,7,10));
             Box(Buildings,FVector(-32,Y-125,14),FVector(38,18,20));
         }
+        const FPortVesselInput* Imported=bUnifiedTerminal?GetVesselInput(VesselIndex):nullptr;
         const int32 Count=bUnifiedTerminal?ConfiguredCargo[VesselIndex]:ShipRows*ShipBays*ShipTiers;
         for(int32 Index=0;Index<Count;++Index)
                 {
                     const int32 Capacity=ShipRows*ShipBays*ShipTiers;
                     const int32 Local=Index%Capacity;
-                    const int32 Row=Local%ShipRows, Bay=(Local/ShipRows)%ShipBays, Tier=Local/(ShipRows*ShipBays);
+                    const auto* InputRow=Imported?&Imported->Rows[Index]:nullptr;
+                    const int32 Row=InputRow?InputRow->GridSlot.Y:Local%ShipRows;
+                    const int32 Bay=InputRow?InputRow->GridSlot.X:(Local/ShipRows)%ShipBays;
+                    const int32 Tier=InputRow?InputRow->GridSlot.Z:Local/(ShipRows*ShipBays);
                     const float BayY=bUnifiedTerminal?-81.f+Bay*18.f:-99.f+Bay*13.f;
                     const FVector Position(-49+Row*3,Y+BayY,5.695+Tier*2.59);
                     const float CraneSpacing=bUnifiedTerminal?70.f:100.f;
                     const int32 Nearest=FMath::Clamp(FMath::RoundToInt((Position.Y-(Y-CraneSpacing))/CraneSpacing),0,2)+(bUnifiedTerminal?VesselIndex*3:(Y<0?0:5));
-                    SiteLogistics->AddShipCargo(Position*100.,Nearest,bUnifiedTerminal?Index/Capacity:0);
+                    SiteLogistics->AddShipCargo(Position*100.,Nearest,bUnifiedTerminal && !Imported?Index/Capacity:0,
+                        InputRow?FName(*InputRow->ContainerId):NAME_None);
                 }
         ++VesselIndex;
     }

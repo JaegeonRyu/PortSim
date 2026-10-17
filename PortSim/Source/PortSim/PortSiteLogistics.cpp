@@ -222,7 +222,7 @@ void APortSiteLogistics::ApplyVesselMotions(float FrameDurationSeconds)
     }
 }
 
-void APortSiteLogistics::AddShipCargo(FVector Position,int32 STS,int32 Wave)
+void APortSiteLogistics::AddShipCargo(FVector Position,int32 STS,int32 Wave,FName ContainerName)
 {
     check(STS>=0 && STS<9);
     FSiteShipCargo Record;
@@ -233,6 +233,11 @@ void APortSiteLogistics::AddShipCargo(FVector Position,int32 STS,int32 Wave)
     auto* Cargo=GetWorld()->SpawnActor<APortContainerActor>(Position,FRotator::ZeroRotator,Params);
     check(Cargo);
     Cargo->InitializeContainer(Record.ID);
+    if(!ContainerName.IsNone()) Cargo->ContainerID=ContainerName;
+    Record.ContainerName=Cargo->ContainerID;
+#if WITH_EDITOR
+    Cargo->SetActorLabel(FString::Printf(TEXT("Container_%s"),*Record.ContainerName.ToString()));
+#endif
     Cargo->ConfigureSpecification(PortContainerSpecification::ForSequence(Record.ID),
         STSProfile.bReady?STSProfile.ContainerCoG:FVector::ZeroVector);
     // Preserve the existing injected-overload test path without replacing normal
@@ -2035,7 +2040,7 @@ bool APortSiteLogistics::Validate(FString& Error) const
     {
         const auto* Actor=Cargo.Actor.Get();
         if (!IsValid(Actor) || Actor->GetOwner()!=this || Actors.Contains(Actor) ||
-            Actor->ContainerID!=FName(*FString::Printf(TEXT("C%02d"),Cargo.ID)) || Cargo.STS<0 || Cargo.STS>=LaneCount)
+            Actor->ContainerID!=Cargo.ContainerName || Cargo.STS<0 || Cargo.STS>=LaneCount)
         { Error=TEXT("Missing, replaced, duplicate or unassigned ship container actor"); return false; }
         if(!Yard.IsValidIndex(Cargo.PlannedSlot) || !Yard[Cargo.PlannedSlot].Reserved || Yard[Cargo.PlannedSlot].Central ||
             PlannedDestinations.Contains(Cargo.PlannedSlot))
@@ -2162,7 +2167,7 @@ bool APortSiteLogistics::Validate(FString& Error) const
         if (Job.Actor.IsValid())
         {
             ++Physical;
-            if (Job.Actor!=Manifest[Job.Cargo].Actor || Job.Actor->ContainerID!=FName(*FString::Printf(TEXT("C%02d"),Manifest[Job.Cargo].ID)))
+            if (Job.Actor!=Manifest[Job.Cargo].Actor || Job.Actor->ContainerID!=Manifest[Job.Cargo].ContainerName)
             { Error=TEXT("Cargo identity changed during handover"); return false; }
             if ((Job.Stage==2 || Job.Stage==3 || Job.Stage==9) && (Job.Actor->LocationOwner!=ECargoOwner::AGV || Job.Actor->GetAttachParentActor()!=Vehicles[Lane] ||
                 !Job.Actor->GetActorLocation().Equals(Vehicles[Lane]->CargoPosition(),1.f)))
@@ -2172,12 +2177,12 @@ bool APortSiteLogistics::Validate(FString& Error) const
         { Error=TEXT("AGV moved without a path reservation"); return false; }
     }
     if (PlacedContainers.Num()!=Delivered) { Error=TEXT("Delivered cargo actor count mismatch" ); return false; }
-    TSet<FName> PlacedIDs;
+    TSet<const APortContainerActor*> PlacedIDs;
     for (const auto& Cargo:PlacedContainers)
     {
-        if (!IsValid(Cargo) || Cargo->GetOwner()!=this || Cargo->LocationOwner!=ECargoOwner::Yard || Cargo->GetAttachParentActor() || PlacedIDs.Contains(Cargo->ContainerID))
+        if (!IsValid(Cargo) || Cargo->GetOwner()!=this || Cargo->LocationOwner!=ECargoOwner::Yard || Cargo->GetAttachParentActor() || PlacedIDs.Contains(Cargo))
         { Error=TEXT("Lost/duplicate/attached yard cargo actor" ); return false; }
-        PlacedIDs.Add(Cargo->ContainerID);
+        PlacedIDs.Add(Cargo.Get());
     }
     for (int32 Index:PreparedCargo) if (Index!=INDEX_NONE)
     {
