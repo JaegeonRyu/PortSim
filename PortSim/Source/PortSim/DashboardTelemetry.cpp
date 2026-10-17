@@ -507,6 +507,28 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
         O->SetStringField(TEXT("type"),TEXT("vessel"));
         O->SetStringField(TEXT("class"),TEXT("Logical vessel / manifest group"));
         Vector(O,TEXT("position_m"),FVector(-34,TerminalLayout::VesselCenterY(V),0));
+        TArray<TSharedPtr<FJsonValue>> Stowage;
+        for(const auto& C:Manifest) if(C.STS/3==V)
+        {
+            auto Slot=Object();
+            const FVector P=C.Transform.GetLocation()*.01f;
+            Slot->SetNumberField(TEXT("bay"),FMath::RoundToInt((P.Y-TerminalLayout::VesselCenterY(V)+81.f)/18.f)+1);
+            Slot->SetNumberField(TEXT("row"),FMath::RoundToInt((P.X+49.f)/3.f)+1);
+            Slot->SetNumberField(TEXT("tier"),FMath::RoundToInt((P.Z-5.695f)/2.59f)+1);
+            Slot->SetNumberField(TEXT("wave"),C.Wave+1);
+            if(const auto* Cargo=C.Actor.Get())
+            {
+                Slot->SetStringField(TEXT("actor_id"),Cargo->GetName());
+                Slot->SetStringField(TEXT("name"),Cargo->ContainerID.ToString());
+                Slot->SetStringField(TEXT("state"),StaticEnum<ECargoOwner>()->GetNameStringByValue(int64(Cargo->LocationOwner)));
+                Slot->SetBoolField(TEXT("waiting"),Cargo->LocationOwner==ECargoOwner::Ship && Cargo->IsHidden());
+            }
+            Stowage.Add(Value(Slot));
+        }
+        O->SetArrayField(TEXT("stowage"),Stowage);
+        O->SetNumberField(TEXT("stowage_bays"),TerminalLayout::VesselBays);
+        O->SetNumberField(TEXT("stowage_rows"),TerminalLayout::VesselRows);
+        O->SetNumberField(TEXT("stowage_tiers"),TerminalLayout::VesselTiers);
         O->SetNumberField(TEXT("initial_count"),Total);
         O->SetNumberField(TEXT("unloaded"),Unloaded); O->SetNumberField(TEXT("placed"),Placed);
         O->SetNumberField(TEXT("started_at"),VesselStarted[V]);

@@ -87,6 +87,34 @@ function map(){
  return `<section class="panel"><div class="panel-head"><div><h2>터미널 오버뷰 <span class="number">TOP VIEW</span></h2><p>장비를 클릭해 상세 정보를 확인하세요</p></div><div class="legend"><span><i class="type-dot"></i>STS</span><span><i class="type-dot" style="background:#779bbc"></i>AGV</span><span><i class="type-dot" style="background:#c69757"></i>RMG</span></div></div><div class="map-wrap"><svg class="terminal-map" viewBox="0 0 750 390" role="img" aria-label="실행 좌표 기반 항만 장비 지도"><defs><pattern id="map-grid" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".55" fill="#dce8e1"/></pattern></defs><rect width="750" height="390" fill="url(#map-grid)"/><rect x="42" y="25" width="87" height="337" rx="9" fill="#193e4c"/><rect x="129" y="25" width="586" height="337" rx="5" fill="#f1f5f0"/><path d="M${X(70)} 29v330M${X(110)} 29v330M${X(390)} 29v330M${X(650)} 29v330" stroke="#e1e9e2" stroke-width="11"/><path d="M${X(70)} 29v330M${X(390)} 29v330" stroke="#fcfdfb" stroke-width=".7" stroke-dasharray="6 4"/>${shapes}<text x="52" y="18" class="map-text">QUAYSIDE</text><text x="300" y="18" class="map-text">CONTAINER YARD</text><text x="635" y="18" class="map-text">LANDSIDE</text><rect x="646" y="120" width="43" height="65" rx="3" fill="#d4e1d8"/><rect x="646" y="220" width="43" height="34" rx="3" fill="#d4e1d8"/><text x="667" y="156" fill="#80998b" font-size="6" text-anchor="middle">OPS</text><path d="M701 333v-19m-4 5 4-5 4 5" stroke="#8aa197"/><text x="698" y="343" fill="#8aa197" font-size="7">Y−</text>${!state?'<text x="388" y="203" text-anchor="middle" fill="#6f9181" font-size="12">시뮬레이터를 실행하면 장비가 표시됩니다</text>':''}</svg></div><div class="map-caption"><span>배치 좌표: 엔진 데이터 · 장비 기호는 확대 표시</span><span>컨테이너 상세는 목록에서 조회</span></div><div class="flow">${[['ship','선박'],['crane','STS'],['agv','AGV'],['crane','RMG'],['grid','야드']].map(([ic,t],i)=>`${i?'<span class="arrow">→</span>':''}<span class="step"><span class="step-icon">${icon(ic)}</span><b>${t}</b></span>`).join('')}</div></section>`;
 }
 
+function stowagePlans(){
+ const vessels=state?.vessels||[];
+ return `<section class="panel stowage-panel"><div class="panel-head"><div><h2>선박별 선내 적재도</h2><p>시뮬레이션 Bay · Row · Tier 기준 · 칸을 선택하면 화물 상세를 표시합니다.</p></div><span class="live-label">${live?'● LIVE':'○ SNAPSHOT'}</span></div><div class="stowage-legend"><span class="aboard">선내</span><span class="transfer">이송 중</span><span class="landed">야드 완료</span><span class="waiting">후속 차수 대기</span><span>빈 칸: 초기 화물 없음</span></div><div class="stowage-vessels">${vessels.map(v=>{
+  if(!Array.isArray(v.stowage))return `<article><h3>${esc(v.name)}</h3><p>적재도 데이터가 없습니다. 새 빌드에서 시뮬레이션을 실행해 주세요.</p></article>`;
+  const slots=v.stowage, waves=[...new Set(slots.map(c=>c.wave))].sort((a,b)=>a-b);
+  const aboard=slots.filter(c=>c.state==='Ship'&&!c.waiting).length;
+  const waiting=slots.filter(c=>c.waiting).length;
+  const index=new Map(slots.map(c=>[`${c.wave}/${c.tier}/${c.row}/${c.bay}`,c]));
+  let layers='';
+  for(const wave of waves)for(let tier=v.stowage_tiers;tier>=1;tier--){
+   let cells='<span class="stowage-axis">R / B</span>';
+   for(let bay=1;bay<=v.stowage_bays;bay++)cells+=`<span class="stowage-axis">${bay}</span>`;
+   for(let row=1;row<=v.stowage_rows;row++){
+    cells+=`<span class="stowage-axis">${row}</span>`;
+    for(let bay=1;bay<=v.stowage_bays;bay++){
+     const c=index.get(`${wave}/${tier}/${row}/${bay}`);
+     if(!c){cells+='<span class="stowage-slot empty-slot" aria-label="초기 화물 없음"></span>';continue;}
+     const status=c.waiting?'waiting':c.state==='Ship'?'aboard':c.state==='Yard'?'landed':['STS','AGV','RMG'].includes(c.state)?'transfer':'unknown';
+     const description=`${c.name||'화물'} · Bay ${bay} / Row ${row} / Tier ${tier} · ${c.waiting?'후속 차수 대기':labels[c.state]||'상태 없음'}`;
+     cells+=`<button class="stowage-slot ${status} ${selected===c.actor_id?'selected':''}" ${c.actor_id?`data-actor="${esc(c.actor_id)}"`:'disabled'} title="${esc(description)}" aria-label="${esc(description)}">${c.state==='Yard'?'✓':c.waiting?'·':c.state==='Ship'?'■':'↗'}</button>`;
+    }
+   }
+   layers+=`<div class="stowage-layer"><h4>${waves.length>1?`차수 ${wave} · `:''}Tier ${tier}</h4><div class="stowage-scroll"><div class="stowage-grid" style="grid-template-columns:28px repeat(${v.stowage_bays},minmax(22px,1fr))">${cells}</div></div></div>`;
+  }
+  return `<article><h3>${esc(v.name)}</h3><p>선내 ${num(aboard,0)}개 · 대기 ${num(waiting,0)}개 · 전체 ${num(slots.length,0)}개</p>${layers||'<p>적재 화물이 없습니다.</p>'}</article>`;
+ }).join('')||'<p class="empty">선박 데이터 수신 대기</p>'}</div></section>`;
+}
+
 function equipmentTable(){
  const all=actors().filter(a=>(filter==='all'||a.type===filter)&&`${a.name} ${a.id} ${a.class} ${labels[a.state]||a.state}`.toLowerCase().includes(query.toLowerCase()));
  const size=view==='equipment'?14:5;page=Math.min(page,Math.max(0,Math.ceil(all.length/size)-1));
@@ -215,7 +243,7 @@ function renderContent(){
  heading();
  if(view==='sensors')$('#view-content').innerHTML=sensorsPage();
  else if(view==='performance')$('#view-content').innerHTML=performancePage();
- else $('#view-content').innerHTML=`<div class="${view==='equipment'?'full-equipment':''}"><div class="monitor-grid"><div>${view==='overview'?map():''}${equipmentTable()}</div>${inspector()}</div></div>`;
+ else $('#view-content').innerHTML=`<div class="${view==='equipment'?'full-equipment':''}"><div class="monitor-grid"><div>${view==='overview'?map()+stowagePlans():''}${equipmentTable()}</div>${inspector()}</div></div>`;
 }
 function choose(id){selected=id;renderContent();}
 async function poll(){

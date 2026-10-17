@@ -187,8 +187,9 @@ void APortSiteLogistics::SetWindVelocity(FVector WorldVelocityMetersPerSecond)
     for(const auto& Crane:Equipment) if(IsValid(Crane)) Crane->SetWindVelocity(WindVelocityMetersPerSecond);
 }
 
-void APortSiteLogistics::SetVesselMotions(const TArray<FPortVesselMotion>& Motions,const TArray<FVector>& BasePivots)
+void APortSiteLogistics::SetVesselMotions(const TArray<FPortVesselMotion>& Motions,const TArray<FVector>& BasePivots,const FPortSeaState& SeaState)
 {
+    FrameSeaState=SeaState;
     VesselMotions=Motions;
     VesselBasePivots=BasePivots;
 }
@@ -1702,6 +1703,14 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
     while(PendingSimulationSeconds+1.e-9>=TrafficStepSeconds)
     {
         PendingSimulationSeconds-=TrafficStepSeconds;
+        // Environment advances once per render frame, while traffic can take
+        // many fixed steps. Sample each step at its own sea time; replaying the
+        // frame endpoint creates stationary positions with nonzero velocities.
+        auto StepSea=FrameSeaState;
+        if(StepSea.bSeaMotionEnabled)
+            StepSea.ElapsedSeconds=FMath::Max(0.,FrameSeaState.ElapsedSeconds-PendingSimulationSeconds);
+        for(int32 Vessel=0;Vessel<VesselMotions.Num();++Vessel)
+            VesselMotions[Vessel]=StepSea.SampleVesselMotion(Vessel);
         BeginTrafficFrame();
         AdvanceStep(static_cast<float>(TrafficStepSeconds),false);
         if(!Fault.IsEmpty()) break;

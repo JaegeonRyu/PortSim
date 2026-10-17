@@ -171,7 +171,7 @@ void AQuayCrane::ApplySeaMotion()
                 Base.GetLocation()+Motion.TranslationCentimeters,
                 Motion.TransformRotation(Base.GetRotation()),false,nullptr,ETeleportType::TeleportPhysics);
         }
-        if(SiteLogistics) SiteLogistics->SetVesselMotions(Motions,VesselBasePivots);
+        if(SiteLogistics) SiteLogistics->SetVesselMotions(Motions,VesselBasePivots,Environment->GetSeaState());
         return;
     }
     const FPortVesselMotion Motion=Environment->GetVesselMotion(0);
