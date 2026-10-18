@@ -281,6 +281,62 @@ UPortEnvironmentComponent::UPortEnvironmentComponent()
     PrimaryComponentTick.bCanEverTick=false;
 }
 
+void UPortEnvironmentComponent::SetWindSpeedMetersPerSecond(float Speed)
+{
+    if(!FMath::IsFinite(Speed)) return;
+    Wind.WindSpeedMetersPerSecond=Wind.TargetWindSpeedMetersPerSecond=
+        FMath::Clamp(Speed,FPortWindState::MinimumSpeed,FPortWindState::MaximumSpeed);
+    // A UI-selected mean remains stable; gusts still follow their independent schedule.
+    Wind.SecondsUntilTarget=TNumericLimits<double>::Max();
+}
+
+void UPortEnvironmentComponent::SetSeaIntensity(float Intensity)
+{
+    Intensity=FMath::Clamp(Intensity,0.f,1.f);
+    Sea.WaveHeightMeters=FMath::Lerp(FPortSeaState::MinimumWaveHeightMeters,FPortSeaState::MaximumWaveHeightMeters,Intensity);
+    Sea.SwellHeightMeters=FMath::Lerp(FPortSeaState::MinimumSwellHeightMeters,FPortSeaState::MaximumSwellHeightMeters,Intensity);
+}
+
+float UPortEnvironmentComponent::GetSeaIntensity() const
+{
+    const float Wave=(Sea.WaveHeightMeters-FPortSeaState::MinimumWaveHeightMeters)/
+        (FPortSeaState::MaximumWaveHeightMeters-FPortSeaState::MinimumWaveHeightMeters);
+    const float Swell=(Sea.SwellHeightMeters-FPortSeaState::MinimumSwellHeightMeters)/
+        (FPortSeaState::MaximumSwellHeightMeters-FPortSeaState::MinimumSwellHeightMeters);
+    return FMath::Clamp((Wave+Swell)*.5f,0.f,1.f);
+}
+
+void UPortEnvironmentComponent::SetFogIntensity(float Intensity)
+{
+    Intensity=FMath::Clamp(Intensity,0.f,1.f);
+    Fog.VisibilityMeters=FPortFogState::MaximumVisibilityMeters*FMath::Pow(
+        FPortFogState::MinimumVisibilityMeters/FPortFogState::MaximumVisibilityMeters,Intensity);
+}
+
+float UPortEnvironmentComponent::GetFogIntensity() const
+{
+    return FMath::Clamp(FMath::Loge(FPortFogState::MaximumVisibilityMeters/Fog.VisibilityMeters)/
+        FMath::Loge(FPortFogState::MaximumVisibilityMeters/FPortFogState::MinimumVisibilityMeters),0.f,1.f);
+}
+
+void UPortEnvironmentComponent::SetFogVisibilityMeters(float VisibilityMeters)
+{
+    if(FMath::IsFinite(VisibilityMeters))
+        Fog.VisibilityMeters=FMath::Clamp(VisibilityMeters,FPortFogState::MinimumVisibilityMeters,FPortFogState::MaximumVisibilityMeters);
+}
+
+void UPortEnvironmentComponent::SetRainIntensity(float Intensity)
+{
+    Intensity=FMath::Clamp(Intensity,0.f,1.f);
+    Rain.RainfallMmPerHour=FMath::Lerp(FPortRainState::MinimumRainfallMmPerHour,FPortRainState::MaximumRainfallMmPerHour,Intensity);
+}
+
+void UPortEnvironmentComponent::SetRainfallMmPerHour(float RainfallMmPerHour)
+{
+    if(FMath::IsFinite(RainfallMmPerHour))
+        Rain.RainfallMmPerHour=FMath::Clamp(RainfallMmPerHour,FPortRainState::MinimumRainfallMmPerHour,FPortRainState::MaximumRainfallMmPerHour);
+}
+
 void UPortEnvironmentComponent::BeginPlay()
 {
     Super::BeginPlay();

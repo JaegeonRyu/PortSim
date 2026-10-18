@@ -1,4 +1,5 @@
 #include "QuayCrane.h"
+#include "PortEnvironmentComponent.h"
 #include "PortSiteLogistics.h"
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
@@ -52,6 +53,18 @@ void AQuayCrane::LoadRunSettings()
             PendingCargo[I]=FMath::IsFinite(Count)?int32(FMath::Clamp(Count,1.,double(Budget-(PendingShips-I-1)))):1;
             Budget-=PendingCargo[I];
         }
+        if(Environment && !FParse::Param(FCommandLine::Get(),TEXT("unattended")))
+        {
+            bool Enabled=false; double Value=0;
+            if(Object->TryGetBoolField(TEXT("wind_enabled"),Enabled)) Environment->SetWindEnabled(Enabled);
+            if(Object->TryGetNumberField(TEXT("wind_speed_mps"),Value)) Environment->SetWindSpeedMetersPerSecond(Value);
+            if(Object->TryGetBoolField(TEXT("sea_enabled"),Enabled)) Environment->SetSeaMotionEnabled(Enabled);
+            if(Object->TryGetNumberField(TEXT("sea_intensity"),Value)) Environment->SetSeaIntensity(Value);
+            if(Object->TryGetBoolField(TEXT("rain_enabled"),Enabled)) Environment->SetRainEnabled(Enabled);
+            if(Object->TryGetNumberField(TEXT("rainfall_mm_per_hour"),Value)) Environment->SetRainfallMmPerHour(Value);
+            if(Object->TryGetBoolField(TEXT("fog_enabled"),Enabled)) Environment->SetFogEnabled(Enabled);
+            if(Object->TryGetNumberField(TEXT("fog_visibility_m"),Value)) Environment->SetFogVisibilityMeters(Value);
+        }
     }
     // Command-line overrides allow repeatable tests without changing saved settings.
     int32 Ships=PendingShips;
@@ -61,6 +74,22 @@ void AQuayCrane::LoadRunSettings()
         int32 Count=PendingCargo[I];
         if(FParse::Value(FCommandLine::Get(),*FString::Printf(TEXT("PortSimCargo%d="),I+1),Count)) SetPendingCargo(I,Count);
     }
+    if(Environment)
+    {
+        float Value=0;
+        if(FParse::Value(FCommandLine::Get(),TEXT("PortSimWindSpeed="),Value)) Environment->SetWindSpeedMetersPerSecond(Value);
+        if(FParse::Value(FCommandLine::Get(),TEXT("PortSimSeaIntensity="),Value)) Environment->SetSeaIntensity(Value);
+        if(FParse::Value(FCommandLine::Get(),TEXT("PortSimFogVisibility="),Value)) Environment->SetFogVisibilityMeters(Value);
+        if(FParse::Value(FCommandLine::Get(),TEXT("PortSimRainRate="),Value)) Environment->SetRainfallMmPerHour(Value);
+        if(FParse::Param(FCommandLine::Get(),TEXT("PortSimWind"))) Environment->SetWindEnabled(true);
+        if(FParse::Param(FCommandLine::Get(),TEXT("PortSimNoWind"))) Environment->SetWindEnabled(false);
+        if(FParse::Param(FCommandLine::Get(),TEXT("PortSimSea"))) Environment->SetSeaMotionEnabled(true);
+        if(FParse::Param(FCommandLine::Get(),TEXT("PortSimNoSea"))) Environment->SetSeaMotionEnabled(false);
+        if(FParse::Param(FCommandLine::Get(),TEXT("PortSimFog"))) Environment->SetFogEnabled(true);
+        if(FParse::Param(FCommandLine::Get(),TEXT("PortSimNoFog"))) Environment->SetFogEnabled(false);
+        if(FParse::Param(FCommandLine::Get(),TEXT("PortSimRain"))) Environment->SetRainEnabled(true);
+        if(FParse::Param(FCommandLine::Get(),TEXT("PortSimNoRain"))) Environment->SetRainEnabled(false);
+    }
     ConfiguredShips=PendingShips;
     for(int32 I=0;I<3;++I) ConfiguredCargo[I]=PendingCargo[I];
 }
@@ -68,6 +97,17 @@ bool AQuayCrane::SaveRunSettings()
 {
     auto Object=MakeShared<FJsonObject>(); Object->SetNumberField(TEXT("ships"),PendingShips);
     for(int32 I=0;I<3;++I) Object->SetNumberField(FString::Printf(TEXT("cargo_%d"),I+1),PendingCargo[I]);
+    if(Environment)
+    {
+        Object->SetBoolField(TEXT("wind_enabled"),Environment->IsWindEnabled());
+        Object->SetNumberField(TEXT("wind_speed_mps"),Environment->GetWindSpeedMetersPerSecond());
+        Object->SetBoolField(TEXT("sea_enabled"),Environment->IsSeaMotionEnabled());
+        Object->SetNumberField(TEXT("sea_intensity"),Environment->GetSeaIntensity());
+        Object->SetBoolField(TEXT("rain_enabled"),Environment->IsRainEnabled());
+        Object->SetNumberField(TEXT("rainfall_mm_per_hour"),Environment->GetRainfallMmPerHour());
+        Object->SetBoolField(TEXT("fog_enabled"),Environment->IsFogEnabled());
+        Object->SetNumberField(TEXT("fog_visibility_m"),Environment->GetFogVisibilityMeters());
+    }
     FString Json; FJsonSerializer::Serialize(Object,TJsonWriterFactory<>::Create(&Json));
     const FString Path=RunSettingsPath();
     bRunSettingsSaved=FFileHelper::SaveStringToFile(Json,*(Path+TEXT(".tmp")),FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM) &&

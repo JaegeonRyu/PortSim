@@ -529,15 +529,28 @@ void AQuayCrane::Tick(float DeltaSeconds)
                 else { UE_LOG(LogPortSimCrane,Error,TEXT("PORTSIM_HUD_FAIL: HUD unavailable")); FPlatformMisc::RequestExitWithStatus(false,1); }
             }
         }
+        if (FParse::Param(FCommandLine::Get(),TEXT("PortSimEnvironmentUICapture")))
+        {
+            HUDTestElapsed+=DeltaSeconds;
+            if(!bCaptureRequested && HUDTestElapsed>3.f)
+            {
+                FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir()/TEXT("Screenshots/EnvironmentUI.png"),true,false);
+                bCaptureRequested=true; CaptureElapsed=0;
+            }
+            if(bCaptureRequested && (CaptureElapsed+=WallDt)>1.f) FPlatformMisc::RequestExit(false);
+        }
         auto Axis = [PC](FKey Positive, FKey Negative) { return float(PC->IsInputKeyDown(Positive)) - float(PC->IsInputKeyDown(Negative)); };
         const bool Ctrl=PC->IsInputKeyDown(EKeys::LeftControl) || PC->IsInputKeyDown(EKeys::RightControl);
-        if (Ctrl && PC->WasInputKeyJustPressed(EKeys::Zero)) Environment->ToggleWind();
-        else if (Ctrl && PC->WasInputKeyJustPressed(EKeys::One)) Environment->ToggleSeaMotion();
+        if (Ctrl && PC->WasInputKeyJustPressed(EKeys::Zero))
+        { Environment->ToggleWind(); if(!FParse::Param(FCommandLine::Get(),TEXT("unattended"))) SaveRunSettings(); }
+        else if (Ctrl && PC->WasInputKeyJustPressed(EKeys::One))
+        { Environment->ToggleSeaMotion(); if(!FParse::Param(FCommandLine::Get(),TEXT("unattended"))) SaveRunSettings(); }
         else if (Ctrl && PC->WasInputKeyJustPressed(EKeys::Two))
         {
             Environment->ToggleFog();
             UE_LOG(LogTemp,Display,TEXT("PORTSIM_FOG_TOGGLE: enabled=%d visibility_m=%.1f sensor_only=1"),
                 Environment->IsFogEnabled(),Environment->GetFogVisibilityMeters());
+            if(!FParse::Param(FCommandLine::Get(),TEXT("unattended"))) SaveRunSettings();
         }
         else if (Ctrl && PC->WasInputKeyJustPressed(EKeys::Three))
         {
@@ -546,6 +559,7 @@ void AQuayCrane::Tick(float DeltaSeconds)
             UE_LOG(LogTemp,Display,TEXT("PORTSIM_RAIN_TOGGLE: enabled=%d rate_mmph=%.1f camera_scale=%.3f lidar_scale=%.3f traction_scale=%.3f visual=0"),
                 Rain.bRainEnabled,Rain.RainfallMmPerHour,Rain.SensorRangeScale(TEXT("camera")),
                 Rain.SensorRangeScale(TEXT("lidar")),Rain.WetTractionScale());
+            if(!FParse::Param(FCommandLine::Get(),TEXT("unattended"))) SaveRunSettings();
         }
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::Home))
         { CameraViewName=TEXT("전체"); bFollowAGV=false; bFreeCamera=false; CameraArm->SetRelativeLocation(FVector(35000,0,0)); CameraArm->TargetArmLength=185000.f; CameraArm->SetRelativeRotation(FRotator(-52,38,0)); }
@@ -863,7 +877,7 @@ void APortSimHUD::DrawHUD()
             { if(PC->GetMousePosition(MX,MY)) UpdateSlider(MX); }
             else { DragSlider=-2; CranePawn->SaveRunSettings(); }
         }
-        DrawRect(FLinearColor(.015f,.03f,.05f,.94f),16,16,680*Scale,(351+CranePawn->PendingShips*66)*Scale);
+        DrawRect(FLinearColor(.015f,.03f,.05f,.94f),16,16,680*Scale,(592+CranePawn->PendingShips*66)*Scale);
         float Y=28;
         auto Text=[&](const FString& T,FLinearColor C=FLinearColor::White)
         { DrawText(T,C,30,Y,GEngine->GetSmallFont(),TextScale); Y+=30*Scale; };
@@ -891,6 +905,36 @@ void APortSimHUD::DrawHUD()
         for(int32 I=0;I<CranePawn->PendingShips;++I)
             Slider(FString::Printf(TEXT("선박 %d · 컨테이너 %d개"),I+1,CranePawn->PendingCargo[I]),
                 CranePawn->PendingCargo[I],CranePawn->PendingCargoLimit(I),FName(*FString::Printf(TEXT("CargoSlider%d"),I)));
+        if(auto* Environment=CranePawn->GetEnvironment())
+        {
+            Text(TEXT("환경 변수 · 슬라이더는 오른쪽으로 갈수록 강함"),FLinearColor(.35f,.9f,.8f));
+            auto EnvironmentSlider=[&](const FString& Label,float Ratio,bool Enabled,FName SliderName,FName ToggleName)
+            {
+                const float RowY=Y,ToggleX=40.f,LabelX=140.f,Width=480.f*Scale;
+                DrawRect(Enabled?FLinearColor(.04f,.42f,.32f):FLinearColor(.16f,.2f,.23f),
+                    ToggleX,RowY+1.f*Scale,82.f*Scale,26.f*Scale);
+                DrawText(Enabled?TEXT("ON"):TEXT("OFF"),Enabled?FLinearColor(.65f,1.f,.8f):FLinearColor(.65f,.7f,.73f),
+                    ToggleX+23.f*Scale,RowY+6.f*Scale,GEngine->GetSmallFont(),TextScale);
+                AddHitBox(FVector2D(ToggleX,RowY+1.f*Scale),FVector2D(82.f*Scale,26.f*Scale),ToggleName,true,55);
+                DrawText(Label,Enabled?FLinearColor::White:FLinearColor(.55f,.6f,.64f),
+                    LabelX,RowY+3.f*Scale,GEngine->GetSmallFont(),TextScale);
+                Ratio=FMath::Clamp(Ratio,0.f,1.f);
+                DrawRect(FLinearColor(.15f,.24f,.3f),LabelX,RowY+31.f*Scale,Width,6.f*Scale);
+                DrawRect(Enabled?FLinearColor(.1f,.7f,.9f):FLinearColor(.3f,.38f,.42f),
+                    LabelX,RowY+31.f*Scale,Width*Ratio,6.f*Scale);
+                DrawRect(FLinearColor(.8f,.95f,1.f),LabelX+Width*Ratio-5.f*Scale,RowY+23.f*Scale,10.f*Scale,22.f*Scale);
+                AddHitBox(FVector2D(LabelX-6.f*Scale,RowY+21.f*Scale),FVector2D(Width+12.f*Scale,28.f*Scale),SliderName,true,50);
+                Y+=52.f*Scale;
+            };
+            EnvironmentSlider(FString::Printf(TEXT("바람 %.1f m/s  [Ctrl+0]"),Environment->GetWindSpeedMetersPerSecond()),
+                Environment->GetWindIntensity(),Environment->IsWindEnabled(),TEXT("WindIntensitySlider"),TEXT("ToggleWindSetting"));
+            EnvironmentSlider(FString::Printf(TEXT("파도·너울 Hs %.2f m  [Ctrl+1]"),Environment->GetSignificantWaveHeightMeters()),
+                Environment->GetSeaIntensity(),Environment->IsSeaMotionEnabled(),TEXT("SeaIntensitySlider"),TEXT("ToggleSeaSetting"));
+            EnvironmentSlider(FString::Printf(TEXT("비 %.1f mm/h  [Ctrl+3]"),Environment->GetRainfallMmPerHour()),
+                Environment->GetRainIntensity(),Environment->IsRainEnabled(),TEXT("RainIntensitySlider"),TEXT("ToggleRainSetting"));
+            EnvironmentSlider(FString::Printf(TEXT("안개 가시거리 %.0f m  [Ctrl+2]"),Environment->GetFogVisibilityMeters()),
+                Environment->GetFogIntensity(),Environment->IsFogEnabled(),TEXT("FogIntensitySlider"),TEXT("ToggleFogSetting"));
+        }
         int32 ActiveTotal=0; for(int32 I=0;I<CranePawn->ConfiguredShips;++I) ActiveTotal+=CranePawn->ConfiguredCargo[I];
         Text(FString::Printf(TEXT("현재 %d척 · %d개 / 완료 %d개"),CranePawn->ConfiguredShips,ActiveTotal,CranePawn->Deliveries));
         const float BY=Y;
@@ -976,10 +1020,19 @@ void APortSimHUD::UpdateSlider(float MouseX)
     auto* C=Cast<AQuayCrane>(GetOwningPlayerController()->GetPawn());
     if(!C || !Canvas) return;
     const float Scale=FMath::Clamp(Canvas->SizeX/1440.f,.65f,1.4f);
-    const float Ratio=FMath::Clamp((MouseX-40)/(480*Scale),0.f,1.f);
+    const bool EnvironmentSlider=DragSlider>=10;
+    const float OriginX=EnvironmentSlider?140.f:40.f;
+    const float Ratio=FMath::Clamp((MouseX-OriginX)/(480*Scale),0.f,1.f);
     if(DragSlider==-1) C->SetPendingShips(1+FMath::RoundToInt(Ratio*2));
     else if(DragSlider>=0 && DragSlider<C->PendingShips)
         C->SetPendingCargo(DragSlider,1+FMath::RoundToInt(Ratio*(C->PendingCargoLimit(DragSlider)-1)));
+    else if(auto* Environment=C->GetEnvironment())
+    {
+        if(DragSlider==10) Environment->SetWindSpeedMetersPerSecond(FMath::Lerp(FPortWindState::MinimumSpeed,FPortWindState::MaximumSpeed,Ratio));
+        else if(DragSlider==11) Environment->SetSeaIntensity(Ratio);
+        else if(DragSlider==12) Environment->SetRainIntensity(Ratio);
+        else if(DragSlider==13) Environment->SetFogIntensity(Ratio);
+    }
 }
 void APortSimHUD::NotifyHitBoxClick(FName BoxName)
 {
@@ -987,6 +1040,13 @@ void APortSimHUD::NotifyHitBoxClick(FName BoxName)
     auto* PC=GetOwningPlayerController(); auto* C=PC?Cast<AQuayCrane>(PC->GetPawn()):nullptr;
     if(!C) return;
     if(BoxName==TEXT("TogglePortHUD")) { C->SaveRunSettings(); DragSlider=-2; C->ToggleHUD(); return; }
+    if(auto* Environment=C->GetEnvironment())
+    {
+        if(BoxName==TEXT("ToggleWindSetting")) { Environment->ToggleWind(); C->SaveRunSettings(); return; }
+        if(BoxName==TEXT("ToggleSeaSetting")) { Environment->ToggleSeaMotion(); C->SaveRunSettings(); return; }
+        if(BoxName==TEXT("ToggleRainSetting")) { Environment->ToggleRain(); C->SaveRunSettings(); return; }
+        if(BoxName==TEXT("ToggleFogSetting")) { Environment->ToggleFog(); C->SaveRunSettings(); return; }
+    }
     if(BoxName==TEXT("RunSimulation")) C->StartAutomatic(false);
     else if(BoxName==TEXT("PauseSimulation") && C->bAutoRunning) C->bAutoPaused=!C->bAutoPaused;
     else if(BoxName==TEXT("ResetSimulation") || BoxName==TEXT("StopSimulation")) C->StopSimulation();
@@ -1002,6 +1062,10 @@ void APortSimHUD::NotifyHitBoxClick(FName BoxName)
         if(BoxName==TEXT("ShipsSlider")) DragSlider=-1;
         for(int32 I=0;I<C->PendingShips;++I)
             if(BoxName==FName(*FString::Printf(TEXT("CargoSlider%d"),I))) DragSlider=I;
+        if(BoxName==TEXT("WindIntensitySlider")) DragSlider=10;
+        else if(BoxName==TEXT("SeaIntensitySlider")) DragSlider=11;
+        else if(BoxName==TEXT("RainIntensitySlider")) DragSlider=12;
+        else if(BoxName==TEXT("FogIntensitySlider")) DragSlider=13;
         float X=0,Y=0;
         if(DragSlider!=-2 && PC->GetMousePosition(X,Y)) { UpdateSlider(X); C->SaveRunSettings(); }
     }

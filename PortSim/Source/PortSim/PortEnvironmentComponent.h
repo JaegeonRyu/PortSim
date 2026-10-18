@@ -201,23 +201,39 @@ public:
     UFUNCTION(BlueprintPure, Category="Environment|Wind") FVector GetEffectiveWindVelocity() const;
     UFUNCTION(BlueprintPure, Category="Environment|Wind") FString GetWindDirectionName() const { return FPortWindState::DirectionName(Wind.EffectiveDirectionDegrees()); }
     UFUNCTION(BlueprintCallable, Category="Environment|Wind") void ToggleWind() { Wind.bWindEnabled=!Wind.bWindEnabled; }
+    UFUNCTION(BlueprintCallable, Category="Environment|Wind") void SetWindEnabled(bool Enabled) { Wind.bWindEnabled=Enabled; }
+    UFUNCTION(BlueprintCallable, Category="Environment|Wind") void SetWindSpeedMetersPerSecond(float Speed);
+    UFUNCTION(BlueprintPure, Category="Environment|Wind") float GetWindIntensity() const
+    { return (Wind.WindSpeedMetersPerSecond-FPortWindState::MinimumSpeed)/(FPortWindState::MaximumSpeed-FPortWindState::MinimumSpeed); }
     const FPortWindState& GetWindState() const { return Wind; }
     UFUNCTION(BlueprintPure, Category="Environment|Sea") bool IsSeaMotionEnabled() const { return Sea.bSeaMotionEnabled; }
     UFUNCTION(BlueprintPure, Category="Environment|Sea") float GetSignificantWaveHeightMeters() const { return Sea.SignificantWaveHeightMeters(); }
     UFUNCTION(BlueprintPure, Category="Environment|Sea") float GetWavePeriodSeconds() const { return Sea.WavePeriodSeconds; }
     UFUNCTION(BlueprintPure, Category="Environment|Sea") float GetSwellPeriodSeconds() const { return Sea.SwellPeriodSeconds; }
     UFUNCTION(BlueprintCallable, Category="Environment|Sea") void ToggleSeaMotion() { Sea.bSeaMotionEnabled=!Sea.bSeaMotionEnabled; }
+    UFUNCTION(BlueprintCallable, Category="Environment|Sea") void SetSeaMotionEnabled(bool Enabled) { Sea.bSeaMotionEnabled=Enabled; }
+    UFUNCTION(BlueprintCallable, Category="Environment|Sea") void SetSeaIntensity(float Intensity);
+    UFUNCTION(BlueprintPure, Category="Environment|Sea") float GetSeaIntensity() const;
     FPortVesselMotion GetVesselMotion(int32 VesselIndex=0) const { return Sea.SampleVesselMotion(VesselIndex); }
     const FPortSeaState& GetSeaState() const { return Sea; }
     UFUNCTION(BlueprintPure, Category="Environment|Fog") bool IsFogEnabled() const { return Fog.bFogEnabled; }
     UFUNCTION(BlueprintPure, Category="Environment|Fog") float GetFogVisibilityMeters() const { return Fog.VisibilityMeters; }
     UFUNCTION(BlueprintCallable, Category="Environment|Fog") void ToggleFog() { Fog.bFogEnabled=!Fog.bFogEnabled; }
+    UFUNCTION(BlueprintCallable, Category="Environment|Fog") void SetFogEnabled(bool Enabled) { Fog.bFogEnabled=Enabled; }
+    UFUNCTION(BlueprintCallable, Category="Environment|Fog") void SetFogIntensity(float Intensity);
+    UFUNCTION(BlueprintPure, Category="Environment|Fog") float GetFogIntensity() const;
+    void SetFogVisibilityMeters(float VisibilityMeters);
     float GetFogLimitedSensorRangeMeters(const FString& SensorKey,float NominalRangeMeters) const
     { return Fog.SensorRangeMeters(SensorKey,NominalRangeMeters); }
     const FPortFogState& GetFogState() const { return Fog; }
     UFUNCTION(BlueprintPure, Category="Environment|Rain") bool IsRainEnabled() const { return Rain.bRainEnabled; }
     UFUNCTION(BlueprintPure, Category="Environment|Rain") float GetRainfallMmPerHour() const { return Rain.RainfallMmPerHour; }
     UFUNCTION(BlueprintCallable, Category="Environment|Rain") void ToggleRain() { Rain.bRainEnabled=!Rain.bRainEnabled; }
+    UFUNCTION(BlueprintCallable, Category="Environment|Rain") void SetRainEnabled(bool Enabled) { Rain.bRainEnabled=Enabled; }
+    UFUNCTION(BlueprintCallable, Category="Environment|Rain") void SetRainIntensity(float Intensity);
+    UFUNCTION(BlueprintPure, Category="Environment|Rain") float GetRainIntensity() const
+    { return (Rain.RainfallMmPerHour-FPortRainState::MinimumRainfallMmPerHour)/(FPortRainState::MaximumRainfallMmPerHour-FPortRainState::MinimumRainfallMmPerHour); }
+    void SetRainfallMmPerHour(float RainfallMmPerHour);
     const FPortRainState& GetRainState() const { return Rain; }
 private:
     FPortWindState Wind;

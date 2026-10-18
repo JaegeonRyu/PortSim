@@ -191,4 +191,25 @@ bool FPortRainStateTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Rain toggle enables operational effects"),Component->IsRainEnabled());
     return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPortEnvironmentUISettingsTest,"PortSim.Environment.UISettings",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FPortEnvironmentUISettingsTest::RunTest(const FString& Parameters)
+{
+    auto* Component=NewObject<UPortEnvironmentComponent>();
+    Component->SetWindSpeedMetersPerSecond(6.f);
+    TestEqual(TEXT("Wind slider sets mean speed"),Component->GetWindSpeedMetersPerSecond(),6.f);
+    Component->SetSeaIntensity(.75f);
+    TestTrue(TEXT("Sea slider round trips"),FMath::IsNearlyEqual(Component->GetSeaIntensity(),.75f));
+    Component->SetRainIntensity(.5f);
+    TestTrue(TEXT("Rain slider round trips"),FMath::IsNearlyEqual(Component->GetRainIntensity(),.5f));
+    Component->SetFogIntensity(.8f);
+    TestTrue(TEXT("Fog slider round trips logarithmically"),FMath::IsNearlyEqual(Component->GetFogIntensity(),.8f,.0001f));
+    Component->SetWindEnabled(false); Component->SetSeaMotionEnabled(false);
+    Component->SetRainEnabled(true); Component->SetFogEnabled(true);
+    TestFalse(TEXT("Wind UI OFF"),Component->IsWindEnabled());
+    TestFalse(TEXT("Sea UI OFF"),Component->IsSeaMotionEnabled());
+    TestTrue(TEXT("Rain UI ON"),Component->IsRainEnabled());
+    TestTrue(TEXT("Fog UI ON"),Component->IsFogEnabled());
+    return true;
+}
 #endif
