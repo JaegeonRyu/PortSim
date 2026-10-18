@@ -1699,12 +1699,23 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
     // gates before the other vehicles and LiDAR have been updated.
     constexpr double TrafficStepSeconds=.05;
     PendingSimulationSeconds+=Dt;
+    bool bAdvancedTraffic=false;
     while(PendingSimulationSeconds+1.e-9>=TrafficStepSeconds)
     {
         PendingSimulationSeconds-=TrafficStepSeconds;
         BeginTrafficFrame();
         AdvanceStep(static_cast<float>(TrafficStepSeconds),false);
+        bAdvancedTraffic=true;
         if(!Fault.IsEmpty()) break;
+    }
+    // Traffic runs at 20 Hz, but waves and wind are sampled every rendered
+    // frame.  Keep secured ship cargo on the current vessel pose even when the
+    // accumulated time is not yet large enough for another traffic step.
+    if(!bAdvancedTraffic)
+    {
+        ApplyVesselMotions(Dt);
+        for(const auto& Cargo:ShipContainers)
+            if(IsValid(Cargo)) Cargo->ApplyWind(WindVelocityMetersPerSecond,STSProfile.Dynamics.WindDrag);
     }
 }
 
