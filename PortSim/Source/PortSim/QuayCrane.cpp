@@ -449,7 +449,6 @@ void AQuayCrane::Tick(float DeltaSeconds)
     if(SiteLogistics) SiteLogistics->SetWindVelocity(WindVelocity);
     for(const auto& Container:ContainerActors) if(IsValid(Container)) Container->ApplyWind(WindVelocity);
     if(bPickupTest){TickPickupTest(DeltaSeconds);return;}
-    if(FParse::Param(FCommandLine::Get(),TEXT("PortSimControlsTest"))) TickControlsTest(DeltaSeconds);
     // World timers, control and Chaos consume the same accelerated delta.
     // Chaos subdivides the frame into small physics steps.
     const float Dt=DeltaSeconds;
@@ -591,6 +590,10 @@ void AQuayCrane::Tick(float DeltaSeconds)
             Status=FString::Printf(TEXT("All configured ships unloaded: %d containers, %.1f simulation seconds"),Deliveries,AutoElapsed);
             UE_LOG(LogPortSimCrane,Display,TEXT("TERMINAL_ALL_UNLOADED: %d containers in %.2f simulation seconds"),Deliveries,AutoElapsed);
         }
+        // Validate interactive controls only after site logistics has consumed
+        // this frame's vessel motion.  Running earlier compares current sea
+        // state with ship cargo that still carries the previous frame pose.
+        if(FParse::Param(FCommandLine::Get(),TEXT("PortSimControlsTest"))) TickControlsTest(DeltaSeconds);
         return;
     }
     bAutoDriveTarget=false;
