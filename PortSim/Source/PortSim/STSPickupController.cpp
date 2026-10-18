@@ -18,6 +18,10 @@ bool FSTSPickupConfig::Load(TSharedPtr<FJsonObject> Root,FString& Error)
         !N(TEXT("trial_height_m"),TrialHeight,100)||!N(TEXT("trial_horizontal_tolerance_m"),TrialHorizontalTolerance,100)||
         !N(TEXT("trial_hold_s"),TrialHold)||!N(TEXT("trial_timeout_s"),TrialTimeout)||
         !N(TEXT("minimum_corner_fraction"),MinimumCornerFraction)||!N(TEXT("mass_stability_fraction"),MassStability)||!N(TEXT("max_attempts"),Count))return false;
+    TrialLiftTimeout=TrialTimeout;
+    if(O->HasField(TEXT("trial_lift_timeout_s")) && !N(TEXT("trial_lift_timeout_s"),TrialLiftTimeout)) return false;
+    if(TrialLiftTimeout<TrialHold || TrialLiftTimeout>AlignmentTimeout)
+    { Error=TEXT("Trial lift travel deadline outside the alignment budget"); return false; }
     for(int32 I=0;I<3;++I)
     {
         const TCHAR* Key=I==0?TEXT("pose_bias_x_m"):I==1?TEXT("pose_bias_y_m"):TEXT("pose_bias_z_m");
@@ -118,7 +122,9 @@ void FSTSPickupController::Update(const FSTSPickupConfig& C,const FSTSObservatio
     }
     Target=TrialOrigin+FVector(0,0,C.TrialHeight);
     if(!O.AllLocked()){Fail(TEXT("Trial lift lost lock feedback"));return;}
-    if(PhaseTime>C.TrialTimeout){Fail(TEXT("Trial lift verification timed out"));return;}
+    const double Deadline=Phase==ESTSPickupPhase::TrialLift && C.TrialLiftTimeout>0?
+        C.TrialLiftTimeout:C.TrialTimeout;
+    if(PhaseTime>Deadline){Fail(TEXT("Trial lift verification timed out"));return;}
     const double Sum=O.CornerLoadsN[0]+O.CornerLoadsN[1]+O.CornerLoadsN[2]+O.CornerLoadsN[3];
     const double EffectiveG=9.80665+O.HoistAcceleration*.01;
     const double Mass=EffectiveG>1?Sum/EffectiveG:0;

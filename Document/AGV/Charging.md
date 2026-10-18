@@ -11,6 +11,6 @@
 - 80%에서 충전을 끊고 같은 자리에서 배차 대상에 복귀한다. 충전소 이동으로 20% 아래에 도착하면 충전에 30분보다 조금 더 걸린다.
 - 차량 이름표에 배터리 백분율 및 CHARGING 상태를 표시한다. 대시보드 AGV 상세에는 잔량, 충전 상태, 충전 구역을 표시한다.
 
-배터리 값은 `battery_percent`, `charging`, `needs_charge`, `dispatch_eligible`, `charge_limit_percent`, `charging_bay`로 대시보드에 전달한다. 충전 관련 단계는 10(충전소 이동), 11(대기 위치 복귀), 12(충전)이다.
+배터리 값은 `battery_percent`, `charging`, `needs_charge`, `dispatch_eligible`, `charge_limit_percent`, `charging_bay`로 대시보드에 전달한다. 충전 관련 단계는 11(충전소 이동), 12(대기 위치 복귀), 13(충전)이다. 기존 10단계는 두 번째 20ft 컨테이너의 개별 STS 적재에 사용하므로 충전 상태와 분리한다.
 
 Tab 카메라는 대기소 → 현재 설정된 선박별 안벽 → 기존 크레인 순서로 순환한다. Home은 전체, End는 근접 시점이다.

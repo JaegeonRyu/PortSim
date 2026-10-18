@@ -11,13 +11,14 @@ public class PortSim : ModuleRules
 	
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "ProceduralMeshComponent" });
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "Json", "UMG", "Slate", "SlateCore", "DesktopPlatform" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "Json", "UMG", "Slate", "SlateCore", "DesktopPlatform", "PhysicsCore" });
 
         // One authoritative reference in Document/STS; copy/stage it for packaged runs.
         string ProjectRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "../.."));
         string Reference = Path.GetFullPath(Path.Combine(ProjectRoot, "../Document/STS/STS_ReferenceData.json"));
         RuntimeDependencies.Add("$(ProjectDir)/Content/STS/STS_ReferenceData.json", Reference, StagedFileType.UFS);
         RuntimeDependencies.Add("$(ProjectDir)/Config/STS_Simulation.json", StagedFileType.NonUFS);
+        RuntimeDependencies.Add("$(ProjectDir)/Config/Stowage_Planning.json", StagedFileType.NonUFS);
 
 		// Uncomment if you are using Slate UI
 		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });

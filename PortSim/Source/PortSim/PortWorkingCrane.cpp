@@ -1,5 +1,7 @@
 #include "PortWorkingCrane.h"
+#include "SimulationPerformance.h"
 #include "PortContainerActor.h"
+#include "PortSiteLogistics.h"
 #include "PortAGVActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
@@ -9,6 +11,8 @@
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
 #include "SpreaderTelescope.h"
+#include "Misc/ScopeExit.h"
+#include "PhysicsEngine/BodyInstance.h"
 
 namespace WorkingCrane { constexpr float LiftOffset=154.5f; }
 
@@ -78,7 +82,7 @@ void APortWorkingCrane::Configure(int32 Number,bool bQuayside,FVector Source,FVe
         CrossBeams[I]->SetRelativeScale3D(bSTS?FVector(1.4,22,1.4):FVector(1.6,18,1.6));
         const float BeamLength=STSProfile.bReady?(STSProfile.MaxTrolley()-STSProfile.MinTrolley()+400.f)/100.f:(bSTS?125.f:34.f);
         Beams[I]->SetRelativeScale3D(FVector(BeamLength,bSTS?1.f:1.2f,1.8f));
-        Pads[I]->SetWorldLocationAndRotation(Slots[I]-FVector(0,0,139.5f),Orientation);
+        Pads[I]->SetWorldLocationAndRotation(Slots[I]-FVector(0,0,139.5f),Orientation,false,nullptr,ETeleportType::TeleportPhysics);
         Pads[I]->SetWorldScale3D(FVector(3.1f,13.f,.2f));
     }
     Mast->SetRelativeLocation(FVector(0,0,BeamZ+1200));
@@ -182,11 +186,34 @@ void APortWorkingCrane::SetOperationPaused(bool Paused)
 
 void APortWorkingCrane::UpdateParts()
 {
+    bPartsDirty=true;
+    if(!bDeferParts) FlushParts();
+}
+
+void APortWorkingCrane::FlushParts()
+{
+    if(!bPartsDirty) return;
+    bPartsDirty=false;
+    PortSimPerformance::FScope Timing(TEXT("crane_parts"));
     SetActorLocation(Home+Orientation.RotateVector(FVector(0,Head.Y,0)));
     Trolley->SetRelativeLocation(FVector(Head.X,0,BeamZ));
-    Spreader->SetRelativeLocation(FVector(Head.X,0,Head.Z)+SuspendedOffset);
-    Spreader->SetRelativeRotation(FRotator(0,FMath::RadiansToDegrees(SuspensionState.Yaw),0));
-    UpdateSpreaderGeometry();
+    Spreader->SetRelativeLocationAndRotation(FVector(Head.X,0,Head.Z)+SuspendedOffset,
+        FRotator(0,FMath::RadiansToDegrees(SuspensionState.Yaw),0));
+    // Telescope geometry is refreshed by AdvanceTelescope only when its length
+    // changes. Moving the parent already carries all sensors and lock corners.
+    bRopeVisualsDirty=true;
+    if(!bDeferRopeVisuals) UpdateRopeVisuals();
+}
+
+void APortWorkingCrane::DeferRopeVisuals(bool Defer)
+{
+    bDeferRopeVisuals=Defer;
+    if(!Defer && bRopeVisualsDirty) UpdateRopeVisuals();
+}
+
+void APortWorkingCrane::UpdateRopeVisuals()
+{
+    bRopeVisualsDirty=false;
     const float HalfLength=PortSpreaderTelescope::TwistlockHalfLengthCm(TelescopeLengthCm);
     const float HalfWidth=PortSpreaderTelescope::TwistlockHalfWidthCm();
     for (int32 I=0;I<4;++I)
@@ -208,6 +235,8 @@ bool APortWorkingCrane::MoveHead(FVector Target,float Dt)
 
 bool APortWorkingCrane::DestinationClear() const
 {
+    const FVector Extent(120,IsValid(CargoActor)?CargoActor->ExternalDimensionsCm.Y*.5f-2.f:608.f,127.5);
+    SynchronizeShipQuery(FBox(-Extent,Extent).TransformBy(FTransform(Orientation,Slots[1-SourceSlot])));
     FCollisionQueryParams Query(SCENE_QUERY_STAT(WorkingCraneSlot),false);
     Query.AddIgnoredActor(CargoActor);
     // Shrink by 2 cm so the supporting pad/ground is not treated as an obstruction.
@@ -223,13 +252,18 @@ void APortWorkingCrane::Stop(const FString& Reason)
 
 void APortWorkingCrane::Advance(float Dt,bool bGlobalPaused)
 {
+    PortSimPerformance::FScope Profile(TEXT("crane_advance"));
     if(!FMath::IsFinite(Dt) || Dt<=0) { if(Dt==0)AdvanceStep(0,bGlobalPaused);return; }
+    if(!bJobActive) { AdvanceStep(Dt,bGlobalPaused); return; }
     // A render frame can cover a large simulation interval at low FPS/high speed.
     // Substep observations and the state machine too, not just the physical plant.
-    const int32 Steps=FMath::Max(1,FMath::CeilToInt(double(Dt)*60.));
+    const int32 Steps=CraneSimulationSteps::Count(Dt,60.);
+    bDeferParts=true;
+    ON_SCOPE_EXIT { bDeferParts=false; FlushParts(); };
     const float Step=Dt/Steps;
     for(int32 I=0;I<Steps;++I)
     {
+        ShipControlFraction=double(I+1)/Steps;
         // Pickup can complete inside this outer frame. Re-evaluate ownership
         // every substep so a newly attached load is never moved back onto the
         // vessel by the remaining frame interpolation.
@@ -241,6 +275,16 @@ void APortWorkingCrane::Advance(float Dt,bool bGlobalPaused)
         }
         AdvanceStep(Step,bGlobalPaused);
     }
+    ShipControlFraction=1;
+}
+
+void APortWorkingCrane::SynchronizeShipQuery(const FBox& Query) const
+{
+    // Refresh the scene cache before queries; controller state remains at its
+    // original 60/120 Hz steps even when there is no sensor sample this step.
+    const_cast<APortWorkingCrane*>(this)->FlushParts();
+    if(IsValid(CargoActor)) if(auto* Site=Cast<APortSiteLogistics>(CargoActor->GetOwner()))
+        Site->SynchronizeShipCollision(Query,ShipControlFraction);
 }
 
 void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
@@ -254,7 +298,12 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
     {
         SampleSTS();
         if(!STSProfile.bReady || !Observation.IsFresh(SimulationTime,STSProfile.SensorMaxAge))
-        { Stop(bSTS?TEXT("Required STS sensor observation invalid/stale"):TEXT("Required RMG sensor observation invalid/stale")); return; }
+        {
+            Stop(FString::Printf(TEXT("Required %s sensor observation invalid/stale: %s (age=%.4fs limit=%.4fs)"),
+                bSTS?TEXT("STS"):TEXT("RMG"),SensorInvalidReason.IsEmpty()?TEXT("Freshness/profile check"):*SensorInvalidReason,
+                SimulationTime-Observation.Timestamp,double(STSProfile.SensorMaxAge)));
+            return;
+        }
         if(bCarrying && (!Observation.AllLocked() || Observation.DynamicPayloadEstimateKg()>STSProfile.RatedPayloadKg))
         { Stop(TEXT("Loaded hoist interlock: locks/load observation invalid")); return; }
     }
@@ -331,7 +380,14 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
         if (SettleTime<1.5f) return;
         if (FVector::Dist(CargoActor->GetActorLocation(),Slots[1-SourceSlot])>10.f ||
             CargoActor->GetBody()->GetPhysicsLinearVelocity().Size()>5.f || CargoActor->GetActorUpVector().Z<.99f)
-        { Stop(TEXT("Placed cargo failed physical settling check")); return; }
+        {
+            UE_LOG(LogTemp,Error,TEXT("CRANE_SETTLING_DETAIL: crane=%d cargo=%s position=%s destination=%s error_cm=%.3f speed_cmps=%.3f up_z=%.6f physics=%d"),
+                CraneID,*GetNameSafe(CargoActor),*CargoActor->GetActorLocation().ToString(),
+                *Slots[1-SourceSlot].ToString(),FVector::Dist(CargoActor->GetActorLocation(),Slots[1-SourceSlot]),
+                CargoActor->GetBody()->GetPhysicsLinearVelocity().Size(),CargoActor->GetActorUpVector().Z,
+                CargoActor->GetBody()->IsSimulatingPhysics());
+            Stop(TEXT("Placed cargo failed physical settling check")); return;
+        }
         ++CompletedJobs;
         LastJobSeconds=JobSeconds; LastPausedSeconds=PausedSeconds;
         if (bExternalJobs) { bJobActive=false; CargoActor=nullptr; Stage=0; StageTime=SettleTime=0; return; }
@@ -354,7 +410,14 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
         if (!DestinationClear()) { Stop(TEXT("Destination became occupied")); return; }
         CargoActor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
         auto* Body=CargoActor->GetBody();
+        // A controller frame can contain many kinematic pose updates before
+        // Chaos runs. Commit the measured release pose on both sides of the
+        // state change; otherwise an earlier deferred target can reappear as
+        // the load becomes dynamic, even though the landing sensors passed.
+        const FTransform ReleasePose=CargoActor->GetActorTransform();
+        Body->BodyInstance.SetBodyTransform(ReleasePose,ETeleportType::TeleportPhysics,false);
         Body->SetSimulatePhysics(true);
+        Body->BodyInstance.SetBodyTransform(ReleasePose,ETeleportType::TeleportPhysics,false);
         Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
         Body->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
         CargoActor->LocationOwner=bSTS && (1-SourceSlot)==0?ECargoOwner::Ship:ECargoOwner::Yard;
@@ -383,7 +446,7 @@ bool APortWorkingCrane::ValidateOperation(FString& Error) const
     double Margin=STSProfile.Pickup.AcquisitionRadius;
     if(STSProfile.bReady)
     {
-        auto WindConfig=STSProfile.Dynamics;
+        FSTSDynamicsParameters WindConfig=STSProfile.Dynamics;
         WindConfig.Wind=Orientation.UnrotateVector(WindVelocityMetersPerSecond);
         const FVector WindAllowance=WindConfig.WindEquilibriumOffset(STSProfile.MaxRope,
             FMath::Max(1.f,STSProfile.SpreaderMassKg))*100.;
@@ -418,8 +481,32 @@ void APortWorkingCrane::EndPlay(const EEndPlayReason::Type Reason)
     Super::EndPlay(Reason);
 }
 
+bool APortWorkingCrane::SetAGVLandingTarget(FVector Target)
+{
+    if(!bSTS || !bExternalJobs || !bJobActive || bDestinationReady || Stage>5 ||
+        !STSProfile.ContainsTarget(Local(Target)+FVector(0,0,WorkingCrane::LiftOffset))) return false;
+    // STS stage 5 can be waiting at travel height with descent interlocked.
+    // Bind the deck datum there too, while the load is safely above the pad.
+    if(Stage==5 && Head.Z<Local(Target).Z+WorkingCrane::LiftOffset+100.f) return false;
+    Slots[1-SourceSlot]=Target;
+    Pads[1-SourceSlot]->SetWorldLocation(Target-FVector(0,0,139.5f),false,nullptr,ETeleportType::TeleportPhysics);
+    SampleSTS(true);
+    return true;
+}
+
+bool APortWorkingCrane::IsWaitingForAGV() const
+{
+    return bSTS && bJobActive && !bDestinationReady &&
+        (Stage==5 || (Stage==4 && AxisVelocity.Size2D()<=1.f &&
+            (Local(Slots[1-SourceSlot])-(Head+SuspendedOffset)).Size2D()<=STSProfile.LandingTolerance));
+}
+
 bool APortWorkingCrane::AssignCargo(APortContainerActor* Cargo,FVector Source,FVector Destination,bool SourceSupport,bool DestinationSupport,APortAGVActor* HandoverVehicle)
 {
+    // Dispatch can choose an otherwise passive box in the middle of a frame.
+    if(IsValid(Cargo) && Cargo->LocationOwner==ECargoOwner::Ship && !Cargo->GetAttachParentActor())
+        if(const auto* Site=Cast<APortSiteLogistics>(Cargo->GetOwner()); Site && Site->IsDeferringVisuals())
+        { Cargo->ApplySecuredMotionFraction(1.); Source=Cargo->GetActorLocation(); }
     if (!bExternalJobs || bJobActive || !IsValid(Cargo) || !Fault.IsEmpty()) return false;
     {
         if(!STSProfile.bReady) { Stop(TEXT("Crane profile unavailable")); return false; }
@@ -438,7 +525,10 @@ bool APortWorkingCrane::AssignCargo(APortContainerActor* Cargo,FVector Source,FV
     for (int32 I=0;I<2;++I)
     {
         const bool Support=I==0?SourceSupport:DestinationSupport;
-        Pads[I]->SetWorldLocationAndRotation(Slots[I]-FVector(0,0,139.5f),Orientation);
+        // This is a fixed support for the newly reserved slot, not a platform
+        // travelling from the last job's tier. Do not give Chaos an interpolated
+        // kinematic target (or a fictitious support velocity) between jobs.
+        Pads[I]->SetWorldLocationAndRotation(Slots[I]-FVector(0,0,139.5f),Orientation,false,nullptr,ETeleportType::TeleportPhysics);
         Pads[I]->SetWorldScale3D(FVector(Cargo->ExternalDimensionsCm.X+66.f,Cargo->ExternalDimensionsCm.Y+80.f,20.f)/100.f);
         Pads[I]->SetCollisionEnabled(Support?ECollisionEnabled::QueryAndPhysics:ECollisionEnabled::NoCollision);
         Pads[I]->SetVisibility(Support);

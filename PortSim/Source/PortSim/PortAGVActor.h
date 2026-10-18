@@ -49,6 +49,7 @@ public:
     bool MoveToPosition(FVector Target, float Dt, bool StopAtTarget=true);
     FVector PlannedMotionDirection(FVector Target) const;
     FVector CargoPosition() const;
+    FVector DeckPosition(float OffsetCm) const;
     void SetPayload(float GrossMassKg) { PayloadKg=FMath::Max(0.f,GrossMassKg); }
     void SetFMSCommand(FVector Target,int32 NodeIndex,int32 NodeCount,bool Docking,float AcceptanceCm=-1.f,
         FVector ExpectedDockingAxis=FVector::ZeroVector);
@@ -73,6 +74,8 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV") float Speed=0;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV") int32 CompletedJobs=0;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV") float PayloadKg=0;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV") float ActiveDeckOffsetCm=0;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV") FVector DeckCoGOffsetCm=FVector::ZeroVector;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV") FAGVSensorState Sensors;
 private:
     void RefreshBatteryLabel();

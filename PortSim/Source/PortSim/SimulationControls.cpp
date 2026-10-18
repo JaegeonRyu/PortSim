@@ -1,5 +1,6 @@
 #include "QuayCrane.h"
 #include "PortSiteLogistics.h"
+#include "TerminalLayout.h"
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
 #include "Misc/CommandLine.h"
@@ -22,13 +23,13 @@ FString RunSettingsPath()
 int32 AQuayCrane::PendingCargoTotal() const
 { int32 Total=0; for(int32 I=0;I<PendingShips;++I) Total+=PendingCargo[I]; return Total; }
 int32 AQuayCrane::PendingCargoLimit(int32 Vessel) const
-{ return 5594-PendingCargoTotal()+PendingCargo[Vessel]; }
+{ return TerminalLayout::ReceivingSlotCount(bUnifiedTerminal)-PendingCargoTotal()+PendingCargo[Vessel]; }
 void AQuayCrane::SetPendingShips(int32 Count)
 {
     const int32 Old=PendingShips;
     PendingShips=FMath::Clamp(Count,1,3);
     for(int32 I=Old;I<PendingShips;++I) PendingCargo[I]=GetPendingVesselInput(I)?GetPendingVesselInput(I)->Rows.Num():ManualCargo[I];
-    int32 Excess=PendingCargoTotal()-5594;
+    int32 Excess=PendingCargoTotal()-TerminalLayout::ReceivingSlotCount(bUnifiedTerminal);
     for(int32 I=0;I<PendingShips && Excess>0;++I)
     { if(GetPendingVesselInput(I)) continue; const int32 Take=FMath::Min(Excess,PendingCargo[I]-1); PendingCargo[I]-=Take; Excess-=Take; }
 }
@@ -48,11 +49,11 @@ void AQuayCrane::LoadRunSettings()
     {
         double Ships=3; Object->TryGetNumberField(TEXT("ships"),Ships);
         PendingShips=FMath::IsFinite(Ships)?int32(FMath::Clamp(Ships,1.,3.)):3;
-        int32 Budget=5594;
+        int32 Budget=TerminalLayout::ReceivingSlotCount(bUnifiedTerminal);
         for(int32 I=0;I<3;++I)
         {
             double Count=200; Object->TryGetNumberField(FString::Printf(TEXT("cargo_%d"),I+1),Count);
-            PendingCargo[I]=FMath::IsFinite(Count)?int32(FMath::Clamp(Count,1.,double(I<PendingShips?Budget-(PendingShips-I-1):5594))):1;
+            PendingCargo[I]=FMath::IsFinite(Count)?int32(FMath::Clamp(Count,1.,double(I<PendingShips?Budget-(PendingShips-I-1):TerminalLayout::ReceivingSlotCount(bUnifiedTerminal)))):1;
             if(I<PendingShips) Budget-=PendingCargo[I];
         }
     }
@@ -64,7 +65,7 @@ void AQuayCrane::LoadRunSettings()
             Object->TryGetBoolField(FString::Printf(TEXT("file_mode_%d"),I+1),PendingFileMode[I]);
             double Manual=ManualCargo[I];
             if(Object->TryGetNumberField(FString::Printf(TEXT("manual_cargo_%d"),I+1),Manual) && FMath::IsFinite(Manual))
-                ManualCargo[I]=int32(FMath::Clamp(Manual,1.,5594.));
+                ManualCargo[I]=int32(FMath::Clamp(Manual,1.,double(TerminalLayout::ReceivingSlotCount(bUnifiedTerminal))));
         }
     }
     if(bUnifiedTerminal && Object.IsValid()) RestoreVesselInputs(*Object);

@@ -1,6 +1,9 @@
 #include "PortContainerActor.h"
 #include "PortAGVActor.h"
 #include "PortEnvironmentComponent.h"
+#include "PortAGVActor.h"
+#include "PortWorkingCrane.h"
+#include "AGVReference.h"
 #include "TerminalLayout.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
@@ -17,6 +20,9 @@ APortContainerActor::APortContainerActor()
     Body->SetWorldScale3D(ExternalDimensionsCm/100.f);
     Body->SetMobility(EComponentMobility::Movable);
     Body->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+    // Sensors use explicit traces/overlap queries, never overlap-event callbacks.
+    // Moving every secured box otherwise refreshes event pairs at every substep.
+    Body->SetGenerateOverlapEvents(false);
     Body->SetSimulatePhysics(true);
     Body->SetLinearDamping(.4f);
     Body->SetAngularDamping(2.f);
@@ -26,6 +32,7 @@ APortContainerActor::APortContainerActor()
     Visual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ContainerVisual"));
     Visual->SetupAttachment(Body);
     Visual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    Visual->SetGenerateOverlapEvents(false);
     Visual->SetAbsolute(false,false,true);
     Tags.Add(TEXT("PortSim.Container"));
 }
@@ -57,7 +64,7 @@ void APortContainerActor::ApplyWind(FVector WindVelocityMetersPerSecond,float Dr
 }
 
 void APortContainerActor::SetSecuredVesselMotion(FVector Position,FQuat Rotation,FVector VelocityCentimetersPerSecond,
-    FVector AccelerationCentimetersPerSecondSquared,FVector JerkCentimetersPerSecondCubed,double FrameDurationSeconds)
+    FVector AccelerationCentimetersPerSecondSquared,FVector JerkCentimetersPerSecondCubed,double FrameDurationSeconds,bool ApplyPose)
 {
     const bool WasSimulating=Body->IsSimulatingPhysics();
     if(WasSimulating) Body->SetSimulatePhysics(false);
@@ -83,13 +90,52 @@ void APortContainerActor::SetSecuredVesselMotion(FVector Position,FQuat Rotation
     SecuredFrameDurationSeconds=bHasSecuredMotionFrame && !WasSimulating && FMath::IsFinite(FrameDurationSeconds)?
         FMath::Max(0.,FrameDurationSeconds):0.;
     bHasSecuredMotionFrame=true;
-    ApplySecuredMotionFraction(1.);
+    SecuredWindowStart=0; SecuredWindowEnd=1;
+    // Hermite position is a cubic Bezier curve. Its four control points bound
+    // the whole path, including overshoot between endpoints. A rotation chord
+    // bounds every corner through slerp without an oversized spherical box.
+    SecuredSweptBounds=FBox(ForceInit);
+    SecuredSweptBounds+=PreviousSecuredTransform.GetLocation();
+    SecuredSweptBounds+=PreviousSecuredTransform.GetLocation()+PreviousSecuredVelocity*SecuredFrameDurationSeconds/3.;
+    SecuredSweptBounds+=CurrentSecuredTransform.GetLocation()-CurrentSecuredVelocity*SecuredFrameDurationSeconds/3.;
+    SecuredSweptBounds+=CurrentSecuredTransform.GetLocation();
+    const FVector Half=ExternalDimensionsCm*.5;
+    const FVector InitialExtent=FBox(-Half,Half).TransformBy(FTransform(PreviousSecuredTransform.GetRotation())).GetExtent();
+    const double Angle=PreviousSecuredTransform.GetRotation().AngularDistance(CurrentSecuredTransform.GetRotation());
+    const double RotationMargin=2.*Half.Size()*FMath::Sin(Angle*.5)+2.;
+    SecuredSweptBounds=SecuredSweptBounds.ExpandBy(InitialExtent+FVector(RotationMargin));
+    if(ApplyPose) ApplySecuredMotionFraction(1.);
+}
+
+void APortContainerActor::SetSecuredMotionWindow(double Start,double End)
+{
+    SecuredWindowStart=FMath::Clamp(Start,0.,1.);
+    SecuredWindowEnd=FMath::Clamp(End,SecuredWindowStart,1.);
+}
+
+void APortContainerActor::BeginVisualFrame()
+{
+    if(DeferredVisualParent.IsValid() || !Visual->GetAttachParent()) return;
+    check(Visual->GetCollisionEnabled()==ECollisionEnabled::NoCollision);
+    DeferredVisualParent=Visual->GetAttachParent();
+    DeferredVisualRelative=Visual->GetRelativeTransform();
+    // Only the non-colliding artwork is deferred. Body remains the root and
+    // updates its physics/query pose at every original control substep.
+    Visual->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+}
+
+void APortContainerActor::EndVisualFrame()
+{
+    auto* Parent=DeferredVisualParent.Get(); if(!Parent) return;
+    Visual->SetRelativeTransform(DeferredVisualRelative);
+    Visual->AttachToComponent(Parent,FAttachmentTransformRules::KeepRelativeTransform);
+    DeferredVisualParent.Reset();
 }
 
 void APortContainerActor::ApplySecuredMotionFraction(double Fraction)
 {
     if(!bHasSecuredMotionFrame || Body->IsSimulatingPhysics()) return;
-    const double Alpha=FMath::Clamp(Fraction,0.,1.);
+    const double Alpha=FMath::Lerp(SecuredWindowStart,SecuredWindowEnd,FMath::Clamp(Fraction,0.,1.));
     FVector Position,Velocity;
     if(SecuredFrameDurationSeconds>UE_SMALL_NUMBER)
     {
@@ -118,13 +164,17 @@ void APortContainerActor::ApplySecuredMotionFraction(double Fraction)
 FVector APortContainerActor::GetMotionVelocity() const
 {
     if(Body->IsSimulatingPhysics()) return Body->GetPhysicsLinearVelocity();
-    // Vessel samples remain cached after handover; only ship-secured cargo may use them.
-    if(LocationOwner==ECargoOwner::Ship && !GetAttachParentActor())
-        return KinematicVelocityCentimetersPerSecond;
-    if(LocationOwner==ECargoOwner::AGV)
-        if(const auto* Vehicle=Cast<APortAGVActor>(GetAttachParentActor()))
-            return Vehicle->PlannedMotionDirection(Vehicle->Sensors.FMSNextNode)*Vehicle->Speed;
-    return GetAttachParentActor()?GetAttachParentActor()->GetVelocity():FVector::ZeroVector;
+    // Cached vessel motion only applies while the cargo is secured aboard.
+    if(LocationOwner==ECargoOwner::Ship && !GetAttachParentActor()) return KinematicVelocityCentimetersPerSecond;
+    if(const auto* Vehicle=Cast<APortAGVActor>(GetAttachParentActor()))
+    {
+        const float SignedSpeed=Vehicle->Speed*(Vehicle->Sensors.bReversing?-1.f:1.f);
+        const float YawRate=SignedSpeed*FMath::Tan(FMath::DegreesToRadians(Vehicle->Sensors.SteeringAngleDegrees))/AGVReference::EffectiveWheelbaseCm;
+        const FVector Arm=GetActorLocation()-Vehicle->GetActorLocation();
+        return Vehicle->GetActorRightVector()*SignedSpeed+FVector(-YawRate*Arm.Y,YawRate*Arm.X,0);
+    }
+    if(const auto* Crane=Cast<APortWorkingCrane>(GetAttachParentActor())) return Crane->Observation.SpreaderVelocity;
+    return FVector::ZeroVector;
 }
 
 FVector APortContainerActor::GetMotionAcceleration() const

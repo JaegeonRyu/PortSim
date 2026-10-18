@@ -31,6 +31,8 @@ public:
     FSTSObservation Observation;
     void SetDestinationReady(bool Ready);
     void SetHandoverVehicle(APortAGVActor* Vehicle);
+    bool SetAGVLandingTarget(FVector Target);
+    bool IsWaitingForAGV() const;
     APortAGVActor* GetHandoverVehicle() const;
     bool IsBusy() const { return bJobActive; }
     UFUNCTION(BlueprintCallable, Category="Operation") void ResetOperation();
@@ -38,6 +40,7 @@ public:
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     bool ValidateOperation(FString& Error) const;
     FVector HeadPosition() const;
+    void DeferRopeVisuals(bool Defer);
     TSharedRef<FJsonObject> DashboardState() const;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Operation") bool bEnabled=true;
@@ -49,6 +52,12 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") FString Fault;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") TObjectPtr<APortContainerActor> CargoActor;
 private:
+    bool bDeferRopeVisuals=false, bRopeVisualsDirty=false;
+    void UpdateRopeVisuals();
+    double ShipControlFraction=1;
+    bool bDeferParts=false, bPartsDirty=false;
+    void FlushParts();
+    void SynchronizeShipQuery(const FBox& Query) const;
     void AdvanceStep(float Dt, bool bGlobalPaused);
     FSTSSuspension SuspensionState;
     FSTSPickupController Pickup;
@@ -78,6 +87,7 @@ private:
     double AGVAlignmentWait=0;
     bool CornerLocked[4]={false,false,false,false};
     bool bSensorFault=false;
+    FString SensorInvalidReason;
     int32 LockFault=INDEX_NONE;
     void SampleSTS(bool Force=false);
     bool MoveSTS(FVector Target,float Dt);

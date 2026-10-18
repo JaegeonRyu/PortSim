@@ -444,11 +444,16 @@ void AQuayCrane::UpdateRopes()
 void AQuayCrane::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
-    Environment->AdvanceEnvironment(DeltaSeconds);
-    ApplySeaMotion();
+    const bool EnvironmentFrozen=bAutoPaused || bEmergencyStop || (bUnifiedTerminal && !bAutoRunning) ||
+        (SiteLogistics && !SiteLogistics->Fault.IsEmpty());
+    if(!EnvironmentFrozen)
+    {
+        Environment->AdvanceEnvironment(DeltaSeconds);
+        ApplySeaMotion();
+    }
     const FVector WindVelocity=Environment->GetEffectiveWindVelocity();
     if(SiteLogistics) SiteLogistics->SetWindVelocity(WindVelocity);
-    for(const auto& Container:ContainerActors) if(IsValid(Container)) Container->ApplyWind(WindVelocity);
+    if(!EnvironmentFrozen) for(const auto& Container:ContainerActors) if(IsValid(Container)) Container->ApplyWind(WindVelocity);
     if(bPickupTest){TickPickupTest(DeltaSeconds);return;}
     if(FParse::Param(FCommandLine::Get(),TEXT("PortSimControlsTest"))) TickControlsTest(DeltaSeconds);
     // World timers, control and Chaos consume the same accelerated delta.

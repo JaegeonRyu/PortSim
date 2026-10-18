@@ -260,6 +260,7 @@ private:
     float SiteTestTime=0.f;
     float SiteTestHold=0.f;
     int32 SiteTestStage=0;
+    bool bTrafficFlowCheckpoint=false;
     TArray<FVector> SiteTestPositions;
     UPROPERTY() TObjectPtr<AActor> SiteActor;
     void ResetTerminal();

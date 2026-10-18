@@ -26,6 +26,7 @@ APortAGVActor::APortAGVActor()
         const FVector Size=Cylinder.Object->GetBounds().BoxExtent*2.f;
         Wheel->SetRelativeScale3D(FVector(Diameter/Size.X,Diameter/Size.Y,Width/Size.Z));
         Wheel->SetCollisionProfileName(TEXT("NoCollision"));
+        Wheel->SetGenerateOverlapEvents(false);
         if(Material) Wheel->SetMaterial(0,Material);
     };
     for (int32 Side:{-1,1}) for (int32 Axle:{-1,0,1})
@@ -59,6 +60,8 @@ void APortAGVActor::InitializeVehicle(int32 Number)
 
 void APortAGVActor::ResetVehicle(FVector Position)
 {
+    ActiveDeckOffsetCm=0;
+    DeckCoGOffsetCm=FVector::ZeroVector;
     Speed=0; CompletedJobs=0; PayloadKg=0;
     BatteryPercent=ChargeLimitPercent; bNeedsCharge=bCharging=false;
     DisplayedBattery=-1; RefreshBatteryLabel();
@@ -97,7 +100,12 @@ void APortAGVActor::AdvanceBattery(double Seconds,bool Operating,bool Charging)
 
 FVector APortAGVActor::CargoPosition() const
 {
-    return GetActorLocation()+FVector(0,0,349.5f);
+    return DeckPosition(ActiveDeckOffsetCm);
+}
+
+FVector APortAGVActor::DeckPosition(float OffsetCm) const
+{
+    return GetActorLocation()+GetActorRightVector()*OffsetCm+FVector(0,0,349.5f);
 }
 
 bool APortAGVActor::MoveToX(float X,float Dt)
@@ -206,11 +214,11 @@ bool APortAGVActor::MoveToPosition(FVector Target,float Dt,bool StopAtTarget)
     const FVector DrivenAxis(BeforeAxis.X*FMath::Cos(HalfYaw)-BeforeAxis.Y*FMath::Sin(HalfYaw),
         BeforeAxis.X*FMath::Sin(HalfYaw)+BeforeAxis.Y*FMath::Cos(HalfYaw),0);
     const float Chord=FMath::Abs(Curvature)>1.e-6f?2.f*FMath::Sin(HalfYaw)/Curvature:Travel;
-    AddActorWorldRotation(FRotator(0,FMath::RadiansToDegrees(YawStepRadians),0));
     // Integrate the actual circular arc, rather than advancing along its end
     // tangent. The midpoint tangent measures steering travel without crab slip.
     const FVector Delta=DrivenAxis.GetSafeNormal2D()*Chord;
-    SetActorLocation(Previous+Delta);
+    SetActorLocationAndRotation(Previous+Delta,
+        GetActorRotation()+FRotator(0,FMath::RadiansToDegrees(YawStepRadians),0));
     const FVector Lateral(-DrivenAxis.Y,DrivenAxis.X,0);
     Sensors.LateralSlipCm=FMath::Abs(FVector::DotProduct(Delta,Lateral));
     Sensors.SteeringAngleDegrees=FMath::RadiansToDegrees(FMath::Atan(

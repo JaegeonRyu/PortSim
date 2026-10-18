@@ -41,9 +41,16 @@ bool FRMGProfileTest::RunTest(const FString& Parameters)
         // Crane local X is along world Y: inland scaling changes gantry travel,
         // not the physical trolley gauge or lift envelope.
         for(int Row=0;Row<7;++Row)
-            TestTrue(TEXT("Expanded yard targets stay in physical RMG work envelope"),
-                P.ContainsTarget(FVector((Row-3)*300.f,
-                    (TerminalLayout::RMGHomeX(Half)-X)*100.f,1081.f)));
+            for(int Pad=0;Pad<TerminalLayout::YardPads(TerminalLayout::YardSizeFt(Bay));++Pad)
+            {
+                const float Offset=TerminalLayout::YardPadOffsetCm(TerminalLayout::YardSizeFt(Bay),Pad);
+                TestTrue(TEXT("All size-specific pads stay in physical RMG work envelope"),
+                    P.ContainsTarget(FVector((Row-3)*300.f,
+                        (TerminalLayout::RMGHomeX(Half)-X)*100.f-Offset,1081.f)));
+                TestTrue(TEXT("Offset 20ft pad keeps gantry bogies on rails"),
+                    X+Offset*.01f-TerminalLayout::RMGBogieHalfLengthM>=TerminalLayout::RMGRailStartX-.01f &&
+                    X+Offset*.01f+TerminalLayout::RMGBogieHalfLengthM<=TerminalLayout::RMGRailEndX+.01f);
+            }
         TestTrue(TEXT("AGV handover stays in physical RMG work envelope"),
             P.ContainsTarget(FVector(1320.f,
                 (TerminalLayout::RMGHomeX(Half)-TerminalLayout::RMGHandoverX(Half))*100.f,504.f)));
