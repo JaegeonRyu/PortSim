@@ -124,7 +124,15 @@ void FSTSPickupController::Update(const FSTSPickupConfig& C,const FSTSObservatio
     if(!O.AllLocked()){Fail(TEXT("Trial lift lost lock feedback"));return;}
     const double Deadline=Phase==ESTSPickupPhase::TrialLift && C.TrialLiftTimeout>0?
         C.TrialLiftTimeout:C.TrialTimeout;
-    if(PhaseTime>Deadline){Fail(TEXT("Trial lift verification timed out"));return;}
+    if(PhaseTime>Deadline)
+    {
+        const FVector Error=O.SpreaderPosition-Target;
+        Fail(*FString::Printf(TEXT("Trial lift verification timed out: trial_phase=%s elapsed_s=%.3f deadline_s=%.3f stable_s=%.3f required_hold_s=%.3f absolute_speed_cmps=%.3f speed_limit_cmps=%.3f horizontal_error_cm=%.3f horizontal_limit_cm=%.3f vertical_error_cm=%.3f vertical_limit_cm=%.3f supported=%d hoist_acceleration_cmps2=%.3f corner_loads_n=%.3f/%.3f/%.3f/%.3f"),
+            PhaseName(),PhaseTime,Deadline,StableTime,C.TrialHold,O.SpreaderVelocity.Size(),C.RelativeSpeed,
+            Error.Size2D(),C.TrialHorizontalTolerance,FMath::Abs(Error.Z),C.VerticalTolerance,O.bCargoSupported,
+            O.HoistAcceleration,O.CornerLoadsN[0],O.CornerLoadsN[1],O.CornerLoadsN[2],O.CornerLoadsN[3]));
+        return;
+    }
     const double Sum=O.CornerLoadsN[0]+O.CornerLoadsN[1]+O.CornerLoadsN[2]+O.CornerLoadsN[3];
     const double EffectiveG=9.80665+O.HoistAcceleration*.01;
     const double Mass=EffectiveG>1?Sum/EffectiveG:0;
