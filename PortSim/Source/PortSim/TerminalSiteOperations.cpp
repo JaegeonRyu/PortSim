@@ -1,4 +1,5 @@
 #include "QuayCrane.h"
+#include "TerminalLayout.h"
 #include "PortWorkingCrane.h"
 #include "PortSiteLogistics.h"
 #include "PortAGVActor.h"
@@ -149,12 +150,31 @@ void AQuayCrane::TickSiteTest(float Dt)
 }
 void AQuayCrane::FocusNextSiteCrane()
 {
-    if (WorkingCranes.IsEmpty()) return;
-    bFreeCamera=false;
-    bFollowAGV=false;
-    SiteCameraIndex=(SiteCameraIndex+1)%WorkingCranes.Num();
-    const auto* Crane=WorkingCranes[SiteCameraIndex].Get();
+    const int32 ExtraViews=bUnifiedTerminal?1+ConfiguredShips:0;
+    const int32 ViewCount=ExtraViews+WorkingCranes.Num();
+    if(ViewCount==0) return;
+    bFreeCamera=false; bFollowAGV=false;
+    SiteCameraIndex=(SiteCameraIndex+1)%ViewCount;
+    if(bUnifiedTerminal && SiteCameraIndex==0)
+    {
+        CameraArm->SetRelativeLocation(FVector(TerminalLayout::SiteCmX(7800),50050,0));
+        CameraArm->TargetArmLength=42000.f;
+        CameraArm->SetRelativeRotation(FRotator(-65,38,0));
+        CameraViewName=TEXT("AGV 대기소");
+        return;
+    }
+    if(bUnifiedTerminal && SiteCameraIndex<=ConfiguredShips)
+    {
+        const int32 Vessel=SiteCameraIndex-1;
+        CameraArm->SetRelativeLocation(FVector(2500,TerminalLayout::VesselCenterY(Vessel)*100.f,1000));
+        CameraArm->TargetArmLength=40000.f;
+        CameraArm->SetRelativeRotation(FRotator(-55,38,0));
+        CameraViewName=FString::Printf(TEXT("선박 %d 안벽"),Vessel+1);
+        return;
+    }
+    const auto* Crane=WorkingCranes[SiteCameraIndex-ExtraViews].Get();
     CameraArm->SetRelativeLocation(Crane->GetActorLocation()+FVector(0,0,Crane->bSTS?2300:800));
     CameraArm->TargetArmLength=Crane->bSTS?20000.f:10500.f;
     CameraArm->SetRelativeRotation(FRotator(-35,Crane->bSTS?38.f:128.f,0));
+    CameraViewName=FString::Printf(TEXT("%s %d"),Crane->bSTS?TEXT("STS"):TEXT("RMG"),SiteCameraIndex-ExtraViews+1);
 }

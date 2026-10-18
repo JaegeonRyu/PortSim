@@ -13,3 +13,10 @@
 @media(max-width:520px){main{padding:22px 12px 0}.shell{margin-left:57px}.sidebar{width:57px;padding:22px 4px}.nav{padding:13px 8px}.sensor-diagram svg{height:220px}.topbar{padding:0 14px;height:54px}.brand{padding:0 8px}.brandmark{font-size:20px;width:27px;height:33px}h1{font-size:20px}.eyebrow{font-size:8px;letter-spacing:1px}.kpis{gap:9px}.kpi-value{font-size:22px}.kpi-label{font-size:10px}.kpi-foot{font-size:8px}.sensor-list{grid-template-columns:1fr}.key-values{grid-template-columns:1fr 1fr}.legend{gap:8px}.terminal-map{height:260px}.flow{font-size:8px}.flow .step b{font-size:8px}.map-caption{font-size:8px}.panel-head{padding:15px 13px}.panel-head h2{font-size:14px}footer{font-size:7px;gap:10px}.result-hero strong{font-size:38px}.connection{font-size:9px}.detail-tabs{justify-content:space-between}.topbar{font-size:10px}.avatar{width:24px;height:24px}}
 
 .wire-row{padding:12px 0;border-bottom:1px solid #e3ebe5}.wire-row>span{float:right}.wire-row small{color:#6f8276}.sensor-projection{width:100%;margin-top:16px}.sensor-picker{display:block;padding:12px 24px}
+
+#fault-dialog{width:min(620px,calc(100vw - 48px));max-height:80vh;box-sizing:border-box;padding:28px;border:1px solid #bd5555;border-radius:14px;background:#fff;color:#263c36;box-shadow:0 24px 80px #0005}
+#fault-dialog::backdrop{background:#112e36a6}
+#fault-dialog h2{margin:0 0 12px;color:#a52e2e}
+#fault-description{line-height:1.6}
+#fault-details{white-space:pre-wrap;overflow-wrap:anywhere;max-height:45vh;overflow:auto;padding:16px;background:#fff1f0;border-radius:8px;color:#922e2e;font:14px/1.6 monospace}
+#fault-dialog form{display:flex;justify-content:flex-end;margin-top:20px}

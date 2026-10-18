@@ -39,6 +39,7 @@ struct FSiteTransfer
     float StationaryTime=0;
     FVector LastPosition=FVector::ZeroVector;
     int32 LastStage=-1;
+    int32 ChargingBay=INDEX_NONE; // held through station departure; stages 10 travel, 11 return, 12 charge
     TWeakObjectPtr<APortContainerActor> Actor;
     TArray<FVector> Route;
     bool bYardReleased=false, bRMGReserved=false, bParkingDeparture=false;
@@ -154,6 +155,8 @@ private:
     void ApplyVesselMotions(float FrameDurationSeconds=0);
     void Dispatch(int32 Lane);
     void ScheduleFleet();
+    void AdvanceFleetBatteries(float Dt);
+    FVector ChargingBayPosition(int32 Bay) const;
     void ActivateVehicle(int32 Vehicle,int32 STS,bool FromQueue);
     void AssignReturnSTS(int32 Vehicle);
     void PrepareNextCargo(int32 Lane);
@@ -171,6 +174,7 @@ private:
     void Freeze(bool Paused);
     void Stop(const FString& Reason);
     FVector QuayPark(int32 Lane) const;
+    FVector QueueQuay(int32 STS) const;
     FVector CargoQuay(int32 CargoIndex) const;
     FVector QueueQuay(int32 STS) const;
     FVector FleetPark(int32 Vehicle) const;
