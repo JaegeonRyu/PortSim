@@ -255,12 +255,13 @@ void APortAGVActor::SetFMSHold(bool Hold)
     if(Hold) Speed=0;
 }
 
-void APortAGVActor::UpdateLiDARObservation(float FrontDistanceCm,float RearDistanceCm,float SafetyDistanceCm,
+void APortAGVActor::UpdateLiDARObservation(float FrontDistanceCm,float RearDistanceCm,float SafetyDistanceCm,float DetectionRangeCm,
     bool ControlledStop,int32 BlockingVehicleID)
 {
     Sensors.FrontObstacleDistanceCm=FrontDistanceCm;
     Sensors.RearObstacleDistanceCm=RearDistanceCm;
     Sensors.LiDARSafetyDistanceCm=SafetyDistanceCm;
+    Sensors.LiDARDetectionRangeCm=DetectionRangeCm;
     Sensors.LiDARBlockingVehicleID=BlockingVehicleID;
     Sensors.bLiDARClear=!ControlledStop;
     Sensors.bControlledStop=ControlledStop;

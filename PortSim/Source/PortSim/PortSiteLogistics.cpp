@@ -187,6 +187,12 @@ void APortSiteLogistics::SetWindVelocity(FVector WorldVelocityMetersPerSecond)
     for(const auto& Crane:Equipment) if(IsValid(Crane)) Crane->SetWindVelocity(WindVelocityMetersPerSecond);
 }
 
+void APortSiteLogistics::SetFogVisibilityMeters(float VisibilityMeters)
+{
+    FogVisibilityMeters=FMath::IsFinite(VisibilityMeters)?FMath::Max(0.f,VisibilityMeters):MAX_flt;
+    for(const auto& Crane:Equipment) if(IsValid(Crane)) Crane->SetFogVisibilityMeters(FogVisibilityMeters);
+}
+
 void APortSiteLogistics::SetVesselMotions(const TArray<FPortVesselMotion>& Motions,const TArray<FVector>& BasePivots)
 {
     VesselMotions=Motions;
@@ -216,8 +222,18 @@ void APortSiteLogistics::ApplyVesselMotions(float FrameDurationSeconds)
         FVector Position,Velocity,Acceleration,Jerk;FQuat Rotation;
         if(!ResolveVesselTransform(Cargo,Position,Rotation,Velocity,Acceleration,Jerk)) continue;
         Actor->SetSecuredVesselMotion(Position,Rotation,Velocity,Acceleration,Jerk,FrameDurationSeconds);
+    }
+}
+
+void APortSiteLogistics::ApplyVesselMotionFraction(double Fraction)
+{
+    for(auto& Cargo:Manifest)
+    {
+        auto* Actor=Cargo.Actor.Get();
+        if(!IsValid(Actor) || Actor->LocationOwner!=ECargoOwner::Ship || Actor->GetAttachParentActor()) continue;
+        Actor->ApplySecuredMotionFraction(Fraction);
         if(Equipment.IsValidIndex(YardCraneCount+Cargo.STS))
-            Equipment[YardCraneCount+Cargo.STS]->UpdateMovingShipSource(Actor,Position);
+            Equipment[YardCraneCount+Cargo.STS]->UpdateMovingShipSource(Actor,Actor->GetActorLocation());
     }
 }
 
@@ -1254,6 +1270,14 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
             }
             From=Point;
         }
+        if(FogVisibilityMeters<MAX_flt)
+        {
+            const float FogRangeCm=FogVisibilityMeters*100.f;
+            const float LocalizationAllowance=2.f*AGVReference::PositionAccuracyCm;
+            const float FogSafeSpeed=FMath::Sqrt(2.f*Vehicle->AccelerationCmPerSecondSquared()*
+                FMath::Max(0.f,FogRangeCm-LocalizationAllowance));
+            ApproachLimit=FMath::Min(ApproachLimit,FogSafeSpeed);
+        }
         Vehicle->SetApproachSpeedLimit(ApproachLimit);
     }
     else if(!Vehicle->Sensors.FMSNextNode.Equals(Target,.01f)) Vehicle->SetFMSCommand(Target,0,1,true);
@@ -1328,6 +1352,7 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
             const float SideClearance=FMath::Abs(FVector::DotProduct(Delta,Lateral))-OwnSide-ProjectedExtent(Other,Lateral);
             if(SideClearance>0) continue;
             const float Clearance=FMath::Max(0.f,FMath::Abs(Along)-OwnLong-ProjectedExtent(Other,TravelDirection));
+            if(FogVisibilityMeters<MAX_flt && Clearance>FogVisibilityMeters*100.f) continue;
             if(Along>=0 && (AheadDistance<0 || Clearance<AheadDistance))
             { AheadDistance=Clearance; LiDARBlocker=Other->VehicleID; }
             else if(Along<0 && (BehindDistance<0 || Clearance<BehindDistance)) BehindDistance=Clearance;
@@ -1342,9 +1367,13 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
     const float LiDARSafetyDistance=AGVReference::DynamicLiDARSafetyDistance(
         Vehicle->Speed,Vehicle->AccelerationCmPerSecondSquared());
     const float LeadingDistance=Reversing?RearDistance:FrontDistance;
-    const bool LiDARStop=LeadingDistance>=0 && LeadingDistance<=LiDARSafetyDistance;
-    Vehicle->UpdateLiDARObservation(FrontDistance,RearDistance,LiDARSafetyDistance,LiDARStop,
-        LiDARStop?LiDARBlocker:INDEX_NONE);
+    // If fog is switched on while travelling above the new sensor-safe speed,
+    // command one controlled stop before resuming at the visibility-limited rate.
+    const bool VisibilityStop=FogVisibilityMeters<MAX_flt && LiDARSafetyDistance>FogVisibilityMeters*100.f;
+    const bool LiDARStop=VisibilityStop || (LeadingDistance>=0 && LeadingDistance<=LiDARSafetyDistance);
+    Vehicle->UpdateLiDARObservation(FrontDistance,RearDistance,LiDARSafetyDistance,
+        FogVisibilityMeters<MAX_flt?FogVisibilityMeters*100.f:-1.f,LiDARStop,
+        !VisibilityStop&&LiDARStop?LiDARBlocker:INDEX_NONE);
     if(LiDARStop)
     {
         RoadBlockers.Add(ID,LiDARBlocker);
@@ -1699,21 +1728,27 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
     // gates before the other vehicles and LiDAR have been updated.
     constexpr double TrafficStepSeconds=.05;
     PendingSimulationSeconds+=Dt;
-    bool bAdvancedTraffic=false;
-    while(PendingSimulationSeconds+1.e-9>=TrafficStepSeconds)
+    PendingVesselMotionSeconds+=Dt;
+    const int32 Steps=FMath::FloorToInt((PendingSimulationSeconds+1.e-9)/TrafficStepSeconds);
+    if(Steps>0)
     {
-        PendingSimulationSeconds-=TrafficStepSeconds;
-        BeginTrafficFrame();
-        AdvanceStep(static_cast<float>(TrafficStepSeconds),false);
-        bAdvancedTraffic=true;
-        if(!Fault.IsEmpty()) break;
+        PendingSimulationSeconds-=Steps*TrafficStepSeconds;
+        // The environment is sampled once per rendered frame. Establish one
+        // motion segment for that frame, then spread it across every 20 Hz
+        // logistics step instead of compressing the entire wave displacement
+        // into the first step at high playback rates.
+        ApplyVesselMotions(static_cast<float>(PendingVesselMotionSeconds));
+        PendingVesselMotionSeconds=0;
+        for(int32 StepIndex=0;StepIndex<Steps;++StepIndex)
+        {
+            ApplyVesselMotionFraction(double(StepIndex+1)/Steps);
+            BeginTrafficFrame();
+            AdvanceStep(static_cast<float>(TrafficStepSeconds),false);
+            if(!Fault.IsEmpty()) break;
+        }
     }
-    // Traffic runs at 20 Hz, but waves and wind are sampled every rendered
-    // frame.  Keep secured ship cargo on the current vessel pose even when the
-    // accumulated time is not yet large enough for another traffic step.
-    if(!bAdvancedTraffic)
+    else
     {
-        ApplyVesselMotions(Dt);
         for(const auto& Cargo:ShipContainers)
             if(IsValid(Cargo)) Cargo->ApplyWind(WindVelocityMetersPerSecond,STSProfile.Dynamics.WindDrag);
     }
@@ -1722,7 +1757,6 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
 void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
 {
     if (!bReady) return;
-    ApplyVesselMotions(Dt);
     for(const auto& Cargo:ShipContainers) if(IsValid(Cargo)) Cargo->ApplyWind(WindVelocityMetersPerSecond,STSProfile.Dynamics.WindDrag);
     if(!Paused && Fault.IsEmpty()) SimulationTime+=Dt;
     ExportDashboard(Paused);
@@ -1926,7 +1960,7 @@ void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
 void APortSiteLogistics::ResetLogistics()
 {
     if (!bReady) return;
-    PendingSimulationSeconds=0;
+    PendingSimulationSeconds=PendingVesselMotionSeconds=0;
     TrafficRecoveryTargets.Reset(); TrafficRecoveryOriginalReverse.Reset(); LastTrafficRecoveryAt=-100;
     for (auto& Job:Jobs) if (Job.Actor.IsValid()) Job.Actor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
     PlacedContainers.Reset();

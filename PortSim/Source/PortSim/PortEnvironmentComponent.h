@@ -137,6 +137,24 @@ struct PORTSIM_API FPortWindAerodynamics
         FQuat BodyRotation,FVector DimensionsMeters,double DragCoefficient);
 };
 
+/** Sensor-only fog model. Visual fog is deliberately outside this phase. */
+struct PORTSIM_API FPortFogState
+{
+    static constexpr float DefaultVisibilityMeters=30.f;
+    static constexpr float MinimumVisibilityMeters=5.f;
+    static constexpr float MaximumVisibilityMeters=1000.f;
+    bool bFogEnabled=false;
+    float VisibilityMeters=DefaultVisibilityMeters;
+
+    float SensorRangeMeters(const FString& SensorKey,float NominalRangeMeters) const
+    {
+        if(!bFogEnabled) return NominalRangeMeters;
+        const bool bFogSensitive=SensorKey.Contains(TEXT("camera"),ESearchCase::IgnoreCase) ||
+            SensorKey.Contains(TEXT("lidar"),ESearchCase::IgnoreCase);
+        return bFogSensitive?FMath::Min(NominalRangeMeters,VisibilityMeters):NominalRangeMeters;
+    }
+};
+
 /** One environment owned by the terminal controller and sampled by equipment. */
 UCLASS(ClassGroup=(PortSim), meta=(BlueprintSpawnableComponent))
 class PORTSIM_API UPortEnvironmentComponent : public UActorComponent
@@ -170,8 +188,15 @@ public:
     UFUNCTION(BlueprintCallable, Category="Environment|Sea") void ToggleSeaMotion() { Sea.bSeaMotionEnabled=!Sea.bSeaMotionEnabled; }
     FPortVesselMotion GetVesselMotion(int32 VesselIndex=0) const { return Sea.SampleVesselMotion(VesselIndex); }
     const FPortSeaState& GetSeaState() const { return Sea; }
+    UFUNCTION(BlueprintPure, Category="Environment|Fog") bool IsFogEnabled() const { return Fog.bFogEnabled; }
+    UFUNCTION(BlueprintPure, Category="Environment|Fog") float GetFogVisibilityMeters() const { return Fog.VisibilityMeters; }
+    UFUNCTION(BlueprintCallable, Category="Environment|Fog") void ToggleFog() { Fog.bFogEnabled=!Fog.bFogEnabled; }
+    float GetFogLimitedSensorRangeMeters(const FString& SensorKey,float NominalRangeMeters) const
+    { return Fog.SensorRangeMeters(SensorKey,NominalRangeMeters); }
+    const FPortFogState& GetFogState() const { return Fog; }
 private:
     FPortWindState Wind;
     FPortSeaState Sea;
+    FPortFogState Fog;
     int32 LastReportedGustCount=0;
 };

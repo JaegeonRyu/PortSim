@@ -153,4 +153,24 @@ bool FPortSeaStateTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("ON resumes frozen sea clock"),Sea.ElapsedSeconds>FrozenAt);
     return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPortFogStateTest,"PortSim.Environment.FogState",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FPortFogStateTest::RunTest(const FString& Parameters)
+{
+    FPortFogState Fog;
+    TestFalse(TEXT("Fog defaults OFF to preserve existing scenarios"),Fog.bFogEnabled);
+    TestEqual(TEXT("Dense-fog visibility assumption"),Fog.VisibilityMeters,FPortFogState::DefaultVisibilityMeters);
+    TestEqual(TEXT("OFF preserves camera range"),Fog.SensorRangeMeters(TEXT("spreader_camera"),50.f),50.f);
+    Fog.bFogEnabled=true;
+    TestEqual(TEXT("Fog limits camera range"),Fog.SensorRangeMeters(TEXT("spreader_camera"),50.f),Fog.VisibilityMeters);
+    TestEqual(TEXT("Fog limits LiDAR range case-insensitively"),Fog.SensorRangeMeters(TEXT("AGV_Position_LiDAR"),100.f),Fog.VisibilityMeters);
+    TestEqual(TEXT("Fog does not alter encoders"),Fog.SensorRangeMeters(TEXT("hoist_encoder"),100.f),100.f);
+    auto* Component=NewObject<UPortEnvironmentComponent>();
+    TestFalse(TEXT("Component fog defaults OFF"),Component->IsFogEnabled());
+    Component->ToggleFog();
+    TestTrue(TEXT("Fog toggle enables sensor attenuation"),Component->IsFogEnabled());
+    TestEqual(TEXT("Component applies fog range"),Component->GetFogLimitedSensorRangeMeters(TEXT("camera"),100.f),
+        FPortFogState::DefaultVisibilityMeters);
+    return true;
+}
 #endif

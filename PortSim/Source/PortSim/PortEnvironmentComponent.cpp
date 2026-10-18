@@ -288,10 +288,16 @@ void UPortEnvironmentComponent::BeginPlay()
     FParse::Value(FCommandLine::Get(),TEXT("PortSimEnvironmentSeed="),Seed);
     Wind.Initialize(Seed);
     Sea.Initialize(Seed);
+    float FogVisibility=Fog.VisibilityMeters;
+    if(FParse::Value(FCommandLine::Get(),TEXT("PortSimFogVisibility="),FogVisibility) && FMath::IsFinite(FogVisibility))
+        Fog.VisibilityMeters=FMath::Clamp(FogVisibility,FPortFogState::MinimumVisibilityMeters,FPortFogState::MaximumVisibilityMeters);
+    Fog.bFogEnabled=FParse::Param(FCommandLine::Get(),TEXT("PortSimFog"));
     LastReportedGustCount=Wind.GustCount;
     UE_LOG(LogTemp,Display,TEXT("PORTSIM_SEA_STATE: seed=%d Hs_m=%.3f wave_m=%.3f wave_period_s=%.3f swell_m=%.3f swell_period_s=%.3f"),
         Seed,Sea.SignificantWaveHeightMeters(),Sea.WaveHeightMeters,Sea.WavePeriodSeconds,
         Sea.SwellHeightMeters,Sea.SwellPeriodSeconds);
+    UE_LOG(LogTemp,Display,TEXT("PORTSIM_FOG_STATE: enabled=%d visibility_m=%.1f sensor_only=1"),
+        Fog.bFogEnabled,Fog.VisibilityMeters);
 }
 
 void UPortEnvironmentComponent::AdvanceEnvironment(float SimulationSeconds)

@@ -444,10 +444,19 @@ void AQuayCrane::UpdateRopes()
 void AQuayCrane::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
-    Environment->AdvanceEnvironment(DeltaSeconds);
+    // Pause and E-stop freeze one coherent simulation instant. Advancing the
+    // environment here while logistics is paused moves secured ship cargo and
+    // invalidates both the operator-visible stop and the site interlock test.
+    const bool bEnvironmentPaused=bAutoPaused || bEmergencyStop ||
+        (SiteLogistics && !SiteLogistics->Fault.IsEmpty());
+    if(!bEnvironmentPaused) Environment->AdvanceEnvironment(DeltaSeconds);
     ApplySeaMotion();
     const FVector WindVelocity=Environment->GetEffectiveWindVelocity();
-    if(SiteLogistics) SiteLogistics->SetWindVelocity(WindVelocity);
+    if(SiteLogistics)
+    {
+        SiteLogistics->SetWindVelocity(WindVelocity);
+        SiteLogistics->SetFogVisibilityMeters(Environment->IsFogEnabled()?Environment->GetFogVisibilityMeters():MAX_flt);
+    }
     for(const auto& Container:ContainerActors) if(IsValid(Container)) Container->ApplyWind(WindVelocity);
     if(bPickupTest){TickPickupTest(DeltaSeconds);return;}
     // World timers, control and Chaos consume the same accelerated delta.
@@ -523,6 +532,12 @@ void AQuayCrane::Tick(float DeltaSeconds)
         const bool Ctrl=PC->IsInputKeyDown(EKeys::LeftControl) || PC->IsInputKeyDown(EKeys::RightControl);
         if (Ctrl && PC->WasInputKeyJustPressed(EKeys::Zero)) Environment->ToggleWind();
         else if (Ctrl && PC->WasInputKeyJustPressed(EKeys::One)) Environment->ToggleSeaMotion();
+        else if (Ctrl && PC->WasInputKeyJustPressed(EKeys::Two))
+        {
+            Environment->ToggleFog();
+            UE_LOG(LogTemp,Display,TEXT("PORTSIM_FOG_TOGGLE: enabled=%d visibility_m=%.1f sensor_only=1"),
+                Environment->IsFogEnabled(),Environment->GetFogVisibilityMeters());
+        }
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::Home))
         { CameraViewName=TEXT("전체"); bFollowAGV=false; bFreeCamera=false; CameraArm->SetRelativeLocation(FVector(35000,0,0)); CameraArm->TargetArmLength=185000.f; CameraArm->SetRelativeRotation(FRotator(-52,38,0)); }
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::End))
@@ -540,7 +555,8 @@ void AQuayCrane::Tick(float DeltaSeconds)
         }
     }
 #if WITH_DEV_AUTOMATION_TESTS
-    if (FParse::Param(FCommandLine::Get(),TEXT("PortSimWindInputTest"))) TickWindInputTest(Dt);
+    if (FParse::Param(FCommandLine::Get(),TEXT("PortSimWindInputTest")) ||
+        FParse::Param(FCommandLine::Get(),TEXT("PortSimFogInputTest"))) TickWindInputTest(Dt);
 #endif
     if (bUnifiedTerminal)
     {

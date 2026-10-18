@@ -355,6 +355,8 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     Root->SetNumberField(TEXT("receiving_capacity"),ReceivingCapacity);
     Root->SetNumberField(TEXT("peak_moving_agvs"),PeakMovingVehicles);
     Root->SetNumberField(TEXT("prefetched_jobs"),PrefetchedJobs);
+    Root->SetBoolField(TEXT("fog_enabled"),FogVisibilityMeters<MAX_flt);
+    Root->SetNumberField(TEXT("fog_visibility_m"),FogVisibilityMeters<MAX_flt?FogVisibilityMeters:-1.f);
     TArray<TSharedPtr<FJsonValue>> ReturnCorridors;
     static const TCHAR* ReturnNames[]={TEXT("south"),TEXT("central"),TEXT("north")};
     for(int32 Corridor=0;Corridor<TerminalLayout::AGVReturnCorridorCount;++Corridor)
@@ -444,6 +446,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             O->SetNumberField(TEXT("lidar_front_obstacle_m"),V->Sensors.FrontObstacleDistanceCm<0?-1:V->Sensors.FrontObstacleDistanceCm*.01f);
             O->SetNumberField(TEXT("lidar_rear_obstacle_m"),V->Sensors.RearObstacleDistanceCm<0?-1:V->Sensors.RearObstacleDistanceCm*.01f);
             O->SetNumberField(TEXT("lidar_safety_distance_m"),V->Sensors.LiDARSafetyDistanceCm*.01f);
+            O->SetNumberField(TEXT("lidar_detection_range_m"),V->Sensors.LiDARDetectionRangeCm<0?-1:V->Sensors.LiDARDetectionRangeCm*.01f);
             O->SetNumberField(TEXT("lidar_blocking_agv"),V->Sensors.LiDARBlockingVehicleID);
             O->SetBoolField(TEXT("lidar_clear"),V->Sensors.bLiDARClear);
             O->SetBoolField(TEXT("controlled_stop"),V->Sensors.bControlledStop);

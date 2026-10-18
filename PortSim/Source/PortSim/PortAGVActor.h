@@ -32,6 +32,7 @@ struct FAGVSensorState
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="AGV|Safety") float FrontObstacleDistanceCm=-1;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="AGV|Safety") float RearObstacleDistanceCm=-1;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="AGV|Safety") float LiDARSafetyDistanceCm=0;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="AGV|Safety") float LiDARDetectionRangeCm=-1;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="AGV|Safety") int32 LiDARBlockingVehicleID=INDEX_NONE;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="AGV|Safety") bool bLiDARClear=true;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="AGV|Safety") bool bControlledStop=false;
@@ -53,7 +54,7 @@ public:
     void SetFMSCommand(FVector Target,int32 NodeIndex,int32 NodeCount,bool Docking,float AcceptanceCm=-1.f,
         FVector ExpectedDockingAxis=FVector::ZeroVector);
     void SetFMSHold(bool Hold);
-    void UpdateLiDARObservation(float FrontDistanceCm,float RearDistanceCm,float SafetyDistanceCm,
+    void UpdateLiDARObservation(float FrontDistanceCm,float RearDistanceCm,float SafetyDistanceCm,float DetectionRangeCm,
         bool ControlledStop,int32 BlockingVehicleID=INDEX_NONE);
     float SpeedLimitCmPerSecond() const;
     void SetApproachSpeedLimit(float Limit) { FMSApproachSpeedLimit=Limit; }

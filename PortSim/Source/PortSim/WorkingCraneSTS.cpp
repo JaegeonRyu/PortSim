@@ -35,6 +35,11 @@ void APortWorkingCrane::SetWindVelocity(FVector WorldVelocityMetersPerSecond)
         WorldVelocityMetersPerSecond.GetClampedToMaxSize(50.f);
 }
 
+void APortWorkingCrane::SetFogVisibilityMeters(float VisibilityMeters)
+{
+    FogVisibilityMeters=FMath::IsFinite(VisibilityMeters)?FMath::Max(0.f,VisibilityMeters):MAX_flt;
+}
+
 void APortWorkingCrane::UpdateMovingShipSource(APortContainerActor* Cargo,FVector WorldPosition)
 {
     if(!bSTS || !bJobActive || bCarrying || CargoActor!=Cargo || Stage>2 || SourceSlot<0 || SourceSlot>1) return;
@@ -399,7 +404,10 @@ bool APortWorkingCrane::STSSensorContains(const FString& Key,FVector Point) cons
     for(const FVector& Origin:Origins)
     {
         const FVector Delta=Point-Origin;const double Distance=Delta.Size()*.01;
-        if(Distance>=M.Minimum && Distance<=M.Maximum && FVector::DotProduct(Delta.GetSafeNormal(),Marker->GetForwardVector())>=FMath::Cos(FMath::DegreesToRadians(M.Fov*.5)))return true;
+        const bool bFogSensitive=Key.Contains(TEXT("camera"),ESearchCase::IgnoreCase) ||
+            Key.Contains(TEXT("lidar"),ESearchCase::IgnoreCase);
+        const double Maximum=bFogSensitive?FMath::Min(double(M.Maximum),double(FogVisibilityMeters)):M.Maximum;
+        if(Distance>=M.Minimum && Distance<=Maximum && FVector::DotProduct(Delta.GetSafeNormal(),Marker->GetForwardVector())>=FMath::Cos(FMath::DegreesToRadians(M.Fov*.5)))return true;
     }
     return false;
 }

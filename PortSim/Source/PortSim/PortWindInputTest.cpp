@@ -39,20 +39,28 @@ void AQuayCrane::TickWindInputTest(float Dt)
         return Pass;
     };
     if(T.Step>=1000) return;
+    const bool bFogOnly=FParse::Param(FCommandLine::Get(),TEXT("PortSimFogInputTest"));
+    if(bFogOnly && T.Step==0 && T.Frame==0) T.Step=34;
     const FKey Keys[]={EKeys::P,EKeys::Equals,EKeys::Hyphen,EKeys::Add,EKeys::Zero,EKeys::Zero,
         EKeys::Zero,EKeys::Add,EKeys::NumPadZero,EKeys::Add,EKeys::Zero,EKeys::R,EKeys::Zero,
         EKeys::One,EKeys::One,EKeys::H,EKeys::H,EKeys::SpaceBar,EKeys::SpaceBar,EKeys::Home,EKeys::End,EKeys::Tab,
         EKeys::W,EKeys::S,EKeys::A,EKeys::D,EKeys::Q,EKeys::E,EKeys::W,EKeys::RightMouseButton,
-        EKeys::P,EKeys::U,EKeys::L,EKeys::F};
+        EKeys::P,EKeys::U,EKeys::L,EKeys::F,EKeys::Two,EKeys::Two};
     if(T.Step>=UE_ARRAY_COUNT(Keys))
     {
+        if(bFogOnly)
+        {
+            UE_LOG(LogTemp,Display,TEXT("PORTSIM_FOG_INPUT_PASS: Ctrl-left/right+2 sensor fog ON/OFF"));
+            T.Step=1000; FPlatformMisc::RequestExitWithStatus(false,0);
+            return;
+        }
         if(Check(FollowedAGV.IsValid(),TEXT("Loaded AGV follow tracks an actual vehicle")))
         {
             FString Error;
             const bool Valid=ValidateTerminalActors(Error);
             if(!Valid) UE_LOG(LogTemp,Error,TEXT("WIND_INPUT_VALIDATION_DETAIL: %s"),*Error);
             if(!Check(Valid,TEXT("Terminal actor/inventory validation"))) return;
-            UE_LOG(LogTemp,Display,TEXT("PORTSIM_WIND_INPUT_PASS: Ctrl-left/right+0 wind; Ctrl-left/right+1 sea motion; zero/numpad speed reset; raw environment reset persistence; H/button; E-stop; cameras; U/L; loaded AGV follow"));
+            UE_LOG(LogTemp,Display,TEXT("PORTSIM_WIND_INPUT_PASS: Ctrl-left/right+0 wind; Ctrl-left/right+1 sea motion; Ctrl-left/right+2 sensor fog; zero/numpad speed reset; raw environment reset persistence; H/button; E-stop; cameras; U/L; loaded AGV follow"));
             T.Step=1000; FPlatformMisc::RequestExitWithStatus(false,0);
         }
         return;
@@ -63,8 +71,8 @@ void AQuayCrane::TickWindInputTest(float Dt)
         if(T.Elapsed>1500) Check(false,TEXT("Timed out waiting for a loaded AGV"));
         return;
     }
-    const bool LeftCtrl=T.Step==4 || T.Step==10 || T.Step==13;
-    const bool RightCtrl=T.Step==5 || T.Step==12 || T.Step==14;
+    const bool LeftCtrl=T.Step==4 || T.Step==10 || T.Step==13 || T.Step==34;
+    const bool RightCtrl=T.Step==5 || T.Step==12 || T.Step==14 || T.Step==35;
     auto Input=[&](FKey Key,EInputEvent Event)
     {
         PC->InputKey(FInputKeyEventArgs::CreateSimulated(Key,Event,Event==IE_Released?0.f:1.f));
@@ -141,6 +149,8 @@ void AQuayCrane::TickWindInputTest(float Dt)
         case 31: Pass=!bAutoPaused && bAutoRunning; break;
         case 32: Pass=!bAutoLoading && bAutoRunning; break; // Unified mode deliberately rejects loading.
         case 33: Pass=bFollowAGV; break;
+        case 34: Pass=Environment->IsFogEnabled(); break;
+        case 35: Pass=!Environment->IsFogEnabled(); break;
         }
         if(!Check(Pass,*Keys[T.Step].ToString())) return;
         if(FParse::Param(FCommandLine::Get(),TEXT("PortSimWindHUDCapture")) &&

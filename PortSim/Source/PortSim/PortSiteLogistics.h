@@ -72,6 +72,7 @@ public:
     void RegisterBerthVehicles(const TArray<TObjectPtr<APortAGVActor>>& BerthVehicles);
     void BeginTrafficFrame();
     void SetWindVelocity(FVector WorldVelocityMetersPerSecond);
+    void SetFogVisibilityMeters(float VisibilityMeters);
     void SetVesselMotions(const TArray<FPortVesselMotion>& Motions,const TArray<FVector>& BasePivots);
     bool MoveVehicle(APortAGVActor* Vehicle,FVector Target,float Dt);
     void Advance(float Dt,bool Paused);
@@ -149,10 +150,12 @@ private:
     bool bReady=false, bWasPaused=false;
     bool bCargoAlignedHandover=true;
     FVector WindVelocityMetersPerSecond=FVector::ZeroVector;
+    float FogVisibilityMeters=MAX_flt;
     TArray<FPortVesselMotion> VesselMotions;
     TArray<FVector> VesselBasePivots;
     bool ResolveVesselTransform(const FSiteShipCargo& Cargo,FVector& Position,FQuat& Rotation,FVector& Velocity,FVector& Acceleration,FVector& Jerk) const;
     void ApplyVesselMotions(float FrameDurationSeconds=0);
+    void ApplyVesselMotionFraction(double Fraction);
     void Dispatch(int32 Lane);
     void ScheduleFleet();
     void AdvanceFleetBatteries(float Dt);
@@ -164,7 +167,7 @@ private:
     bool YardApproachAvailable(int32 Cargo) const;
     void AdvanceStep(float Dt,bool Paused);
     void RecoverTrafficCycle();
-    double PendingSimulationSeconds=0;
+    double PendingSimulationSeconds=0, PendingVesselMotionSeconds=0;
     int32 YardApproachKey(const FSiteYardSlot& Slot) const { return LaneCount==9?Slot.Crane:Slot.Block; }
     bool ReserveYard(int32 Lane);
     bool PlanYardDestinations();
@@ -176,7 +179,6 @@ private:
     FVector QuayPark(int32 Lane) const;
     FVector QueueQuay(int32 STS) const;
     FVector CargoQuay(int32 CargoIndex) const;
-    FVector QueueQuay(int32 STS) const;
     FVector FleetPark(int32 Vehicle) const;
     FVector YardHandover(const FSiteYardSlot& Slot) const;
 };

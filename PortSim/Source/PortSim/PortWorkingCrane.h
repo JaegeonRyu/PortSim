@@ -23,6 +23,7 @@ public:
     bool AssignCargo(APortContainerActor* Cargo, FVector Source, FVector Destination, bool SourceSupport, bool DestinationSupport, APortAGVActor* HandoverVehicle=nullptr);
     void SetSTSProfile(const FSTSOperatingProfile& Profile) { STSProfile=Profile; }
     void SetWindVelocity(FVector WorldVelocityMetersPerSecond);
+    void SetFogVisibilityMeters(float VisibilityMeters);
     void UpdateMovingShipSource(APortContainerActor* Cargo,FVector WorldPosition);
     FVector GetWindVelocity() const { return WindVelocityMetersPerSecond; }
     bool HasSTSProfile() const { return bSTS && STSProfile.bReady; }
@@ -74,6 +75,7 @@ private:
     UPROPERTY() TObjectPtr<APortAGVActor> HandoverAGV;
     FVector AxisVelocity=FVector::ZeroVector;
     FVector WindVelocityMetersPerSecond=FVector::ZeroVector;
+    float FogVisibilityMeters=MAX_flt;
     double SimulationTime=0, NextSample=0, JobSeconds=0, PausedSeconds=0;
     double AGVAlignmentWait=0;
     bool CornerLocked[4]={false,false,false,false};
