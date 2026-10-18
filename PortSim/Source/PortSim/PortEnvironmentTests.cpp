@@ -173,4 +173,22 @@ bool FPortFogStateTest::RunTest(const FString& Parameters)
         FPortFogState::DefaultVisibilityMeters);
     return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPortRainStateTest,"PortSim.Environment.RainState",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FPortRainStateTest::RunTest(const FString& Parameters)
+{
+    FPortRainState Rain;
+    TestFalse(TEXT("Rain defaults OFF to preserve existing scenarios"),Rain.bRainEnabled);
+    TestEqual(TEXT("OFF preserves camera range"),Rain.SensorRangeScale(TEXT("spreader_camera")),1.f);
+    TestEqual(TEXT("OFF preserves dry traction"),Rain.WetTractionScale(),1.f);
+    Rain.bRainEnabled=true;
+    TestTrue(TEXT("Rain reduces camera range"),Rain.SensorRangeScale(TEXT("spreader_camera"))<1.f);
+    TestTrue(TEXT("Rain reduces LiDAR range"),Rain.SensorRangeScale(TEXT("front_lidar"))<1.f);
+    TestEqual(TEXT("Rain does not alter encoders"),Rain.SensorRangeScale(TEXT("hoist_encoder")),1.f);
+    TestTrue(TEXT("Wet surface reduces traction"),Rain.WetTractionScale()<1.f);
+    auto* Component=NewObject<UPortEnvironmentComponent>();
+    Component->ToggleRain();
+    TestTrue(TEXT("Rain toggle enables operational effects"),Component->IsRainEnabled());
+    return true;
+}
 #endif

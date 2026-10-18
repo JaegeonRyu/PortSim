@@ -456,6 +456,7 @@ void AQuayCrane::Tick(float DeltaSeconds)
     {
         SiteLogistics->SetWindVelocity(WindVelocity);
         SiteLogistics->SetFogVisibilityMeters(Environment->IsFogEnabled()?Environment->GetFogVisibilityMeters():MAX_flt);
+        SiteLogistics->SetRainState(Environment->GetRainState());
     }
     for(const auto& Container:ContainerActors) if(IsValid(Container)) Container->ApplyWind(WindVelocity);
     if(bPickupTest){TickPickupTest(DeltaSeconds);return;}
@@ -538,6 +539,14 @@ void AQuayCrane::Tick(float DeltaSeconds)
             UE_LOG(LogTemp,Display,TEXT("PORTSIM_FOG_TOGGLE: enabled=%d visibility_m=%.1f sensor_only=1"),
                 Environment->IsFogEnabled(),Environment->GetFogVisibilityMeters());
         }
+        else if (Ctrl && PC->WasInputKeyJustPressed(EKeys::Three))
+        {
+            Environment->ToggleRain();
+            const auto& Rain=Environment->GetRainState();
+            UE_LOG(LogTemp,Display,TEXT("PORTSIM_RAIN_TOGGLE: enabled=%d rate_mmph=%.1f camera_scale=%.3f lidar_scale=%.3f traction_scale=%.3f visual=0"),
+                Rain.bRainEnabled,Rain.RainfallMmPerHour,Rain.SensorRangeScale(TEXT("camera")),
+                Rain.SensorRangeScale(TEXT("lidar")),Rain.WetTractionScale());
+        }
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::Home))
         { CameraViewName=TEXT("전체"); bFollowAGV=false; bFreeCamera=false; CameraArm->SetRelativeLocation(FVector(35000,0,0)); CameraArm->TargetArmLength=185000.f; CameraArm->SetRelativeRotation(FRotator(-52,38,0)); }
         if (bTerminalMode && PC->WasInputKeyJustPressed(EKeys::End))
@@ -556,7 +565,8 @@ void AQuayCrane::Tick(float DeltaSeconds)
     }
 #if WITH_DEV_AUTOMATION_TESTS
     if (FParse::Param(FCommandLine::Get(),TEXT("PortSimWindInputTest")) ||
-        FParse::Param(FCommandLine::Get(),TEXT("PortSimFogInputTest"))) TickWindInputTest(Dt);
+        FParse::Param(FCommandLine::Get(),TEXT("PortSimFogInputTest")) ||
+        FParse::Param(FCommandLine::Get(),TEXT("PortSimRainInputTest"))) TickWindInputTest(Dt);
 #endif
     if (bUnifiedTerminal)
     {

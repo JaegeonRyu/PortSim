@@ -155,6 +155,27 @@ struct PORTSIM_API FPortFogState
     }
 };
 
+/** Deterministic sensor and wet-surface rain model. Visual rain is deliberately excluded. */
+struct PORTSIM_API FPortRainState
+{
+    static constexpr float DefaultRainfallMmPerHour=25.f;
+    static constexpr float MinimumRainfallMmPerHour=1.f;
+    static constexpr float MaximumRainfallMmPerHour=100.f;
+    bool bRainEnabled=false;
+    float RainfallMmPerHour=DefaultRainfallMmPerHour;
+
+    float Severity() const
+    { return bRainEnabled?FMath::Clamp(RainfallMmPerHour/50.f,0.f,1.f):0.f; }
+    float SensorRangeScale(const FString& SensorKey) const
+    {
+        const float S=Severity();
+        if(SensorKey.Contains(TEXT("camera"),ESearchCase::IgnoreCase)) return FMath::Lerp(1.f,.6f,S);
+        if(SensorKey.Contains(TEXT("lidar"),ESearchCase::IgnoreCase)) return FMath::Lerp(1.f,.75f,S);
+        return 1.f;
+    }
+    float WetTractionScale() const { return FMath::Lerp(1.f,.8f,Severity()); }
+};
+
 /** One environment owned by the terminal controller and sampled by equipment. */
 UCLASS(ClassGroup=(PortSim), meta=(BlueprintSpawnableComponent))
 class PORTSIM_API UPortEnvironmentComponent : public UActorComponent
@@ -194,9 +215,14 @@ public:
     float GetFogLimitedSensorRangeMeters(const FString& SensorKey,float NominalRangeMeters) const
     { return Fog.SensorRangeMeters(SensorKey,NominalRangeMeters); }
     const FPortFogState& GetFogState() const { return Fog; }
+    UFUNCTION(BlueprintPure, Category="Environment|Rain") bool IsRainEnabled() const { return Rain.bRainEnabled; }
+    UFUNCTION(BlueprintPure, Category="Environment|Rain") float GetRainfallMmPerHour() const { return Rain.RainfallMmPerHour; }
+    UFUNCTION(BlueprintCallable, Category="Environment|Rain") void ToggleRain() { Rain.bRainEnabled=!Rain.bRainEnabled; }
+    const FPortRainState& GetRainState() const { return Rain; }
 private:
     FPortWindState Wind;
     FPortSeaState Sea;
     FPortFogState Fog;
+    FPortRainState Rain;
     int32 LastReportedGustCount=0;
 };

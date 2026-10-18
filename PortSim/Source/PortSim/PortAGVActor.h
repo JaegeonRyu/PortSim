@@ -58,6 +58,7 @@ public:
         bool ControlledStop,int32 BlockingVehicleID=INDEX_NONE);
     float SpeedLimitCmPerSecond() const;
     void SetApproachSpeedLimit(float Limit) { FMSApproachSpeedLimit=Limit; }
+    void SetWetTractionScale(float Scale) { WetTractionScale=FMath::Clamp(Scale,.5f,1.f); }
     void SetSteeringLookAhead(FVector Target,bool Enabled) { SteeringLookAhead=Target; bSteeringLookAhead=Enabled; }
     float AccelerationCmPerSecondSquared() const;
     bool PayloadWithinReferenceLimit() const;
@@ -83,6 +84,7 @@ private:
     void CorrectAtTransponder(FVector Position);
     float FMSAcceptanceCm=800.f;
     float FMSApproachSpeedLimit=MAX_flt;
+    float WetTractionScale=1.f;
     FVector SteeringLookAhead=FVector::ZeroVector;
     bool bSteeringLookAhead=false;
     FVector DockingAxis=FVector::ZeroVector;

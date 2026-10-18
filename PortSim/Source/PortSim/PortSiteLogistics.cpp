@@ -193,6 +193,16 @@ void APortSiteLogistics::SetFogVisibilityMeters(float VisibilityMeters)
     for(const auto& Crane:Equipment) if(IsValid(Crane)) Crane->SetFogVisibilityMeters(FogVisibilityMeters);
 }
 
+void APortSiteLogistics::SetRainState(const FPortRainState& State)
+{
+    RainState=State;
+    const float CameraScale=RainState.SensorRangeScale(TEXT("camera"));
+    const float LiDARScale=RainState.SensorRangeScale(TEXT("lidar"));
+    const float TractionScale=RainState.WetTractionScale();
+    for(const auto& Crane:Equipment) if(IsValid(Crane)) Crane->SetRainSensorRangeScales(CameraScale,LiDARScale);
+    for(const auto& Vehicle:TrafficVehicles) if(IsValid(Vehicle)) Vehicle->SetWetTractionScale(TractionScale);
+}
+
 void APortSiteLogistics::SetVesselMotions(const TArray<FPortVesselMotion>& Motions,const TArray<FVector>& BasePivots)
 {
     VesselMotions=Motions;
@@ -1210,6 +1220,7 @@ void APortSiteLogistics::BeginTrafficFrame()
 
 bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float Dt)
 {
+    Vehicle->SetWetTractionScale(RainState.WetTractionScale());
     if (!bTrafficIndexReady) BeginTrafficFrame();
     const int32 FleetIndex=Vehicles.IndexOfByKey(Vehicle);
     if (Jobs.IsValidIndex(FleetIndex))
@@ -1270,13 +1281,15 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
             }
             From=Point;
         }
-        if(FogVisibilityMeters<MAX_flt)
+        float EnvironmentalLiDARRangeCm=FogVisibilityMeters<MAX_flt?FogVisibilityMeters*100.f:MAX_flt;
+        if(RainState.bRainEnabled)
+            EnvironmentalLiDARRangeCm=FMath::Min(EnvironmentalLiDARRangeCm,10000.f*RainState.SensorRangeScale(TEXT("lidar")));
+        if(EnvironmentalLiDARRangeCm<MAX_flt)
         {
-            const float FogRangeCm=FogVisibilityMeters*100.f;
             const float LocalizationAllowance=2.f*AGVReference::PositionAccuracyCm;
-            const float FogSafeSpeed=FMath::Sqrt(2.f*Vehicle->AccelerationCmPerSecondSquared()*
-                FMath::Max(0.f,FogRangeCm-LocalizationAllowance));
-            ApproachLimit=FMath::Min(ApproachLimit,FogSafeSpeed);
+            const float SensorSafeSpeed=FMath::Sqrt(2.f*Vehicle->AccelerationCmPerSecondSquared()*
+                FMath::Max(0.f,EnvironmentalLiDARRangeCm-LocalizationAllowance));
+            ApproachLimit=FMath::Min(ApproachLimit,SensorSafeSpeed);
         }
         Vehicle->SetApproachSpeedLimit(ApproachLimit);
     }
@@ -1300,6 +1313,9 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
     // controller.  Looking along the target chord would reintroduce a virtual
     // sideways sensor direction while the vehicle is turning.
     const FVector TravelDirection=Vehicle->PlannedMotionDirection(Target);
+    float EnvironmentalLiDARRangeCm=FogVisibilityMeters<MAX_flt?FogVisibilityMeters*100.f:MAX_flt;
+    if(RainState.bRainEnabled)
+        EnvironmentalLiDARRangeCm=FMath::Min(EnvironmentalLiDARRangeCm,10000.f*RainState.SensorRangeScale(TEXT("lidar")));
     float AheadDistance=-1,BehindDistance=-1;
     int32 LiDARBlocker=INDEX_NONE;
     if(!TravelDirection.IsNearlyZero())
@@ -1352,7 +1368,7 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
             const float SideClearance=FMath::Abs(FVector::DotProduct(Delta,Lateral))-OwnSide-ProjectedExtent(Other,Lateral);
             if(SideClearance>0) continue;
             const float Clearance=FMath::Max(0.f,FMath::Abs(Along)-OwnLong-ProjectedExtent(Other,TravelDirection));
-            if(FogVisibilityMeters<MAX_flt && Clearance>FogVisibilityMeters*100.f) continue;
+            if(EnvironmentalLiDARRangeCm<MAX_flt && Clearance>EnvironmentalLiDARRangeCm) continue;
             if(Along>=0 && (AheadDistance<0 || Clearance<AheadDistance))
             { AheadDistance=Clearance; LiDARBlocker=Other->VehicleID; }
             else if(Along<0 && (BehindDistance<0 || Clearance<BehindDistance)) BehindDistance=Clearance;
@@ -1367,12 +1383,12 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
     const float LiDARSafetyDistance=AGVReference::DynamicLiDARSafetyDistance(
         Vehicle->Speed,Vehicle->AccelerationCmPerSecondSquared());
     const float LeadingDistance=Reversing?RearDistance:FrontDistance;
-    // If fog is switched on while travelling above the new sensor-safe speed,
+    // If visibility degrades while travelling above the new sensor-safe speed,
     // command one controlled stop before resuming at the visibility-limited rate.
-    const bool VisibilityStop=FogVisibilityMeters<MAX_flt && LiDARSafetyDistance>FogVisibilityMeters*100.f;
+    const bool VisibilityStop=EnvironmentalLiDARRangeCm<MAX_flt && LiDARSafetyDistance>EnvironmentalLiDARRangeCm;
     const bool LiDARStop=VisibilityStop || (LeadingDistance>=0 && LeadingDistance<=LiDARSafetyDistance);
     Vehicle->UpdateLiDARObservation(FrontDistance,RearDistance,LiDARSafetyDistance,
-        FogVisibilityMeters<MAX_flt?FogVisibilityMeters*100.f:-1.f,LiDARStop,
+        EnvironmentalLiDARRangeCm<MAX_flt?EnvironmentalLiDARRangeCm:-1.f,LiDARStop,
         !VisibilityStop&&LiDARStop?LiDARBlocker:INDEX_NONE);
     if(LiDARStop)
     {

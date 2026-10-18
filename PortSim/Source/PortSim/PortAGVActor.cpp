@@ -297,7 +297,7 @@ float APortAGVActor::SpeedLimitCmPerSecond() const
 
 float APortAGVActor::AccelerationCmPerSecondSquared() const
 {
-    return AGVReference::AccelerationLimit(PayloadKg);
+    return AGVReference::AccelerationLimit(PayloadKg)*WetTractionScale;
 }
 
 bool APortAGVActor::PayloadWithinReferenceLimit() const

@@ -73,6 +73,7 @@ public:
     void BeginTrafficFrame();
     void SetWindVelocity(FVector WorldVelocityMetersPerSecond);
     void SetFogVisibilityMeters(float VisibilityMeters);
+    void SetRainState(const FPortRainState& State);
     void SetVesselMotions(const TArray<FPortVesselMotion>& Motions,const TArray<FVector>& BasePivots);
     bool MoveVehicle(APortAGVActor* Vehicle,FVector Target,float Dt);
     void Advance(float Dt,bool Paused);
@@ -151,6 +152,7 @@ private:
     bool bCargoAlignedHandover=true;
     FVector WindVelocityMetersPerSecond=FVector::ZeroVector;
     float FogVisibilityMeters=MAX_flt;
+    FPortRainState RainState;
     TArray<FPortVesselMotion> VesselMotions;
     TArray<FVector> VesselBasePivots;
     bool ResolveVesselTransform(const FSiteShipCargo& Cargo,FVector& Position,FQuat& Rotation,FVector& Velocity,FVector& Acceleration,FVector& Jerk) const;

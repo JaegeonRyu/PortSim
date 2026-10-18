@@ -357,6 +357,9 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     Root->SetNumberField(TEXT("prefetched_jobs"),PrefetchedJobs);
     Root->SetBoolField(TEXT("fog_enabled"),FogVisibilityMeters<MAX_flt);
     Root->SetNumberField(TEXT("fog_visibility_m"),FogVisibilityMeters<MAX_flt?FogVisibilityMeters:-1.f);
+    Root->SetBoolField(TEXT("rain_enabled"),RainState.bRainEnabled);
+    Root->SetNumberField(TEXT("rainfall_mm_per_hour"),RainState.bRainEnabled?RainState.RainfallMmPerHour:0.f);
+    Root->SetNumberField(TEXT("wet_traction_scale"),RainState.WetTractionScale());
     TArray<TSharedPtr<FJsonValue>> ReturnCorridors;
     static const TCHAR* ReturnNames[]={TEXT("south"),TEXT("central"),TEXT("north")};
     for(int32 Corridor=0;Corridor<TerminalLayout::AGVReturnCorridorCount;++Corridor)
