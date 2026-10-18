@@ -28,10 +28,13 @@ public:
     void ApplyWind(FVector WindVelocityMetersPerSecond,float DragCoefficient=1.2f);
     void SetSecuredVesselMotion(FVector Position,FQuat Rotation,FVector VelocityCentimetersPerSecond,
         FVector AccelerationCentimetersPerSecondSquared=FVector::ZeroVector,
-        FVector JerkCentimetersPerSecondCubed=FVector::ZeroVector,double FrameDurationSeconds=0.);
+        FVector JerkCentimetersPerSecondCubed=FVector::ZeroVector,double FrameDurationSeconds=0.,bool ApplyPose=true);
     /** Interpolate the latest vessel-motion frame for fixed-rate crane substeps. */
     void ApplySecuredMotionFraction(double Fraction);
     void SetSecuredMotionWindow(double Start,double End);
+    void BeginVisualFrame();
+    void EndVisualFrame();
+    bool SecuredMotionCouldIntersect(const FBox& Query) const { return SecuredSweptBounds.Intersect(Query); }
     FVector GetMotionVelocity() const;
     FVector GetMotionAcceleration() const;
     FVector GetMotionJerk() const;
@@ -55,6 +58,9 @@ public:
     FVector KinematicAccelerationCentimetersPerSecondSquared=FVector::ZeroVector;
     FVector KinematicJerkCentimetersPerSecondCubed=FVector::ZeroVector;
 private:
+    TWeakObjectPtr<USceneComponent> DeferredVisualParent;
+    FTransform DeferredVisualRelative;
+    FBox SecuredSweptBounds=FBox(ForceInit);
     FTransform PreviousSecuredTransform=FTransform::Identity, CurrentSecuredTransform=FTransform::Identity;
     FVector PreviousSecuredVelocity=FVector::ZeroVector, CurrentSecuredVelocity=FVector::ZeroVector;
     FVector PreviousSecuredAcceleration=FVector::ZeroVector, CurrentSecuredAcceleration=FVector::ZeroVector;

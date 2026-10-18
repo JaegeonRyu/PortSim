@@ -139,6 +139,7 @@ function overviewDetails(a){
  }
  if(['sts','rmg'].includes(a.type))html+=kv('작업 단계',a.busy?`${a.stage+1}. ${stages[a.stage]}`:'작업 대기')+kv('인계 준비',a.destination_ready?'준비됨':'AGV 복귀 대기')+(a.agv_alignment_wait_seconds>0?kv('AGV 정렬 재확인',`${num(a.agv_alignment_wait_seconds,2)} s`):'')+kv('목표까지 직선거리',`${num(a.distance_to_destination_m)} m`)+kv('스프레더 좌표 X / Y / Z',`${vector(a.head_position_m)} m`)+kv('스프레더 현재 / 목표 길이',`${num(a.spreader_length_m,3)} / ${num(a.spreader_target_length_m,3)} m`)+kv('신축 체결 준비',a.telescope_ready?'완료':'조정 중');
  if(a.type==='agv')html+=kv('배터리',`${num(a.battery_percent,1)}% / 충전 상한 80%`)+kv('배터리 상태',a.charging?'충전 중':a.needs_charge?'충전 필요':'작업 가능')+(a.charging_bay?kv('충전 구역',`${a.charging_bay}번`):'')+kv('현재 속도',`${num(a.speed_mps,2)} m/s`)+kv('남은 경로 거리',`${num(a.route_remaining_m)} m`)+kv('교통 대기 누적',`${num(a.traffic_wait_seconds,1)} s`)+kv('야드 대기 누적',`${num(a.yard_wait_seconds,1)} s`)+(a.return_sts?kv('복귀 목적지',`STS-${a.return_sts}`):'')+kv('작업 단계',['대기','STS 인계 대기','야드 진입 대기','야드 이동','RMG 인계',a.return_sts?'STS 직접 복귀':'주차장 복귀','STS 접근','STS 대기열 이동','STS 배차 대기','야드 입구 RMG 대기','두 번째 20ft 적재','충전소 이동','대기 위치 복귀','충전 중'][a.stage]||'—')+kv('위치추정 오차',`${num(a.position_error_mm,1)} / ±${num(a.position_accuracy_limit_mm,0)} mm`)+kv('현재 FMS 노드',a.fms_node_count?`${num(a.fms_node_index+1,0)} / ${num(a.fms_node_count,0)}`:'배차 대기')+kv('안전 제어',a.controlled_stop?'LiDAR Controlled Stop':a.fms_hold?'FMS 도로예약 대기':'주행 허용');
+ if(a.type==='agv' && a.fms_hold)html+=kv('현재 FMS 예약 요청 대기',`${num(a.fms_wait_seconds,1)} s`)+(a.fms_blocking_agv>=0?kv('통행 대기 상대',`AGV-${a.fms_blocking_agv}`):'');
  html+=kv('위치 X / Y / Z',`${vector(a.position_m)} m`);
  if(a.cargo && a.cargo!=='None')html+=`<div class="kv-row"><span>연결 화물</span>${actorLink(a.cargo)}</div>`;
  if(a.type==='agv' && Array.isArray(a.cargo_items)){
@@ -164,15 +165,21 @@ function overviewDetails(a){
   kv('상부 적재 허용 중량',`${num(a.permitted_superimposed_kg/1000)} t`)+
   (a.planned_pair_cargo?kv('20ft 동반 후보',a.planned_pair_cargo)+kv('추정 운송 절감',`${num(a.estimated_pair_saving_seconds)} s · 조건 미충족 시 개별 운송`):'')+
   `<div class="note">출고 순서 → 취급·위험물 분리 → 같은 크기 → 무거운 화물 아래. 물품·출고 정보는 시뮬레이션용 가상 예약입니다.</div>`;
+ if(Number.isFinite(a.ship_bay))html+=`<div class="detail-subhead">입항 시 선박 적재 위치</div>`+
+  kv('Bay / Row / Tier',`${num(a.ship_bay,0)} / ${num(a.ship_row,0)} / ${num(a.ship_tier,0)}`)+
+  (a.ship_subslot?kv('20ft 셀 내부 자리',`${num(a.ship_subslot,0)}/2`):'')+
+  kv('아래 받침 컨테이너',a.ship_below_container||'갑판 셀')+
+  kv('초기 적재 좌표',`${vector(a.ship_initial_position_m,3)} m`);
  if(a.ship_loading_preview){
   const s=a.ship_loading_preview;
-  html+=`<div class="detail-subhead">선박 적재 계획 <span>시뮬레이션 제원으로 계산</span></div>`+
+  html+=`<div class="detail-subhead">입항 적재 배치 <span>${s.applied_to_arrival?'실제 초기 액터에 적용':'계획 미리보기'}</span></div>`+
    kv('계획 검증',s.feasible?'GM·경사·스택·고박 조건 충족':'허용 조건을 만족하는 배치 부족')+
    kv('계획 물량',`${num(s.planned_containers,0)}개`)+kv('보정 GM',`${num(s.corrected_gm_m,3)} m`)+
    kv('허용 GM 범위',`${num(s.minimum_gm_m,2)} ~ ${num(s.maximum_gm_m,2)} m`)+kv('최종 횡경사 추정',`${num(s.heel_deg,3)} °`)+
    kv('스택 중량 한계',`${num(s.maximum_stack_kg/1000)} t`)+kv('고박 하중 추정 한계',`${num(s.maximum_lashing_n/1000)} kN`)+
-   `<div class="note">목적항별 접근 순서와 중량을 반영한 적재 계획입니다. GM은 고정 KM·명시적 경하중량 가정으로, 고박은 정적 모멘트로 계산합니다. 실제 선박 승인 제원으로 검증한 결과는 아닙니다.</div>`+
-   `<details><summary>Bay / Row / Tier 배치 ${num(s.placements?.length,0)}개 보기</summary><div class="table-scroll"><table><thead><tr><th>화물</th><th>Bay</th><th>Row</th><th>Tier</th><th>스택 t</th><th>고박 kN</th></tr></thead><tbody>${(s.placements||[]).map(p=>`<tr><td>${esc(p.cargo)}</td><td>${num(p.bay,0)}</td><td>${num(p.row,0)}</td><td>${num(p.tier,0)}</td><td>${num(p.stack_kg/1000)}</td><td>${num(p.lashing_n/1000)}</td></tr>`).join('')}</tbody></table></div></details>`;
+   kv('초기 선수·선미 방향 무게중심 편차',`${num(s.longitudinal_cg_m,3)} m`)+
+   `<div class="note">입항 초기 계획입니다. 목적항 순서·규격별 셀·중량·냉동 전원·모의 위험물 구역을 반영합니다. 20ft는 셀 안의 두 자리를 따로 사용합니다. 표의 스택·고박은 각 화물을 계획에 추가한 직후의 해당 열 값입니다. GM은 고정 KM 가정, 고박은 정적 근사이며 실제 선박 승인 제원·IMDG 검증 및 하역 중 실시간 복원성 계산은 아닙니다.</div>`+
+   `<details><summary>Bay / Row / Tier 배치 ${num(s.placements?.length,0)}개 보기</summary><div class="table-scroll"><table><thead><tr><th>화물</th><th>Bay</th><th>Row</th><th>Tier</th><th>20ft 자리</th><th>아래 받침</th><th>스택 t</th><th>고박 kN</th></tr></thead><tbody>${(s.placements||[]).map(p=>`<tr><td>${esc(p.cargo)}</td><td>${num(p.bay,0)}</td><td>${num(p.row,0)}</td><td>${num(p.tier,0)}</td><td>${p.subslot?num(p.subslot,0):'—'}</td><td>${esc(p.below_container||'갑판')}</td><td>${num(p.stack_kg/1000)}</td><td>${num(p.lashing_n/1000)}</td></tr>`).join('')}</tbody></table></div></details>`;
  }
  if(a.type==='container')html+=kv('무게중심 편차',`${vector(a.cog_m)} m`)+kv('물리 계산',a.simulating_physics?'활성':'부착 또는 고정 상태');
  if(a.type==='vessel')html+=kv('초기 화물',`${a.initial_count}개`)+kv('STS 인계 완료',`${a.unloaded}개`)+kv('야드 배치 완료',`${a.placed}개`)+`<button class="button primary" data-performance="${esc(a.id)}" style="margin-top:14px;width:100%">이 선박의 시간 절감 분석 →</button>`;

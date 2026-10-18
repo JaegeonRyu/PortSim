@@ -2,6 +2,16 @@
 #include "CoreMinimal.h"
 class FJsonObject;
 
+namespace CraneSimulationSteps
+{
+    inline int32 Count(double Seconds,double Hertz)
+    {
+        // A float 0.05 s becomes 3.0000000447 cycles at 60 Hz. Do not turn
+        // that representation error into a fourth controller iteration.
+        return FMath::Max(1,FMath::CeilToInt(Seconds*Hertz-1.e-6));
+    }
+}
+
 struct FSTSSensorMount
 {
     FString Key,Frame,Unit;
@@ -17,7 +27,7 @@ struct FSTSSensorMount
 };
 
 /** Explicit SI assumptions for a taut-rope, reduced-order suspension. */
-struct FSTSDynamicsConfig
+struct FSTSDynamicsParameters
 {
     bool AntiSway=true,AntiSkew=true;
     double Damping=0,PositionGain=0,VelocityGain=0,SwayGain=0,SkewKp=0,SkewKd=0,SkewMaxTorque=0;
@@ -25,8 +35,6 @@ struct FSTSDynamicsConfig
     double RopeEA=0,RopeLimit=0,SkewLimit=0;
     FVector Wind=FVector::ZeroVector;
     double WindArea=0,WindDrag=0,WindMoment=0;
-    TArray<FSTSSensorMount> Mounts;
-    bool Load(TSharedPtr<FJsonObject> Root,FString& Error);
     FVector AerodynamicForce(FVector BodyVelocityMps) const;
     FVector WindEquilibriumOffset(double LengthM,double MassKg) const;
     double HorizontalAcceleration(double ErrorM,double VelocityMps,double LengthM,double AngularRate,
@@ -38,6 +46,14 @@ struct FSTSDynamicsConfig
     }
 };
 
+// Force integration copies only numeric parameters. Sensor layout strings and
+// reference JSON stay in the operating profile instead of being copied at 120 Hz.
+struct FSTSDynamicsConfig : FSTSDynamicsParameters
+{
+    TArray<FSTSSensorMount> Mounts;
+    bool Load(TSharedPtr<FJsonObject> Root,FString& Error);
+};
+
 /** Two sway coordinates + yaw. Roll/pitch constrained; no elastic/slack-rope FEM. */
 struct FSTSSuspension
 {
@@ -47,7 +63,7 @@ struct FSTSSuspension
     FVector Offset=FVector::ZeroVector,OffsetVelocity=FVector::ZeroVector;
     bool Saturated=false;
     FString Fault;
-    void Step(const FSTSDynamicsConfig& C,double Dt,double Length,double LengthRate,
+    void Step(const FSTSDynamicsParameters& C,double Dt,double Length,double LengthRate,
         FVector Acceleration,FVector DriveVelocity,double Mass,FVector CoG,double PowerW);
     double SwayDegrees() const { return FMath::RadiansToDegrees(Angle.Size()); }
 };

@@ -9,6 +9,8 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 
 // Site dimensions are published totals; internal buildings/equipment are blockouts.
 // Coordinates in this function are metres: X inland, Y along the quay, Z up.
@@ -124,7 +126,10 @@ void AQuayCrane::BuildTerminalSite()
         Text->SetPivot(FVector2D(.5f,.5f));
         Text->SetRelativeScale3D(FVector(Size*100.f/80.f));
         Text->SetTwoSided(true);
-        Text->SetTickWhenOffscreen(true);
+        // These signs never change: keep their render texture, not a Slate
+        // repaint for every simulation/render frame and offscreen sign.
+        Text->SetManuallyRedraw(true);
+        Text->SetTickWhenOffscreen(false);
         Text->RegisterComponent();
         Text->SetSlateWidget(SNew(STextBlock)
             .Text(FText::FromString(Name))
@@ -146,6 +151,26 @@ void AQuayCrane::BuildTerminalSite()
     }
     const float NorthParkingAccessY=(TerminalLayout::AGVParkY(TerminalLayout::AGVParkBays-1)+3000.f)/100.f;
     RoadSegment(Roads,{50,NorthParkingAccessY+25.f},{167,NorthParkingAccessY+25.f},18);
+    if(bUnifiedTerminal && !FParse::Param(FCommandLine::Get(),TEXT("PortSimLegacyParking")) &&
+        !FParse::Param(FCommandLine::Get(),TEXT("PortSimPreviousApron")))
+    {
+        // Continuous pavement replaces the old individual parking cross strips.
+        // Lane paint uses the same anchors as the actual directed road graph.
+        Box(Roads,FVector(100,-77,.27f),FVector(48,861,.06f));
+        for(float X:{80.f,100.f,120.f})
+            for(float Y=-480;Y<340;Y+=12)
+                Box(White,FVector(X,Y,.39f),FVector(.15f,5,.025f));
+        for(float X:{TerminalLayout::AGVApronNorthX/100.f,TerminalLayout::AGVApronSouthX/100.f})
+            for(float Y=-465;Y<335;Y+=70)
+            {
+                const float Sign=X==TerminalLayout::AGVApronNorthX/100.f?1.f:-1.f;
+                Box(White,FVector(X,Y,.4f),FVector(.18f,3,.025f));
+                for(float Side:{-1.f,1.f})
+                    OrientedBox(White,FVector(TerminalLayout::SiteX(X)+Side*.55f,Y+Sign*.8f,.4f),
+                        FVector(.16f,1.6f,.025f),Side*Sign*45.f);
+            }
+        Label(TEXT("적재 AGV 운반 차선 ↑ ↓"),FVector(100,272,.5f),1.8f);
+    }
     // Rounded quay-side corners join the straight inland service road.
     BezierRoad(Roads,{145,-480},{145,-505},{170,-505},{195,-505},18,10);
     RoadSegment(Roads,{195,-505},{595,-505},18);
@@ -262,8 +287,8 @@ void AQuayCrane::BuildTerminalSite()
         if (!bUnifiedTerminal) SiteLogistics->AddShipCargo(Position,STSIndex);
         ++STSIndex;
     }
-    // Fast-test fleet: 10 rows x 10 bays x 2 tiers = 200 per vessel.
-    // Spread bays over the hull so all three STSs on each vessel still participate.
+    // Seed bookings and provisional vessel membership. Unified Initialize then
+    // replaces these coordinates with its actual supported arrival stowage plan.
     const int32 ShipRows=bUnifiedTerminal?TerminalLayout::VesselRows:11;
     const int32 ShipBays=bUnifiedTerminal?TerminalLayout::VesselBays:16;
     const int32 ShipTiers=bUnifiedTerminal?TerminalLayout::VesselTiers:3;

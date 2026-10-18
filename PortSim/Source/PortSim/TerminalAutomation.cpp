@@ -200,7 +200,7 @@ void AQuayCrane::BuildConfiguredVessels()
         ShipParams.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
         for(int32 Vessel=0;Vessel<ConfiguredShips;++Vessel)
         {
-            const FVector BasePosition(-1800.f,TerminalLayout::VesselCenterY(Vessel)*100.f,250.f);
+            const FVector BasePosition(TerminalLayout::VesselOriginXM*100.f,TerminalLayout::VesselCenterY(Vessel)*100.f,TerminalLayout::VesselOriginZM*100.f);
             auto* VesselActor=GetWorld()->SpawnActor<APortShipActor>(BasePosition,FRotator::ZeroRotator,ShipParams);
             check(VesselActor);
 #if WITH_EDITOR

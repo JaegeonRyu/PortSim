@@ -1,4 +1,5 @@
 #include "PortWorkingCrane.h"
+#include "SimulationPerformance.h"
 #include "CraneTravelBraking.h"
 #include "PortContainerActor.h"
 #include "PortAGVActor.h"
@@ -142,6 +143,10 @@ bool APortWorkingCrane::CargoSupported() const
     Query.AddIgnoredActor(CargoActor);
     const float HalfLength=CargoActor->SensorHalfLengthCm();
     const float HalfWidth=CargoActor->SensorHalfWidthCm();
+    const FVector E=Orientation.RotateVector(FVector(HalfWidth,0,0)).GetAbs()+
+        Orientation.RotateVector(FVector(0,HalfLength,0)).GetAbs();
+    const FVector QueryCenter=CargoActor->GetActorLocation();
+    SynchronizeShipQuery(FBox(QueryCenter-E-FVector(0,0,129.5f+STSProfile.SupportTolerance),QueryCenter+E));
     for(int32 I=0;I<4;++I)
     {
         const FVector P=CargoActor->GetActorLocation()+Orientation.RotateVector(FVector((I&1)?HalfWidth:-HalfWidth,(I&2)?HalfLength:-HalfLength,0));
@@ -155,6 +160,8 @@ bool APortWorkingCrane::CargoSupported() const
 void APortWorkingCrane::SampleSTS(bool Force)
 {
     if(!STSProfile.bReady || !IsValid(CargoActor) || (!Force && SimulationTime<NextSample)) return;
+    FlushParts();
+    PortSimPerformance::FScope Timing(TEXT("crane_sensors"));
     NextSample=SimulationTime+STSProfile.SensorPeriod;
     auto& S=Observation; S.Timestamp=SimulationTime; S.bValid=!bSensorFault;
     SensorInvalidReason=bSensorFault?TEXT("Injected sensor fault"):TEXT("");
@@ -220,6 +227,7 @@ void APortWorkingCrane::SampleSTS(bool Force)
 
 bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
 {
+    PortSimPerformance::FScope Timing(TEXT("crane_dynamics"));
     if(!STSProfile.ContainsTarget(Target)) { Stop(TEXT("Automatic target outside STS envelope")); return false; }
     const double ControlPayload=bCarrying?(Pickup.EstimateValid?Pickup.EstimatedMass:STSProfile.ContainerMassKg):0;
     float Hoist=STSProfile.HoistLimit(ControlPayload,bCarrying);
@@ -230,7 +238,7 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
             2.f*STSProfile.HoistAcceleration*FMath::Max(0.f,Distance-STSProfile.ApproachDistance)));
     }
     if(Stage==2 && bCarrying) Hoist=FMath::Min(Hoist,STSProfile.ApproachSpeed);
-    auto C=STSProfile.Dynamics;
+    FSTSDynamicsParameters C=STSProfile.Dynamics;
     // The plant receives the current environment. The controller receives the
     // latest 20 Hz wind-sensor observation below, just like the other feedback.
     C.Wind=Orientation.UnrotateVector(WindVelocityMetersPerSecond);
@@ -252,7 +260,7 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
         Orientation.UnrotateVector(Observation.CargoJerk):FVector::ZeroVector;
     const double Age=FMath::Max(0.,SimulationTime-Observation.Timestamp);
     double SensorSwayAngle=PI*.5;
-    for(const auto& Mount:C.Mounts) if(Mount.Key==TEXT("sway_sensor") && Mount.Maximum>0)
+    for(const auto& Mount:STSProfile.Dynamics.Mounts) if(Mount.Key==TEXT("sway_sensor") && Mount.Maximum>0)
         SensorSwayAngle=FMath::Min(SensorSwayAngle,FMath::DegreesToRadians(Mount.Maximum));
     const double BrakingStroke=FMath::Max(FMath::Square(double(Limits.X))/(2*Accelerations.X),
         FMath::Square(double(Limits.Y))/(2*Accelerations.Y));
@@ -260,7 +268,7 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
     const FVector CoG=bCarrying?CargoActor->CoGOffsetCm*.01*(Payload/Mass):FVector::ZeroVector;
     // Equal slices avoid a nanosecond remainder from float tick durations.
     // Interpolation can snap on that remainder and amplify acceleration/rope force.
-    const int32 Substeps=FMath::Max(1,FMath::CeilToInt(double(Dt)*120.));
+    const int32 Substeps=CraneSimulationSteps::Count(Dt,120.);
     const double Step=double(Dt)/Substeps;
     if(Step<=0) return false;
     for(int32 Substep=0;Substep<Substeps;++Substep)

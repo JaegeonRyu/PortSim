@@ -28,10 +28,13 @@ struct FSiteYardSlot
 struct FSiteShipCargo
 {
     FTransform Transform;
+    FPortShipPlacement ShipSlot;
+    double BookedGrossKg=0; // booking VGM proxy, before deliberate overload injection
     TWeakObjectPtr<APortContainerActor> Actor;
     int32 Wave=0;
     int32 PlannedPair=INDEX_NONE;
     int32 PlanningOrder=INDEX_NONE;
+    int32 DispatchCriticalPath=0, DispatchUnlocks=0;
     double STSHandoverAt=-1, STSServiceSeconds=0;
     double STSWaitingForVehicleSeconds=0;
     double DispatchEligibleAt=-1, VehicleAssignedAt=-1;
@@ -92,6 +95,9 @@ public:
     void SetVesselMotions(const TArray<FPortVesselMotion>& Motions,const TArray<FVector>& BasePivots);
     bool MoveVehicle(APortAGVActor* Vehicle,FVector Target,float Dt);
     void Advance(float Dt,bool Paused);
+    // Called immediately before every crane scene query inside a traffic step.
+    void SynchronizeShipCollision(const FBox& Query,double ControlFraction);
+    bool IsDeferringVisuals() const { return bDeferringVisuals; }
     void ResetLogistics();
     void ExportDashboard(bool Paused, bool Force=false);
     bool Validate(FString& Error) const;
@@ -123,13 +129,22 @@ public:
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TArray<TObjectPtr<APortContainerActor>> PlacedContainers;
     UPROPERTY() TArray<TObjectPtr<APortWorkingCrane>> Equipment;
 private:
+    friend class FLoadedTrafficRecoveryTest;
+    friend class FApronIntersectionRecoveryTest;
+    friend class FApronManifestRoutesTest;
+    friend class FShipArrivalPlacementTest;
+    friend class FNoEventCollisionTest;
+    friend class FInlandRoadTrafficTest;
     FSTSOperatingProfile STSProfile;
     double SimulationTime=0;
     double NextDashboardWall=0;
+    bool bDeferringVisuals=false;
+    mutable TMap<TWeakObjectPtr<UPrimitiveComponent>,FTransform> KinematicPhysicsPoses;
+    double ShipWindowStart=0, ShipWindowEnd=1;
     TFuture<void> DashboardWrite;
     TMap<TWeakObjectPtr<UClass>,TArray<TFieldPath<FProperty>>> DashboardProperties;
     TUniquePtr<FJsonObject> CaptureDashboard(bool Paused);
-    FTrafficSpatialIndex ReservationIndex, VehicleIndex;
+    FTrafficSpatialIndex ReservationIndex, VehicleIndex, PendingRoadIndex;
     bool bTrafficIndexReady=false;
     void IndexTrafficVehicle(int32 Index);
     double VesselStarted[3]={-1,-1,-1}, VesselUnloaded[3]={-1,-1,-1}, VesselPlaced[3]={-1,-1,-1};
@@ -139,15 +154,18 @@ private:
     void BeginReport();
     TArray<FSiteShipCargo> Manifest;
     TArray<TArray<int32>> SourceAbove;
+    TArray<TArray<int32>> ManifestBySTS;
     FPortShipStowageAssumptions ShipStowageAssumptions;
     TArray<FPortShipStowageResult> ShipStowagePlans;
+    bool PlanArrivalStowage();
+    void BuildSourceAccess();
     TArray<FSiteYardSlot> Yard;
     TArray<int32> CentralSlots;
     int32 CentralReservation=INDEX_NONE, CentralPending=INDEX_NONE;
     TArray<FSiteTransfer> Jobs;
     TArray<bool> BlocksBusy;
     TArray<bool> RMGBusy;
-    TArray<int32> YardApproachOwners; // One inbound/waiting AGV per RMG (legacy eight-STS mode: per block).
+    TArray<int32> YardApproachOwners; // Own the shared RMG aisle through its outgoing vehicle's exit.
     TArray<int32> PreparedCargo;
     TArray<int32> STSOwners;
     TArray<int32> NextVehicles;
@@ -156,10 +174,13 @@ private:
     TMap<int32,int32> RoadReservationEndWaypoint;
     TMap<int32,FVector> TrafficRecoveryTargets;
     TMap<int32,bool> TrafficRecoveryOriginalReverse;
+    TMap<int32,int32> TrafficRecoveryYieldTo;
     double LastTrafficRecoveryAt=-100;
     TMap<int32,FVector> RoadTargets;
     TMap<int32,int32> RoadBlockers;
     TMap<int32,double> RoadWaitSince;
+    TMap<int32,TArray<FBox>> PendingRoadRequests;
+    void ClearPendingRoadRequest(int32 ID);
     double TrafficClock=0, LastCycleRecoveryAt=-10;
     float NoProgressTime=0;
     int32 LastProgressDelivered=0;
@@ -170,6 +191,10 @@ private:
     int32 ReturnRouteCounts[3]={0,0,0};
     bool bReady=false, bWasPaused=false;
     bool bCargoAlignedHandover=true;
+    bool bDepotParking=true; // command-line A/B baseline; normal runs use depot
+    bool bReuseFreedApron=true; // PreviousApron reproduces the pre-conversion depot routes
+    int32 DispatchPriorityLimit=INDEX_NONE;
+    bool UpdateDispatchPriorities();
     FVector WindVelocityMetersPerSecond=FVector::ZeroVector;
     TArray<FPortVesselMotion> VesselMotions;
     TArray<FVector> VesselBasePivots;
@@ -186,8 +211,10 @@ private:
     void PrepareExecutableCargo(int32 Lane);
     FString YardAdmissionReason(int32 Cargo) const;
     bool ReserveYardApproach(int32 Lane);
+    void ReleaseYardApproachIfClear(int32 Lane);
     bool YardApproachAvailable(int32 Cargo) const;
     void AdvanceStep(float Dt,bool Paused);
+    bool PrepareKinematicPhysicsFrame() const;
     void RecoverTrafficCycle();
     double PendingSimulationSeconds=0;
     int32 YardApproachKey(const FSiteYardSlot& Slot) const { return LaneCount==9?Slot.Crane:Slot.Block; }

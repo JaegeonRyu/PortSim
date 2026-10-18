@@ -40,6 +40,7 @@ public:
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     bool ValidateOperation(FString& Error) const;
     FVector HeadPosition() const;
+    void DeferRopeVisuals(bool Defer);
     TSharedRef<FJsonObject> DashboardState() const;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Operation") bool bEnabled=true;
@@ -51,6 +52,12 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") FString Fault;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") TObjectPtr<APortContainerActor> CargoActor;
 private:
+    bool bDeferRopeVisuals=false, bRopeVisualsDirty=false;
+    void UpdateRopeVisuals();
+    double ShipControlFraction=1;
+    bool bDeferParts=false, bPartsDirty=false;
+    void FlushParts();
+    void SynchronizeShipQuery(const FBox& Query) const;
     void AdvanceStep(float Dt, bool bGlobalPaused);
     FSTSSuspension SuspensionState;
     FSTSPickupController Pickup;

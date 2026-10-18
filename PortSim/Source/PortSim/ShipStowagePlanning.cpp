@@ -25,6 +25,14 @@ bool FPortShipStowageAssumptions::Load(const FString& Path,FString& Error)
         LateralAccelerationMps2<=0)
     { Error=TEXT("Invalid ship planning numeric assumptions"); return false; }
     SnapshotJson=Text;
+    // Optional geometry keys preserve older configuration files.
+    auto Optional=[&](const TCHAR* Key,double& Value) { return !Root->HasField(Key) || Read(Key,Value); };
+    if(!Optional(TEXT("bay_pitch_m"),BayPitchM) || !Optional(TEXT("row_pitch_m"),RowPitchM) ||
+        !Optional(TEXT("container_height_m"),ContainerHeightM) || !Optional(TEXT("twin20_pitch_m"),Twin20PitchM) ||
+        !Optional(TEXT("maximum_longitudinal_cg_m"),MaximumLongitudinalCGM))
+    { Error=TEXT("Invalid arrival cell geometry"); return false; }
+    if(Root->HasField(TEXT("use_deck_zones")) && !Root->TryGetBoolField(TEXT("use_deck_zones"),UseDeckZones))
+    { Error=TEXT("Invalid arrival deck zone flag"); return false; }
     return true;
 }
 
@@ -40,8 +48,16 @@ FPortShipStowageResult PlanShipStowage(const TArray<FPortShipPlanningCargo>& Car
         A.MaximumGMM<=A.MinimumGMM || A.MaximumStackKg<=0 || A.MaximumLashingN<=0 ||
         !FMath::IsFinite(A.LateralAccelerationMps2) || A.LateralAccelerationMps2<=0)
     { Result.Reason=TEXT("Invalid ship stability/stack/lashing inputs"); return Result; }
+    if(!FMath::IsFinite(A.BayPitchM) || A.BayPitchM<13.716 || !FMath::IsFinite(A.RowPitchM) || A.RowPitchM<2.438 ||
+        !FMath::IsFinite(A.ContainerHeightM) || A.ContainerHeightM<2.591 || !FMath::IsFinite(A.Twin20PitchM) ||
+        A.Twin20PitchM<6.058 || A.Twin20PitchM+6.058>A.BayPitchM ||
+        !FMath::IsFinite(A.MaximumLongitudinalCGM) || A.MaximumLongitudinalCGM<=0)
+    { Result.Reason=TEXT("Invalid or overlapping ship cell geometry"); return Result; }
     struct FColumn { TArray<int32> CargoIndices; double Mass=0, Moment=0; };
-    TArray<FColumn> Columns; Columns.SetNum(A.Bays*A.Rows);
+    // One physical cell accepts either one long stack or two independent 20ft
+    // stacks. No long box is supported by one short box or an empty pad.
+    TArray<FColumn> Columns; Columns.SetNum(A.Bays*A.Rows*2);
+    TArray<int32> CellLength; CellLength.Init(0,A.Bays*A.Rows);
     TArray<int32> Order; TSet<int32> IDs;
     for(int32 I=0;I<Cargo.Num();++I)
     {
@@ -50,6 +66,8 @@ FPortShipStowageResult PlanShipStowage(const TArray<FPortShipPlanningCargo>& Car
             Cargo[I].GrossKg<=0 || (Cargo[I].LengthFt!=20 && Cargo[I].LengthFt!=40 && Cargo[I].LengthFt!=45))
         { Result.Reason=TEXT("Invalid/duplicate ship booking"); return Result; }
         IDs.Add(Cargo[I].ID); Order.Add(I);
+        if(FMath::Abs(Cargo[I].CoGOffsetM.X)>(Cargo[I].LengthFt==20?3.029:Cargo[I].LengthFt==40?6.096:6.858))
+        { Result.Reason=TEXT("Longitudinal container CoG is outside its envelope"); return Result; }
     }
     // Later port calls load below earlier calls. Within that group, heavy first.
     Order.StableSort([&](int32 X,int32 Y)
@@ -59,16 +77,33 @@ FPortShipStowageResult PlanShipStowage(const TArray<FPortShipPlanningCargo>& Car
         if(Cargo[X].GrossKg!=Cargo[Y].GrossKg) return Cargo[X].GrossKg>Cargo[Y].GrossKg;
         return Cargo[X].ID<Cargo[Y].ID;
     });
-    double Displacement=A.LightshipKg, VerticalMoment=A.LightshipKg*A.LightshipKGM, TransverseMoment=0;
+    double Displacement=A.LightshipKg, VerticalMoment=A.LightshipKg*A.LightshipKGM, TransverseMoment=0, LongitudinalMoment=0;
     Result.CorrectedGMM=A.KMM-A.LightshipKGM-A.FreeSurfaceMomentKgM/A.LightshipKg;
     for(int32 Index:Order)
     {
         const auto& C=Cargo[Index];
         int32 Best=INDEX_NONE; double BestScore=TNumericLimits<double>::Max(),BestGM=0,BestHeel=0,BestLash=0;
+        FVector BestPosition=FVector::ZeroVector;
         for(int32 Col=0;Col<Columns.Num();++Col)
         {
+            const int32 Cell=Col/2, Pad=Col%2, Bay=Cell/A.Rows, Row=Cell%A.Rows;
+            if((C.LengthFt!=20 && Pad!=0) || (CellLength[Cell]!=0 && CellLength[Cell]!=C.LengthFt)) continue;
+            if(A.UseDeckZones)
+            {
+                // Concept-vessel fixtures: powered centre rows; separated DG
+                // end bays; 45ft-capable end cells. These are NOT an IMDG table.
+                const bool EndBay=Bay==0 || Bay==A.Bays-1;
+                const bool Powered=Row==A.Rows/2 || Row==(A.Rows-1)/2;
+                if(C.LengthFt==45 && !EndBay) continue;
+                if(C.Information.HandlingType==TEXT("reefer")) { if(!Powered) continue; }
+                else if(Powered && !EndBay) continue;
+                if(C.Information.HazardGroup==TEXT("flammable") && Bay!=A.Bays-1) continue;
+                if(C.Information.HazardGroup==TEXT("corrosive") && Bay!=0) continue;
+                if(C.Information.HazardGroup==TEXT("none") && EndBay && C.LengthFt!=45) continue;
+            }
             const auto& Stack=Columns[Col]; const int32 Tier=Stack.CargoIndices.Num();
             if(Tier>=A.Tiers || Stack.Mass+C.GrossKg>A.MaximumStackKg) continue;
+            if(C.LengthFt==20 && Stack.Mass+Columns[Col^1].Mass+C.GrossKg>A.MaximumStackKg) continue;
             if(Tier>0)
             {
                 const auto& Lower=Cargo[Stack.CargoIndices.Last()];
@@ -84,8 +119,12 @@ FPortShipStowageResult PlanShipStowage(const TArray<FPortShipPlanningCargo>& Car
                 Above+=Lower.GrossKg;
             }
             if(!Supported) continue;
-            const double Y=(Col%A.Rows-(A.Rows-1)*.5)*2.6+C.CoGOffsetM.Y, Z=A.DeckHeightM+(Tier+.5)*2.591+C.CoGOffsetM.Z;
+            const FVector Position((Bay-(A.Bays-1)*.5)*A.BayPitchM+(C.LengthFt==20?(Pad?1.:-1.)*A.Twin20PitchM*.5:0.),
+                (Row-(A.Rows-1)*.5)*A.RowPitchM,A.DeckHeightM+(Tier+.5)*A.ContainerHeightM);
+            const double X=Position.X+C.CoGOffsetM.X,Y=Position.Y+C.CoGOffsetM.Y,Z=Position.Z+C.CoGOffsetM.Z;
             const double Delta=Displacement+C.GrossKg;
+            const double LCG=(LongitudinalMoment+C.GrossKg*X)/Delta;
+            if(FMath::Abs(LCG)>A.MaximumLongitudinalCGM) continue;
             const double GM=A.KMM-(VerticalMoment+C.GrossKg*Z)/Delta-A.FreeSurfaceMomentKgM/Delta;
             if(!FMath::IsFinite(GM) || GM<A.MinimumGMM || GM>A.MaximumGMM) continue;
             const double Heel=FMath::RadiansToDegrees(FMath::Atan2(FMath::Abs(TransverseMoment+C.GrossKg*Y)/Delta,GM));
@@ -98,17 +137,24 @@ FPortShipStowageResult PlanShipStowage(const TArray<FPortShipPlanningCargo>& Car
             // Preserve unused columns for later port groups whose heavier boxes
             // cannot sit above today's lighter stack. Reuse compatible stacks
             // after all safety limits pass, rather than exhausting the floor first.
-            const double Score=Heel*1000.+(Tier==0?500.:Tier*10.)+FMath::Abs(Col/A.Rows-(A.Bays-1)*.5)*.01;
-            if(Score<BestScore) { Best=Col; BestScore=Score; BestGM=GM; BestHeel=Heel; BestLash=Lashing; }
+            const double Score=Heel*1000.+FMath::Abs(LCG)*100.+(Tier==0?500.:Tier*10.)+
+                (C.LengthFt==20 && !Columns[Col^1].CargoIndices.IsEmpty()?-100.:0.);
+            if(Score<BestScore) { Best=Col; BestScore=Score; BestGM=GM; BestHeel=Heel; BestLash=Lashing; BestPosition=Position; }
         }
         if(Best==INDEX_NONE) { Result.Reason=TEXT("No placement satisfies port access, GM, heel, stack and lashing limits"); return Result; }
         auto& Stack=Columns[Best]; const int32 Tier=Stack.CargoIndices.Num();
-        const double Y=(Best%A.Rows-(A.Rows-1)*.5)*2.6+C.CoGOffsetM.Y, Z=A.DeckHeightM+(Tier+.5)*2.591+C.CoGOffsetM.Z;
+        const double Y=BestPosition.Y+C.CoGOffsetM.Y,Z=BestPosition.Z+C.CoGOffsetM.Z;
+        LongitudinalMoment+=C.GrossKg*(BestPosition.X+C.CoGOffsetM.X);
         Displacement+=C.GrossKg; VerticalMoment+=C.GrossKg*Z; TransverseMoment+=C.GrossKg*Y;
         Stack.Mass+=C.GrossKg; Stack.Moment+=C.GrossKg*A.LateralAccelerationMps2*(Z-A.DeckHeightM);
-        Stack.CargoIndices.Add(Index);
-        Result.Placements.Add({C.ID,Best/A.Rows+1,Best%A.Rows+1,Tier+1,BestGM,BestHeel,Stack.Mass,BestLash});
+        FPortShipPlacement Placement{C.ID,Best/2/A.Rows+1,(Best/2)%A.Rows+1,Tier+1,BestGM,BestHeel,Stack.Mass,BestLash};
+        Placement.Subslot=C.LengthFt==20?Best%2+1:0;
+        Placement.BelowCargoID=Stack.CargoIndices.IsEmpty()?INDEX_NONE:Cargo[Stack.CargoIndices.Last()].ID;
+        Placement.PositionM=BestPosition;
+        Stack.CargoIndices.Add(Index); CellLength[Best/2]=C.LengthFt;
+        Result.Placements.Add(Placement);
         Result.CorrectedGMM=BestGM; Result.HeelDegrees=BestHeel;
+        Result.LongitudinalCGM=LongitudinalMoment/Displacement;
     }
     Result.Feasible=true; Result.Reason=TEXT("Feasible under explicit simulation assumptions");
     return Result;

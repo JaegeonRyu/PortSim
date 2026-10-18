@@ -19,11 +19,12 @@ void AQuayCrane::TickSiteOperations(float Dt)
     if (!SiteLogistics || (bTerminalTest && !FParse::Param(FCommandLine::Get(),TEXT("PortSimMixedTest")))) return;
     if (bTerminalTest) SiteLogistics->DispatchLimit=16;
     const bool Full=FParse::Param(FCommandLine::Get(),TEXT("PortSimFullUnloadTest"));
+    const bool Continuous=FParse::Param(FCommandLine::Get(),TEXT("PortSimContinuousTrafficTest"));
     const bool Testing=Full || FParse::Param(FCommandLine::Get(),TEXT("PortSimSiteTest"));
     int32 TestShipments=SiteLogistics->Vehicles.Num()*2;
     FParse::Value(FCommandLine::Get(),TEXT("PortSimSiteShipmentLimit="),TestShipments);
     TestShipments=FMath::Clamp(TestShipments,9,SiteLogistics->InitialShipCount());
-    if (Testing) SiteLogistics->DispatchLimit=Full?SiteLogistics->InitialShipCount():TestShipments;
+    if (Testing) SiteLogistics->DispatchLimit=(Full || Continuous)?SiteLogistics->InitialShipCount():TestShipments;
     const bool FirstWave=FParse::Param(FCommandLine::Get(),TEXT("PortSimFirstWaveTest"));
     const bool CarLike=FParse::Param(FCommandLine::Get(),TEXT("PortSimCarLikeTest"));
     int32 WaveShipmentCount=9;
@@ -73,6 +74,7 @@ void AQuayCrane::TickSiteTest(float Dt)
     if (SiteTestTime==0) UE_LOG(LogTemp,Display,TEXT("SITE_TEST_STEP: %.6f simulation seconds per frame"),Dt);
     SiteTestTime+=Dt;
     const bool Full=FParse::Param(FCommandLine::Get(),TEXT("PortSimFullUnloadTest"));
+    const bool Continuous=FParse::Param(FCommandLine::Get(),TEXT("PortSimContinuousTrafficTest"));
     int32 TestShipments=SiteLogistics->Vehicles.Num()*2;
     FParse::Value(FCommandLine::Get(),TEXT("PortSimSiteShipmentLimit="),TestShipments);
     const int32 Expected=Full?SiteLogistics->InitialShipCount():FMath::Clamp(TestShipments,9,SiteLogistics->InitialShipCount());
@@ -106,7 +108,16 @@ void AQuayCrane::TickSiteTest(float Dt)
         for(const auto& Crane:WorkingCranes)
             if(Crane->bSTS && Crane->bCarrying && Crane->Stage==5 && Crane->Observation.bAGVAligned && IsValid(Crane->GetHandoverVehicle()))
             { Crane->GetHandoverVehicle()->AddActorWorldOffset(FVector(100,0,0)); break; }
-    if (SiteTestTime>(Full?200000.f:14000.f)) { Finish(false,TEXT("Integrated logistics timeout")); return; }
+    if (SiteTestTime>((Full || Continuous)?200000.f:14000.f)) { Finish(false,TEXT("Integrated logistics timeout")); return; }
+    if(Continuous && SiteTestStage==5 && !bTrafficFlowCheckpoint && SiteLogistics->Delivered>=217)
+    {
+        int32 Waiting=0,InlandWaiting=0;
+        for(const auto& V:SiteLogistics->Vehicles) if(V->Sensors.bFMSHold)
+        { ++Waiting; InlandWaiting+=V->GetActorLocation().X>50000.f; }
+        UE_LOG(LogTemp,Display,TEXT("FMS_FLOW_CHECKPOINT: delivered=%d fms_waiting=%d inland_x_over_500m_waiting=%d"),
+            SiteLogistics->Delivered,Waiting,InlandWaiting);
+        bTrafficFlowCheckpoint=true;
+    }
     bool Moving=false;
     for (const auto& Vehicle:SiteLogistics->Vehicles) Moving|=Vehicle->Speed>1.f;
     auto Freeze=[&](bool Emergency)
@@ -132,7 +143,7 @@ void AQuayCrane::TickSiteTest(float Dt)
         { Finish(false,TEXT("In-transit reset: ")+Error); return; }
         SiteTestStage=5;
     }
-    else if (SiteTestStage==5 && SiteLogistics->Delivered==Expected && SiteLogistics->IsIdle())
+    else if (SiteTestStage==5 && SiteLogistics->Delivered>=Expected && (Continuous || SiteLogistics->IsIdle()))
     {
         int32 UsedAGVs=0,MinimumJobs=MAX_int32,MaximumJobs=0;
         for (const auto& Vehicle:SiteLogistics->Vehicles) if(Vehicle->CompletedJobs>0)
@@ -143,7 +154,7 @@ void AQuayCrane::TickSiteTest(float Dt)
         { Finish(false,TEXT("AGVs did not move concurrently or STSs did not prepare ahead")); return; }
         // Yard-support admission can correctly select parked vehicles instead
         // of direct STS returns. Queue hits are a metric, not a completion goal.
-        if (bUnifiedTerminal && SiteLogistics->PlacedContainers.Num()!=Expected)
+        if (bUnifiedTerminal && SiteLogistics->PlacedContainers.Num()!=SiteLogistics->Delivered)
         { Finish(false,TEXT("Completed shipments are missing physical yard containers")); return; }
         if (Full && (SiteLogistics->ShipRemaining()!=0 || SiteLogistics->InTransit()!=0 || SiteLogistics->PlacedContainers.Num()!=Expected))
         { Finish(false,TEXT("Full vessel inventory was not physically stored")); return; }
@@ -152,6 +163,7 @@ void AQuayCrane::TickSiteTest(float Dt)
             SiteLogistics->PeakMovingVehicles,SiteLogistics->PrefetchedJobs,UsedAGVs,MinimumJobs,MaximumJobs);
         const FString Summary=FString::Printf(TEXT("yard %d -> %d; %d vessel containers; %d/%d AGVs selected by ETA plus bounded fairness, %d complete planned STS/AGV/RMG shipments; mixed sizes, concurrent traffic, STS prefetch, physical placement, pause/E-stop and reset"),
             SiteLogistics->BaselineYard,SiteLogistics->InitialYard,SiteLogistics->InitialShipCount(),UsedAGVs,SiteLogistics->Vehicles.Num(),SiteLogistics->Delivered);
+        if(Continuous) SiteLogistics->ExportDashboard(false,true);
         SiteLogistics->ResetLogistics();
         if (!SiteLogistics->Validate(Error) || SiteLogistics->Delivered || SiteLogistics->InTransit())
         { Finish(false,TEXT("Completed reset: ")+Error); return; }

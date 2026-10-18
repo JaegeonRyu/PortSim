@@ -18,6 +18,7 @@
 #include "Misc/FileHelper.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformTime.h"
+#include "SimulationPerformance.h"
 #include "UObject/UnrealType.h"
 
 namespace Dashboard
@@ -308,7 +309,22 @@ void APortSiteLogistics::ExportDashboard(bool Paused,bool Force)
         DashboardWrite.Wait();
     }
     NextDashboardWall=FPlatformTime::Seconds()+1.;
+    // A telemetry snapshot describes one current scene, including its artwork.
+    if(bDeferringVisuals)
+    {
+        for(const auto& Box:ShipContainers) if(IsValid(Box))
+        {
+            if(Box->LocationOwner==ECargoOwner::Ship && !Box->GetAttachParentActor()) Box->ApplySecuredMotionFraction(1.);
+            Box->EndVisualFrame();
+        }
+        for(const auto& Crane:Equipment) Crane->DeferRopeVisuals(false);
+    }
     auto Snapshot=CaptureDashboard(Paused);
+    if(bDeferringVisuals)
+    {
+        for(const auto& Box:ShipContainers) if(IsValid(Box)) Box->BeginVisualFrame();
+        for(const auto& Crane:Equipment) Crane->DeferRopeVisuals(true);
+    }
     const FString Directory=FPaths::ProjectSavedDir()/TEXT("Dashboard");
     DashboardWrite=Async(EAsyncExecution::ThreadPool,[Snapshot=MoveTemp(Snapshot),Directory]() mutable
     {
@@ -332,6 +348,7 @@ void APortSiteLogistics::ExportDashboard(bool Paused,bool Force)
 
 TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
 {
+    PortSimPerformance::FScope CaptureTiming(TEXT("dashboard_capture"));
     using namespace Dashboard;
     for (auto It=DashboardProperties.CreateIterator();It;++It) if (!It.Key().IsValid()) It.RemoveCurrent();
     auto Root=Object();
@@ -347,6 +364,8 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     }
     Root->SetBoolField(TEXT("paused"),Paused);
     Root->SetBoolField(TEXT("unified"),LaneCount==9);
+    Root->SetStringField(TEXT("agv_parking_layout"),bDepotParking?TEXT("depot"):TEXT("legacy_distributed"));
+    Root->SetStringField(TEXT("agv_apron_layout"),bReuseFreedApron?TEXT("reused_transport_lanes"):TEXT("previous_routes"));
     Root->SetStringField(TEXT("handover_policy"),UsesCargoAlignedHandover()?TEXT("cargo_aligned_quay"):TEXT("fixed_quay"));
     Root->SetStringField(TEXT("fault"),Fault);
     Root->SetNumberField(TEXT("delivered"),Delivered);
@@ -360,7 +379,9 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     Root->SetNumberField(TEXT("peak_moving_agvs"),PeakMovingVehicles);
     Root->SetNumberField(TEXT("prefetched_jobs"),PrefetchedJobs);
     Root->SetNumberField(TEXT("paired_20ft_trips"),PairedTrips);
-    Root->SetStringField(TEXT("dispatch_policy"),TEXT("oldest executable source + supported yard + AGV admission before pickup"));
+    Root->SetStringField(TEXT("dispatch_policy"),bReuseFreedApron?
+        TEXT("ready supported-yard critical path + bounded age priority + AGV admission before pickup"):
+        TEXT("oldest executable source + supported yard + AGV admission before pickup"));
     int32 IdleVehicles=0; for(const auto& J:Jobs) IdleVehicles+=J.Stage==0;
     Root->SetNumberField(TEXT("idle_agvs"),IdleVehicles);
     Root->SetStringField(TEXT("yard_stacking_policy"),TEXT("outbound_order > handling/hazard zones > compatible size > heavy below light"));
@@ -420,6 +441,18 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             if(Manifest.IsValidIndex(Mate)) O->SetStringField(TEXT("planned_pair_cargo"),Manifest[Mate].Actor->ContainerID.ToString());
             O->SetNumberField(TEXT("estimated_pair_saving_seconds"),Manifest[ManifestIndex].EstimatedPairSavingSeconds);
             const auto& Entry=Manifest[ManifestIndex];
+            if(LaneCount==9)
+            {
+                O->SetNumberField(TEXT("ship_bay"),Entry.ShipSlot.Bay);
+                O->SetNumberField(TEXT("ship_row"),Entry.ShipSlot.Row);
+                O->SetNumberField(TEXT("ship_tier"),Entry.ShipSlot.Tier);
+                O->SetNumberField(TEXT("ship_subslot"),Entry.ShipSlot.Subslot);
+                O->SetStringField(TEXT("ship_below_container"),Entry.ShipSlot.BelowCargoID==INDEX_NONE?TEXT(""):
+                    FString::Printf(TEXT("C%d"),Entry.ShipSlot.BelowCargoID));
+                Vector(O,TEXT("ship_initial_position_m"),Entry.Transform.GetLocation(),.01f);
+            }
+            O->SetNumberField(TEXT("dispatch_critical_path_edges"),Entry.DispatchCriticalPath);
+            O->SetNumberField(TEXT("dispatch_unlocked_containers"),Entry.DispatchUnlocks);
             O->SetNumberField(TEXT("dispatch_wait_seconds"),Entry.DispatchEligibleAt<0?0:
                 FMath::Max(0.,(Entry.VehicleAssignedAt<0?SimulationTime:Entry.VehicleAssignedAt)-Entry.DispatchEligibleAt));
             O->SetNumberField(TEXT("sts_waiting_for_agv_seconds"),Entry.STSWaitingForVehicleSeconds);
@@ -506,6 +539,10 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             O->SetBoolField(TEXT("transponder_locked"),V->Sensors.bTransponderLocked);
             O->SetBoolField(TEXT("fms_connected"),V->Sensors.bFMSConnected);
             O->SetBoolField(TEXT("fms_hold"),V->Sensors.bFMSHold);
+            const int32* BlockingAGV=RoadBlockers.Find(V->VehicleID);
+            const double* WaitingSince=RoadWaitSince.Find(V->VehicleID);
+            O->SetNumberField(TEXT("fms_blocking_agv"),BlockingAGV?*BlockingAGV:INDEX_NONE);
+            O->SetNumberField(TEXT("fms_wait_seconds"),WaitingSince?FMath::Max(0.,TrafficClock-*WaitingSince):0.);
             O->SetNumberField(TEXT("fms_node_index"),V->Sensors.FMSNodeIndex);
             O->SetNumberField(TEXT("fms_node_count"),V->Sensors.FMSNodeCount);
             Vector(O,TEXT("fms_next_node_m"),V->Sensors.FMSNextNode,.01f);
@@ -585,7 +622,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
         O->SetStringField(TEXT("name"),FString::Printf(TEXT("VESSEL-%02d"),V+1));
         O->SetStringField(TEXT("type"),TEXT("vessel"));
         O->SetStringField(TEXT("class"),TEXT("Logical vessel / manifest group"));
-        Vector(O,TEXT("position_m"),FVector(-34,TerminalLayout::VesselCenterY(V),0));
+        Vector(O,TEXT("position_m"),FVector(TerminalLayout::VesselCenterXM,TerminalLayout::VesselCenterY(V),0));
         O->SetNumberField(TEXT("initial_count"),Total);
         if(ShipStowagePlans.IsValidIndex(V))
         {
@@ -593,6 +630,11 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             auto Preview=Object();
             Preview->SetStringField(TEXT("basis"),ShipStowageAssumptions.Basis);
             Preview->SetBoolField(TEXT("feasible"),Plan.Feasible);
+            Preview->SetBoolField(TEXT("applied_to_arrival"),true);
+            Preview->SetNumberField(TEXT("bay_count"),ShipStowageAssumptions.Bays);
+            Preview->SetNumberField(TEXT("row_count"),ShipStowageAssumptions.Rows);
+            Preview->SetNumberField(TEXT("longitudinal_cg_m"),Plan.LongitudinalCGM);
+            Preview->SetStringField(TEXT("state_basis"),TEXT("initial_arrival_not_live_hydrostatics"));
             Preview->SetStringField(TEXT("reason"),Plan.Reason);
             Preview->SetNumberField(TEXT("planned_containers"),Plan.Placements.Num());
             Preview->SetNumberField(TEXT("corrected_gm_m"),Plan.CorrectedGMM);
@@ -610,6 +652,10 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             {
                 auto S=Object(); S->SetStringField(TEXT("cargo"),FString::Printf(TEXT("C%d"),P.CargoID));
                 S->SetNumberField(TEXT("bay"),P.Bay); S->SetNumberField(TEXT("row"),P.Row); S->SetNumberField(TEXT("tier"),P.Tier);
+                S->SetNumberField(TEXT("subslot"),P.Subslot);
+                Vector(S,TEXT("ship_axes_position_m"),P.PositionM);
+                S->SetStringField(TEXT("below_container"),P.BelowCargoID==INDEX_NONE?TEXT(""):
+                    FString::Printf(TEXT("C%d"),P.BelowCargoID));
                 S->SetNumberField(TEXT("gm_after_m"),P.CorrectedGMM); S->SetNumberField(TEXT("heel_after_deg"),P.HeelDegrees);
                 S->SetNumberField(TEXT("stack_kg"),P.StackKg); S->SetNumberField(TEXT("lashing_n"),P.LashingN);
                 Slots.Add(Value(S));

@@ -20,14 +20,24 @@ void APortWorkingCrane::SampleRMGEnvironment()
         bool Valid=true;
         const float HalfLength=IsValid(CargoActor)?CargoActor->SensorHalfLengthCm():520.f;
         const float HalfWidth=IsValid(CargoActor)?CargoActor->SensorHalfWidthCm():113.f;
+        const FVector E=Orientation.RotateVector(FVector(HalfWidth,0,0)).GetAbs()+
+            Orientation.RotateVector(FVector(0,HalfLength,0)).GetAbs();
+        SynchronizeShipQuery(FBox(FVector(Slots[1-SourceSlot].X-E.X,Slots[1-SourceSlot].Y-E.Y,Home.Z-100),
+            FVector(Slots[1-SourceSlot].X+E.X,Slots[1-SourceSlot].Y+E.Y,Home.Z+BeamZ-100)));
         for(int32 I=0;I<4;++I)
         {
             const FVector Point=Slots[1-SourceSlot]+Orientation.RotateVector(FVector((I&1)?HalfWidth:-HalfWidth,(I&2)?HalfLength:-HalfLength,0));
             const FVector Origin(Point.X,Point.Y,Home.Z+BeamZ-100);
             FHitResult Hit;
             const bool Found=GetWorld()->LineTraceSingleByChannel(Hit,Origin,FVector(Point.X,Point.Y,Home.Z-100),ECC_Visibility,ProfileQuery);
-            Valid &= Found && Hit.ImpactNormal.Z>.8 && STSSensorContains(TEXT("stack_profile"),Hit.ImpactPoint) &&
+            const bool InView=Found && STSSensorContains(TEXT("stack_profile"),Hit.ImpactPoint);
+            const bool CornerValid=Found && Hit.ImpactNormal.Z>.8 && InView &&
                 FMath::Abs(Hit.ImpactPoint.Z-(Slots[1-SourceSlot].Z-129.5))<=STSProfile.StackHeightTolerance;
+            if(Stage==5 && !CornerValid)
+                UE_LOG(LogTemp,Warning,TEXT("RMG_STACK_SAMPLE: crane=%d corner=%d found=%d actor=%s component=%s point=%s normal=%s expected_z_cm=%.3f in_view=%d"),
+                    CraneID,I,Found,*GetNameSafe(Hit.GetActor()),*GetNameSafe(Hit.GetComponent()),*Hit.ImpactPoint.ToString(),
+                    *Hit.ImpactNormal.ToString(),Slots[1-SourceSlot].Z-129.5,InView);
+            Valid &= CornerValid;
             if(Found)O.StackTopZ=FMath::Max(O.StackTopZ,float(Hit.ImpactPoint.Z));
         }
         O.bStackProfileValid=Valid && !FParse::Param(FCommandLine::Get(),TEXT("PortSimRMGStackFault"));
@@ -43,6 +53,10 @@ void APortWorkingCrane::SampleRMGEnvironment()
         for(const FVector& LocalOrigin:Origins)
         {
             const FVector Origin=Marker->GetAttachParent()->GetComponentLocation()+Marker->GetAttachParent()->GetComponentQuat().RotateVector(LocalOrigin*100);
+            const FVector Begin=Origin+Marker->GetForwardVector()*M.Minimum*100;
+            const FVector End=Origin+Marker->GetForwardVector()*M.Maximum*100;
+            FBox QueryBounds(ForceInit); QueryBounds+=Begin; QueryBounds+=End;
+            SynchronizeShipQuery(QueryBounds);
             FHitResult Hit;
             if(GetWorld()->LineTraceSingleByChannel(Hit,Origin+Marker->GetForwardVector()*M.Minimum*100,Origin+Marker->GetForwardVector()*M.Maximum*100,ECC_Visibility,Query) && Cast<APortWorkingCrane>(Hit.GetActor()))
             {

@@ -2,6 +2,8 @@
 
 `junsoo`의 기존 작업을 `b17eab2`로 보존한 뒤 `upstream/main`의 `ef316c3`까지 병합했다. 대기·충전소 60면, 전 차량 대기소 초기 배치, 배터리 배차, 주차장 진출입 수정, 카메라/HUD 및 main의 나머지 변경을 포함한다.
 
+후속 작업에서 아래에 기록한 적재·LiDAR 교착의 복구를 구현하고 재현 검사를 통과했다. 이전·새 주차 방식의 120개 운송 비교도 각각 완료했다. 현재 결과는 [교착 복구 및 주차 방식 비교](LoadedTrafficRecoveryAndParkingComparison.md)에 기록했으며, 아래 내용은 병합 당시의 검증 이력이다.
+
 ## 충돌 해결
 
 - 기존 두 번째 20ft 개별 적재 단계 10을 유지하고 충전 이동/복귀/충전은 `FSiteTransfer::ToCharge=11`, `ReturnToStandby=12`, `Charging=13`으로 분리했다. 웹 상태 표시도 함께 맞췄다.

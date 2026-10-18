@@ -10,6 +10,8 @@ namespace TerminalLayout
     constexpr int TotalVesselContainers = VesselCount * ContainersPerVessel;
     // Three 210 m vessels stop before the worker-rest building (Y=247..333 m).
     constexpr float VesselLengthM=210.f;
+    constexpr float VesselOriginXM=-18.f, VesselCenterXM=-32.f; // ShipHull is -14m from the actor origin.
+    constexpr float VesselOriginZM=2.5f, VesselDeckTopM=4.5f; // ShipDeck centre +1.9m, half thickness 0.1m.
     constexpr float VesselCenterY(int Index) { return -390.f+Index*230.f; }
     constexpr float STSCenterY(int Index) { return VesselCenterY(Index/3)+(Index%3-1)*70.f; }
     static_assert(VesselCenterY(2)+VesselLengthM*.5f+7.f<247.f,"Ships must stop before worker rest");
@@ -193,6 +195,13 @@ namespace TerminalLayout
     constexpr float STSSupportHalfWidthCm=50.f;
     constexpr float AGVBerthApproachX=7200.f;
     constexpr float AGVBerthApproachOffset=1600.f;
+    // The former quay parking rows are now a paved transport apron. Loaded
+    // traffic has its own pair of one-way lanes, clear of empty quay arrivals
+    // and the yard/depot return spines. These are concept-layout coordinates.
+    constexpr float AGVApronNorthX=9000.f;
+    constexpr float AGVApronSouthX=11000.f;
+    constexpr float AGVApronDepartureY(float HandoverY)
+    { return HandoverY-1600.f<AGVSouthLoadedY?AGVSouthLoadedY:HandoverY-1600.f; }
     constexpr float AGVSouthInboundY=AGVSouthLoadedY;
     // Keep the return lane clear of the last southern RMG's +13.2 m
     // handover aisle, while retaining 13.5 m between opposite traffic.

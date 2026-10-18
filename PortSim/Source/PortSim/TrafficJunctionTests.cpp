@@ -19,10 +19,16 @@ bool FTrafficJunctionTest::RunTest(const FString& Parameters)
     for(int32 I=0;I<12;++I) LongRoad.Add(FVector(I*3000,0,0));
     Exit.Reset();
     TrafficJunctionPolicy::AppendExitCorridor(Exit,LongRoad,0,LongRoad.Num(),[](int32){return FVector(730,210,250);});
-    TestEqual(TEXT("Straight road permits following AGVs after a bounded claim"),Exit.Num(),2);
+    TestTrue(TEXT("A straight gate does not claim the road occupied by a distant leader"),Exit.IsEmpty());
+    const TArray<FVector> Turn={FVector(0,0,0),FVector(4000,0,0),FVector(4000,600,0),
+        FVector(4000,1400,0),FVector(4000,3400,0),FVector(4000,6400,0)};
+    Exit.Reset();
+    TrafficJunctionPolicy::AppendExitCorridor(Exit,Turn,1,Turn.Num(),[](int32){return FVector(730,210,250);});
+    TestEqual(TEXT("A turn retains the entire coupled corner and clear exit"),Exit.Num(),3);
+    TestTrue(TEXT("Turn claim stops after a complete straight exit"),Exit.Last().Max.Y<6400.f);
     Exit.Reset();
     TrafficJunctionPolicy::AppendExitCorridor(Exit,Route,0,2,[](int32){return FVector(730,210,250);});
-    TestEqual(TEXT("Staging stop never claims unowned crane handover"),Exit.Num(),1);
+    TestTrue(TEXT("Staging stop never claims unowned crane handover"),Exit.IsEmpty());
     TMap<int32,int32> Blockers={{100,102},{102,106},{106,101},{101,100},{110,100}};
     const auto Cycle=TrafficJunctionPolicy::WaitCycle(Blockers,110);
     TestEqual(TEXT("Four-vehicle cycle excludes incoming queue"),Cycle.Num(),4);

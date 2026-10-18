@@ -10,6 +10,9 @@ struct FPortShipStowageAssumptions
     double MinimumGMM=.5, MaximumGMM=4.5, MaximumHeelDegrees=5;
     double MaximumStackKg=150000, MaximumLashingN=200000, LateralAccelerationMps2=1.47;
     double DeckHeightM=12;
+    double BayPitchM=18, RowPitchM=3, ContainerHeightM=2.591, Twin20PitchM=6.2;
+    double MaximumLongitudinalCGM=5;
+    bool UseDeckZones=false;
     int32 Bays=10, Rows=8, Tiers=8;
     bool Load(const FString& Path,FString& Error);
 };
@@ -24,6 +27,8 @@ struct FPortShipPlacement
 {
     int32 CargoID=0, Bay=0, Row=0, Tier=0;
     double CorrectedGMM=0, HeelDegrees=0, StackKg=0, LashingN=0;
+    int32 Subslot=0, BelowCargoID=INDEX_NONE;
+    FVector PositionM=FVector::ZeroVector; // longitudinal, transverse, vessel model Z datum
 };
 struct FPortShipStowageResult
 {
@@ -31,8 +36,10 @@ struct FPortShipStowageResult
     FString Reason;
     TArray<FPortShipPlacement> Placements;
     double CorrectedGMM=0, HeelDegrees=0;
+    double LongitudinalCGM=0;
 };
 
-// A loading-plan preview. It does not move actors or approve a real ship's loading.
+// Shared by initial physical arrival placement and the dashboard. Explicit
+// simulation cells/constant KM/static lashing proxy, not vessel approval.
 FPortShipStowageResult PlanShipStowage(const TArray<FPortShipPlanningCargo>& Cargo,
     const FPortShipStowageAssumptions& A);
