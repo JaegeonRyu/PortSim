@@ -6,6 +6,7 @@ const num=(v,d=1)=>Number.isFinite(v)?v.toLocaleString('ko-KR',{maximumFractionD
 const vector=(v,d=2)=>Array.isArray(v)?v.map(n=>num(n,d)).join(' / '):'—';
 const types={sts:['STS 크레인','crane','#159681'],agv:['AGV 운반차','agv','#779bbc'],rmg:['야드 크레인','crane','#c69757'],vessel:['컨테이너선','ship','#627f94'],yard:['야드 블록','grid','#84a998'],container:['컨테이너','box','#9eafb0'],other:['기타 액터','grid','#aab6b0']};
 const labels={charging:'충전 중',to_charge:'충전소 이동',charge_return:'대기 위치 복귀',charge_wait:'충전 순서 대기',working:'작업 중',idle:'대기',paused:'일시정지',fault:'오류',fms_hold:'FMS 대기',lidar_stop:'LiDAR 안전정지',available:'정상',complete:'완료',Ship:'선박',STS:'STS 운반',AGV:'AGV 운반',RMG:'RMG 운반',Yard:'야드'};
+const dispatchReasons={admitted:'AGV · 야드 확보 완료',agv_approaching:'배정 AGV 접근 중',agv_returning:'배정 AGV 복귀 중',vehicle_pending:'실행 가능한 화물 · 차량 배정 대기',yard_support_pending:'야드 아래층 적재 대기',rmg_approach_reserved:'목적 RMG 접근 예약 대기',rmg_turn_clearance:'RMG 인수·출차 공간 대기',yard_block_reserved:'야드 블록 사용 중',yard_slot_unavailable:'목적 슬롯 사용 불가',source_not_ready:'선박 상부 화물·이전 배치 또는 작업 종료 확인'};
 const stages=['안전 높이 이동','픽업 위치 접근','착좌 · 잠금','화물 인양','인계 위치 이동','하강 · 인계','스프레더 회수','안착 확인'];
 const paths={grid:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',crane:'M3 7h18M7 7V4h5l6 3M7 7v14M4 21h6M13 7v10m-3 0h6v4h-6zM18 7v14m-3 0h6',agv:'M3 9h18v8H3zM6 9V6h12v3M6 17v3m12-3v3M7 13h10',ship:'M3 13l9 4 9-4-3 7H6zM6 13V8h12v5M9 8V4h6v4M2 22l4-1 5 1 6-1 5 1',box:'M3 6h18v13H3zM7 6v13m5-13v13m5-13v13',sensor:'M12 11v2M8 8a6 6 0 0 0 0 8m8-8a6 6 0 0 1 0 8M4 4a11 11 0 0 0 0 16M20 4a11 11 0 0 1 0 16',chart:'M3 3v18h18M7 16l4-6 4 3 6-8',download:'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',search:'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14m5 12 6 6',clock:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18m0 4v6l4 2'};
 function icon(name){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name]||paths.grid}"/></svg>`;}
@@ -61,7 +62,8 @@ function renderChrome(){
  const kpi=(label,value,unit,foot,ic,progress)=>`<article class="kpi"><div class="kpi-icon">${icon(ic)}</div><div class="kpi-label">${label}</div><div class="kpi-value">${value}<small>${unit}</small></div><div class="kpi-foot">${foot}</div>${progress!=null?`<div class="progress"><span style="width:${Math.min(100,progress)}%"></span></div>`:''}</article>`;
  const completed=state?.delivered||0,total=state?.initial_ship||0;
  $('#kpis').innerHTML=kpi('운영 장비',state?num(fleet.length,0):'—','대',`STS ${counts.sts} · AGV ${counts.agv} · RMG ${counts.rmg}`,'crane')+kpi('현재 작업 중',state?num(running,0):'—','대',`${state?.paused?'운전 일시정지':live?'엔진 상태 기준':'최근 기록 기준'} · 오류 ${fleet.filter(a=>a.state==='fault').length}대`,'sensor')+kpi('야드 적재 완료',state?num(completed,0):'—',`/ ${num(total,0)}개`,`${total?num(completed/total*100):'0'}% 완료 · 선행 인양 ${state?.prefetched_jobs||0}건`,'box',total?completed/total*100:0)+kpi('실행시간',formatDuration(state?.elapsed_seconds??state?.simulation_seconds),'', `배속 반영 · ${state?.playback_rate??1}배속 · 시:분:초`,'clock');
- $('#footer-time').textContent=state?`기록 시각 ${new Date(state.generated_at).toLocaleString('ko-KR')}`:'시뮬레이션 데이터 대기';
+ const mix=state?.container_size_counts;
+ $('#footer-time').textContent=state?`기록 시각 ${new Date(state.generated_at).toLocaleString('ko-KR')}${mix?` · 20ft ${num(mix['20'],0)}개 / 40ft ${num(mix['40'],0)}개 / 45ft ${num(mix['45'],0)}개`:''}`:'시뮬레이션 데이터 대기';
 }
 
 function map(){
@@ -85,6 +87,39 @@ function map(){
  }
  const a=current();if(a?.type==='agv' && a.route?.length){const pts=[a.position_m,...a.route.map(x=>x.position_m)].map(p=>`${X(p[0])},${Y(p[1])}`).join(' ');shapes+=`<polyline points="${pts}" fill="none" stroke="#6292b8" stroke-width="1.5" stroke-dasharray="4 3"/>`;}
  return `<section class="panel"><div class="panel-head"><div><h2>터미널 오버뷰 <span class="number">TOP VIEW</span></h2><p>장비를 클릭해 상세 정보를 확인하세요</p></div><div class="legend"><span><i class="type-dot"></i>STS</span><span><i class="type-dot" style="background:#779bbc"></i>AGV</span><span><i class="type-dot" style="background:#c69757"></i>RMG</span></div></div><div class="map-wrap"><svg class="terminal-map" viewBox="0 0 750 390" role="img" aria-label="실행 좌표 기반 항만 장비 지도"><defs><pattern id="map-grid" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".55" fill="#dce8e1"/></pattern></defs><rect width="750" height="390" fill="url(#map-grid)"/><rect x="42" y="25" width="87" height="337" rx="9" fill="#193e4c"/><rect x="129" y="25" width="586" height="337" rx="5" fill="#f1f5f0"/><path d="M${X(70)} 29v330M${X(110)} 29v330M${X(390)} 29v330M${X(650)} 29v330" stroke="#e1e9e2" stroke-width="11"/><path d="M${X(70)} 29v330M${X(390)} 29v330" stroke="#fcfdfb" stroke-width=".7" stroke-dasharray="6 4"/>${shapes}<text x="52" y="18" class="map-text">QUAYSIDE</text><text x="300" y="18" class="map-text">CONTAINER YARD</text><text x="635" y="18" class="map-text">LANDSIDE</text><rect x="646" y="120" width="43" height="65" rx="3" fill="#d4e1d8"/><rect x="646" y="220" width="43" height="34" rx="3" fill="#d4e1d8"/><text x="667" y="156" fill="#80998b" font-size="6" text-anchor="middle">OPS</text><path d="M701 333v-19m-4 5 4-5 4 5" stroke="#8aa197"/><text x="698" y="343" fill="#8aa197" font-size="7">Y−</text>${!state?'<text x="388" y="203" text-anchor="middle" fill="#6f9181" font-size="12">시뮬레이터를 실행하면 장비가 표시됩니다</text>':''}</svg></div><div class="map-caption"><span>배치 좌표: 엔진 데이터 · 장비 기호는 확대 표시</span><span>컨테이너 상세는 목록에서 조회</span></div><div class="flow">${[['ship','선박'],['crane','STS'],['agv','AGV'],['crane','RMG'],['grid','야드']].map(([ic,t],i)=>`${i?'<span class="arrow">→</span>':''}<span class="step"><span class="step-icon">${icon(ic)}</span><b>${t}</b></span>`).join('')}</div></section>`;
+}
+
+function stowagePlans(){
+ const vessels=state?.vessels||[];
+ return `<section class="panel stowage-panel"><div class="panel-head"><div><h2>선박별 선내 적재도</h2><p>시뮬레이션 Bay · Row · Tier 기준 · 칸을 선택하면 화물 상세를 표시합니다.</p></div><span class="live-label">${live?'● LIVE':'○ SNAPSHOT'}</span></div><div class="stowage-legend"><span class="aboard">선내</span><span class="transfer">이송 중</span><span class="landed">야드 완료</span><span class="waiting">후속 차수 대기</span><span>빈 칸: 초기 화물 없음</span></div><div class="stowage-vessels">${vessels.map(v=>{
+  if(!Array.isArray(v.stowage))return `<article><h3>${esc(v.name)}</h3><p>적재도 데이터가 없습니다. 새 빌드에서 시뮬레이션을 실행해 주세요.</p></article>`;
+  const slots=v.stowage, waves=[...new Set(slots.map(c=>c.wave))].sort((a,b)=>a-b);
+  const aboard=slots.filter(c=>c.state==='Ship'&&!c.waiting).length;
+  const waiting=slots.filter(c=>c.waiting).length;
+  const index=new Map();
+  for(const c of slots){const key=`${c.wave}/${c.tier}/${c.row}/${c.bay}`;if(!index.has(key))index.set(key,[]);index.get(key).push(c);}
+  let layers='';
+  for(const wave of waves)for(let tier=v.stowage_tiers;tier>=1;tier--){
+   let cells='<span class="stowage-axis">R / B</span>';
+   for(let bay=1;bay<=v.stowage_bays;bay++)cells+=`<span class="stowage-axis">${bay}</span>`;
+   for(let row=1;row<=v.stowage_rows;row++){
+    cells+=`<span class="stowage-axis">${row}</span>`;
+    for(let bay=1;bay<=v.stowage_bays;bay++){
+     const occupants=index.get(`${wave}/${tier}/${row}/${bay}`);
+     if(!occupants){cells+='<span class="stowage-slot empty-slot" aria-label="초기 화물 없음"></span>';continue;}
+     cells+='<span class="stowage-cell">';
+     for(const c of occupants){
+     const status=c.waiting?'waiting':c.state==='Ship'?'aboard':c.state==='Yard'?'landed':['STS','AGV','RMG'].includes(c.state)?'transfer':'unknown';
+     const description=`${c.name||'화물'} · Bay ${bay} / Row ${row} / Tier ${tier} · ${c.waiting?'후속 차수 대기':labels[c.state]||'상태 없음'}`;
+     cells+=`<button class="stowage-slot ${status} ${selected===c.actor_id?'selected':''}" ${c.actor_id?`data-actor="${esc(c.actor_id)}"`:'disabled'} title="${esc(description)}" aria-label="${esc(description)}">${c.state==='Yard'?'✓':c.waiting?'·':c.state==='Ship'?'■':'↗'}</button>`;
+     }
+     cells+='</span>';
+    }
+   }
+   layers+=`<div class="stowage-layer"><h4>${waves.length>1?`차수 ${wave} · `:''}Tier ${tier}</h4><div class="stowage-scroll"><div class="stowage-grid" style="grid-template-columns:28px repeat(${v.stowage_bays},minmax(22px,1fr))">${cells}</div></div></div>`;
+  }
+  return `<article><h3>${esc(v.name)}</h3><p>선내 ${num(aboard,0)}개 · 대기 ${num(waiting,0)}개 · 전체 ${num(slots.length,0)}개</p>${layers||'<p>적재 화물이 없습니다.</p>'}</article>`;
+ }).join('')||'<p class="empty">선박 데이터 수신 대기</p>'}</div></section>`;
 }
 
 function equipmentTable(){
@@ -130,18 +165,55 @@ function overviewDetails(a){
  html+=`<div class="key-values">${tile(a.type==='container'?'화물 질량':'운반 하중',Number.isFinite(p)?num(p/1000):'—','t')}${tile('높이 Z',num(a.head_position_m?.[2]??a.position_m?.[2]),'m')}${tile('완료 작업',num(a.completed??a.placed,0),'건')}${tile('작업 경과',formatDuration(a.job_seconds))}</div>`;
  if(a.fault)html=`<div class="fault-message">${esc(a.fault)}</div>`+html;
  html+=`<div class="detail-subhead">현재 동작 <span>${live?'실행 데이터':'저장 기록'}</span></div>`;
+ if(a.type==='sts' && a.dispatch_wait_reason){
+  html+=kv('배차 판단',dispatchReasons[a.dispatch_wait_reason]||a.dispatch_wait_reason)+kv('즉시 처리 가능한 화물',`${num(a.dispatch_ready_cargo_count,0)}개`)+kv('아래층 / RMG 대기 화물',`${num(a.dispatch_support_blocked_count,0)} / ${num(a.dispatch_rmg_blocked_count,0)}개`)+kv('인양 후 AGV 대기 누적',formatDuration(a.sts_waiting_for_agv_seconds));
+  if(a.oldest_dispatch_cargo)html+=kv('선박에서 대기 중인 선순위 화물',`${a.oldest_dispatch_cargo} · ${formatDuration(a.dispatch_wait_seconds)}`);
+  if(a.assigned_agv)html+=`<div class="kv-row"><span>배정 AGV</span>${actorLink(a.assigned_agv)}</div>`;
+ }
  if(['sts','rmg'].includes(a.type))html+=kv('작업 단계',a.busy?`${a.stage+1}. ${stages[a.stage]}`:'작업 대기')+kv('인계 준비',a.destination_ready?'준비됨':'AGV 복귀 대기')+(a.agv_alignment_wait_seconds>0?kv('AGV 정렬 재확인',`${num(a.agv_alignment_wait_seconds,2)} s`):'')+kv('목표까지 직선거리',`${num(a.distance_to_destination_m)} m`)+kv('스프레더 좌표 X / Y / Z',`${vector(a.head_position_m)} m`)+kv('스프레더 현재 / 목표 길이',`${num(a.spreader_length_m,3)} / ${num(a.spreader_target_length_m,3)} m`)+kv('신축 체결 준비',a.telescope_ready?'완료':'조정 중');
- if(a.type==='agv')html+=kv('배터리',`${num(a.battery_percent,1)}% / 충전 상한 80%`)+kv('배터리 상태',a.charging?'충전 중':a.needs_charge?'충전 필요':'작업 가능')+(a.charging_bay?kv('충전 구역',`${a.charging_bay}번`):'')+kv('현재 속도',`${num(a.speed_mps,2)} m/s`)+kv('남은 경로 거리',`${num(a.route_remaining_m)} m`)+kv('교통 대기 누적',`${num(a.traffic_wait_seconds,1)} s`)+kv('야드 대기 누적',`${num(a.yard_wait_seconds,1)} s`)+(a.return_sts?kv('복귀 목적지',`STS-${a.return_sts}`):'')+kv('작업 단계',['대기','STS 인계 대기','야드 진입 대기','야드 이동','RMG 인계',a.return_sts?'STS 직접 복귀':'주차장 복귀','STS 접근','STS 대기열 이동','STS 배차 대기','야드 입구 RMG 대기','충전소 이동','대기 위치 복귀','충전 중'][a.stage]||'—')+kv('위치추정 오차',`${num(a.position_error_mm,1)} / ±${num(a.position_accuracy_limit_mm,0)} mm`)+kv('현재 FMS 노드',a.fms_node_count?`${num(a.fms_node_index+1,0)} / ${num(a.fms_node_count,0)}`:'배차 대기')+kv('안전 제어',a.controlled_stop?'LiDAR Controlled Stop':a.fms_hold?'FMS 도로예약 대기':'주행 허용');
+ if(a.type==='agv')html+=kv('배터리',`${num(a.battery_percent,1)}% / 충전 상한 80%`)+kv('배터리 상태',a.charging?'충전 중':a.needs_charge?'충전 필요':'작업 가능')+(a.charging_bay?kv('충전 구역',`${a.charging_bay}번`):'')+kv('현재 속도',`${num(a.speed_mps,2)} m/s`)+kv('남은 경로 거리',`${num(a.route_remaining_m)} m`)+kv('교통 대기 누적',`${num(a.traffic_wait_seconds,1)} s`)+kv('야드 대기 누적',`${num(a.yard_wait_seconds,1)} s`)+(a.return_sts?kv('복귀 목적지',`STS-${a.return_sts}`):'')+kv('작업 단계',['대기','STS 인계 대기','야드 진입 대기','야드 이동','RMG 인계',a.return_sts?'STS 직접 복귀':'주차장 복귀','STS 접근','STS 대기열 이동','STS 배차 대기','야드 입구 RMG 대기','두 번째 20ft 적재','충전소 이동','대기 위치 복귀','충전 중'][a.stage]||'—')+kv('위치추정 오차',`${num(a.position_error_mm,1)} / ±${num(a.position_accuracy_limit_mm,0)} mm`)+kv('현재 FMS 노드',a.fms_node_count?`${num(a.fms_node_index+1,0)} / ${num(a.fms_node_count,0)}`:'배차 대기')+kv('안전 제어',a.controlled_stop?'LiDAR Controlled Stop':a.fms_hold?'FMS 도로예약 대기':'주행 허용');
+ if(a.type==='agv' && a.fms_hold)html+=kv('현재 FMS 예약 요청 대기',`${num(a.fms_wait_seconds,1)} s`)+(a.fms_blocking_agv>=0?kv('통행 대기 상대',`AGV-${a.fms_blocking_agv}`):'');
  html+=kv('위치 X / Y / Z',`${vector(a.position_m)} m`);
  if(a.cargo && a.cargo!=='None')html+=`<div class="kv-row"><span>연결 화물</span>${actorLink(a.cargo)}</div>`;
+ if(a.type==='agv' && Array.isArray(a.cargo_items)){
+  html+=kv('갑판 적재 수량',`${num(a.on_deck_count,0)}개`)+kv('적재물 합산 무게중심 (차량 기준)',`${vector(a.deck_cog_offset_m,3)} m`);
+  if(a.stage===10)html+=kv('20ft 운송 준비','두 번째 컨테이너의 개별 착좌·잠금 확인 중');
+  for(const c of a.cargo_items)html+=`<div class="kv-row"><span>${esc(c.name)} · ${num(c.container_length_ft,0)}ft · ${num(c.mass_kg/1000,2)}t</span>${actorLink(c.id)}</div>`;
+ }
  if(a.agv && a.agv!=='None')html+=`<div class="kv-row"><span>인계 AGV</span>${actorLink(a.agv)}</div>`;
  if(a.parent && a.parent!=='None')html+=`<div class="kv-row"><span>부착된 장비</span>${actorLink(a.parent)}</div>`;
  if(Number.isFinite(a.container_length_ft))html+=`<div class="detail-subhead">컨테이너 사양 <span>매니페스트</span></div>`+
   kv('규격',`${num(a.container_length_ft,0)} ft`)+kv('외형 치수 W / L / H',`${vector(a.dimensions_m,3)} m`)+
-  kv('총중량',`${num((a.mass_kg??a.payload_kg)/1000,2)} t`)+kv('자중 / 화물중량',`${num(a.tare_kg/1000,2)} / ${num(a.cargo_mass_kg/1000,2)} t`)+
+  kv('총중량',`${num((a.container_gross_kg??a.mass_kg??a.payload_kg)/1000,2)} t`)+kv('자중 / 화물중량',`${num(a.tare_kg/1000,2)} / ${num(a.cargo_mass_kg/1000,2)} t`)+
   kv('계획 목적지',Number.isFinite(a.planned_yard_block)?`YARD ${num(a.planned_yard_block,0)} · RMG ${num(a.planned_rmg,0)} · SLOT ${num(a.planned_yard_slot,0)}`:'—')+
   kv('계획 좌표 X / Y / Z',`${vector(a.planned_yard_position_m)} m`);
  if(a.pickup)html+=pickupDetails(a)+loads(a);
+ if(a.goods)html+=`<div class="detail-subhead">물품·적재 계획 <span>가상 운송 예약</span></div>`+
+  kv('물품',a.goods)+kv('취급 타입',a.handling_type==='reefer'?'냉동·냉장':'일반 화물')+
+  kv('위험물 구분',({none:'일반',flammable:'인화성 모의 화물',corrosive:'부식성 모의 화물'})[a.hazard_group]||a.hazard_group)+
+  (a.handling_type==='reefer'?kv('설정 온도',`${num(a.temperature_c)} °C`):'')+
+  kv('출고 순서',`${num(a.outbound_order,0)}번 (작은 번호 먼저)`)+kv('목적항 / 기항 순서',`${a.destination_port} / ${num(a.port_call_order,0)}번`)+
+  kv('야드 계획 층',`${num(a.planned_yard_tier,0)}단`)+
+  kv('크기별 전용 칸',Number.isFinite(a.yard_slot_length_ft)?`${num(a.yard_slot_length_ft,0)}ft · CELL ${num(a.planned_yard_cell,0)}${a.yard_slot_length_ft===20?` · 자리 ${num(a.yard_subslot,0)}/2`:''}`:'—')+
+  kv('상부 적재 허용 중량',`${num(a.permitted_superimposed_kg/1000)} t`)+
+  (a.planned_pair_cargo?kv('20ft 동반 후보',a.planned_pair_cargo)+kv('추정 운송 절감',`${num(a.estimated_pair_saving_seconds)} s · 조건 미충족 시 개별 운송`):'')+
+  `<div class="note">출고 순서 → 취급·위험물 분리 → 같은 크기 → 무거운 화물 아래. 물품·출고 정보는 시뮬레이션용 가상 예약입니다.</div>`;
+ if(Number.isFinite(a.ship_bay))html+=`<div class="detail-subhead">입항 시 선박 적재 위치</div>`+
+  kv('Bay / Row / Tier',`${num(a.ship_bay,0)} / ${num(a.ship_row,0)} / ${num(a.ship_tier,0)}`)+
+  (a.ship_subslot?kv('20ft 셀 내부 자리',`${num(a.ship_subslot,0)}/2`):'')+
+  kv('아래 받침 컨테이너',a.ship_below_container||'갑판 셀')+
+  kv('초기 적재 좌표',`${vector(a.ship_initial_position_m,3)} m`);
+ if(a.ship_loading_preview){
+  const s=a.ship_loading_preview;
+  html+=`<div class="detail-subhead">입항 적재 배치 <span>${s.applied_to_arrival?'실제 초기 액터에 적용':'계획 미리보기'}</span></div>`+
+   kv('계획 검증',s.feasible?'GM·경사·스택·고박 조건 충족':'허용 조건을 만족하는 배치 부족')+
+   kv('계획 물량',`${num(s.planned_containers,0)}개`)+kv('보정 GM',`${num(s.corrected_gm_m,3)} m`)+
+   kv('허용 GM 범위',`${num(s.minimum_gm_m,2)} ~ ${num(s.maximum_gm_m,2)} m`)+kv('최종 횡경사 추정',`${num(s.heel_deg,3)} °`)+
+   kv('스택 중량 한계',`${num(s.maximum_stack_kg/1000)} t`)+kv('고박 하중 추정 한계',`${num(s.maximum_lashing_n/1000)} kN`)+
+   kv('초기 선수·선미 방향 무게중심 편차',`${num(s.longitudinal_cg_m,3)} m`)+
+   `<div class="note">입항 초기 계획입니다. 목적항 순서·규격별 셀·중량·냉동 전원·모의 위험물 구역을 반영합니다. 20ft는 셀 안의 두 자리를 따로 사용합니다. 표의 스택·고박은 각 화물을 계획에 추가한 직후의 해당 열 값입니다. GM은 고정 KM 가정, 고박은 정적 근사이며 실제 선박 승인 제원·IMDG 검증 및 하역 중 실시간 복원성 계산은 아닙니다.</div>`+
+   `<details><summary>Bay / Row / Tier 배치 ${num(s.placements?.length,0)}개 보기</summary><div class="table-scroll"><table><thead><tr><th>화물</th><th>Bay</th><th>Row</th><th>Tier</th><th>20ft 자리</th><th>아래 받침</th><th>스택 t</th><th>고박 kN</th></tr></thead><tbody>${(s.placements||[]).map(p=>`<tr><td>${esc(p.cargo)}</td><td>${num(p.bay,0)}</td><td>${num(p.row,0)}</td><td>${num(p.tier,0)}</td><td>${p.subslot?num(p.subslot,0):'—'}</td><td>${esc(p.below_container||'갑판')}</td><td>${num(p.stack_kg/1000)}</td><td>${num(p.lashing_n/1000)}</td></tr>`).join('')}</tbody></table></div></details>`;
+ }
  if(a.type==='container')html+=kv('무게중심 편차',`${vector(a.cog_m)} m`)+kv('물리 계산',a.simulating_physics?'활성':'부착 또는 고정 상태');
  if(a.type==='vessel')html+=kv('초기 화물',`${a.initial_count}개`)+kv('STS 인계 완료',`${a.unloaded}개`)+kv('야드 배치 완료',`${a.placed}개`)+`<button class="button primary" data-performance="${esc(a.id)}" style="margin-top:14px;width:100%">이 선박의 시간 절감 분석 →</button>`;
  if(a.type==='yard')html+=kv('슬롯',num(a.slots,0))+kv('점유',num(a.occupied,0))+`<div class="note">야드의 고정 컨테이너는 개별 Actor가 아닌 인스턴스로 구성되어 블록 단위로 집계합니다.</div>`;
@@ -215,7 +287,7 @@ function renderContent(){
  heading();
  if(view==='sensors')$('#view-content').innerHTML=sensorsPage();
  else if(view==='performance')$('#view-content').innerHTML=performancePage();
- else $('#view-content').innerHTML=`<div class="${view==='equipment'?'full-equipment':''}"><div class="monitor-grid"><div>${view==='overview'?map():''}${equipmentTable()}</div>${inspector()}</div></div>`;
+ else $('#view-content').innerHTML=`<div class="${view==='equipment'?'full-equipment':''}"><div class="monitor-grid"><div>${view==='overview'?map()+stowagePlans():''}${equipmentTable()}</div>${inspector()}</div></div>`;
 }
 function choose(id){selected=id;renderContent();}
 async function poll(){

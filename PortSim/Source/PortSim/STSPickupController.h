@@ -10,6 +10,7 @@ struct FSTSPickupConfig
     double CornerTolerance=2, VerticalTolerance=2, RelativeSpeed=3, HorizontalRelativeSpeed=6, YawTolerance=.25, TiltTolerance=.5;
     double SeatTime=.7, LockTime=.3, LockTimeout=2, AlignmentTimeout=90, AcquisitionRadius=100;
     double TrialHeight=30, TrialHorizontalTolerance=10, TrialHold=1, TrialTimeout=60, MinimumCornerFraction=.03, MassStability=.02;
+    double TrialLiftTimeout=0; // zero preserves the legacy/programmatic trial timeout
     int32 MaxAttempts=2;
     FVector PoseBias=FVector::ZeroVector;
     bool Load(TSharedPtr<FJsonObject> Root,FString& Error);

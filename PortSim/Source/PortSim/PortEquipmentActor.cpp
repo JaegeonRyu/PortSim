@@ -22,6 +22,7 @@ UStaticMeshComponent* APortEquipmentActor::Box(const TCHAR* Name,USceneComponent
     Mesh->SetRelativeLocation(Position);
     Mesh->SetRelativeScale3D(Size/100.f);
     Mesh->SetCollisionProfileName(Collision?TEXT("BlockAllDynamic"):TEXT("NoCollision"));
+    Mesh->SetGenerateOverlapEvents(false); // Explicit sensor queries retain blocking collision.
     return Mesh;
 }
 

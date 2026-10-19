@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "ContainerSpecification.h"
 #include "SpreaderTelescope.h"
+#include "CargoInformation.h"
 #include "PortContainerActor.generated.h"
 
 class UStaticMeshComponent;
@@ -27,15 +28,20 @@ public:
     void ApplyWind(FVector WindVelocityMetersPerSecond,float DragCoefficient=1.2f);
     void SetSecuredVesselMotion(FVector Position,FQuat Rotation,FVector VelocityCentimetersPerSecond,
         FVector AccelerationCentimetersPerSecondSquared=FVector::ZeroVector,
-        FVector JerkCentimetersPerSecondCubed=FVector::ZeroVector,double FrameDurationSeconds=0.);
+        FVector JerkCentimetersPerSecondCubed=FVector::ZeroVector,double FrameDurationSeconds=0.,bool ApplyPose=true);
     /** Interpolate the latest vessel-motion frame for fixed-rate crane substeps. */
     void ApplySecuredMotionFraction(double Fraction);
+    void SetSecuredMotionWindow(double Start,double End);
+    void BeginVisualFrame();
+    void EndVisualFrame();
+    bool SecuredMotionCouldIntersect(const FBox& Query) const { return SecuredSweptBounds.Intersect(Query); }
     FVector GetMotionVelocity() const;
     FVector GetMotionAcceleration() const;
     FVector GetMotionJerk() const;
     UStaticMeshComponent* GetBody() const { return Body; }
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Container") FName ContainerID;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Booking") FPortCargoInformation CargoInformation;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Container") EPortContainerSize SizeClass=EPortContainerSize::Ft40;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Container") int32 LengthFt=40;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Container") FVector ExternalDimensionsCm=FVector(243.8f,1219.2f,259.1f);
@@ -52,10 +58,14 @@ public:
     FVector KinematicAccelerationCentimetersPerSecondSquared=FVector::ZeroVector;
     FVector KinematicJerkCentimetersPerSecondCubed=FVector::ZeroVector;
 private:
+    TWeakObjectPtr<USceneComponent> DeferredVisualParent;
+    FTransform DeferredVisualRelative;
+    FBox SecuredSweptBounds=FBox(ForceInit);
     FTransform PreviousSecuredTransform=FTransform::Identity, CurrentSecuredTransform=FTransform::Identity;
     FVector PreviousSecuredVelocity=FVector::ZeroVector, CurrentSecuredVelocity=FVector::ZeroVector;
     FVector PreviousSecuredAcceleration=FVector::ZeroVector, CurrentSecuredAcceleration=FVector::ZeroVector;
     FVector PreviousSecuredJerk=FVector::ZeroVector, CurrentSecuredJerk=FVector::ZeroVector;
     double SecuredFrameDurationSeconds=0;
+    double SecuredWindowStart=0,SecuredWindowEnd=1;
     bool bHasSecuredMotionFrame=false;
 };

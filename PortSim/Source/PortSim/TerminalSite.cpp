@@ -9,6 +9,8 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 
 // Site dimensions are published totals; internal buildings/equipment are blockouts.
 // Coordinates in this function are metres: X inland, Y along the quay, Z up.
@@ -124,7 +126,10 @@ void AQuayCrane::BuildTerminalSite()
         Text->SetPivot(FVector2D(.5f,.5f));
         Text->SetRelativeScale3D(FVector(Size*100.f/80.f));
         Text->SetTwoSided(true);
-        Text->SetTickWhenOffscreen(true);
+        // These signs never change: keep their render texture, not a Slate
+        // repaint for every simulation/render frame and offscreen sign.
+        Text->SetManuallyRedraw(true);
+        Text->SetTickWhenOffscreen(false);
         Text->RegisterComponent();
         Text->SetSlateWidget(SNew(STextBlock)
             .Text(FText::FromString(Name))
@@ -146,6 +151,26 @@ void AQuayCrane::BuildTerminalSite()
     }
     const float NorthParkingAccessY=(TerminalLayout::AGVParkY(TerminalLayout::AGVParkBays-1)+3000.f)/100.f;
     RoadSegment(Roads,{50,NorthParkingAccessY+25.f},{167,NorthParkingAccessY+25.f},18);
+    if(bUnifiedTerminal && !FParse::Param(FCommandLine::Get(),TEXT("PortSimLegacyParking")) &&
+        !FParse::Param(FCommandLine::Get(),TEXT("PortSimPreviousApron")))
+    {
+        // Continuous pavement replaces the old individual parking cross strips.
+        // Lane paint uses the same anchors as the actual directed road graph.
+        Box(Roads,FVector(100,-77,.27f),FVector(48,861,.06f));
+        for(float X:{80.f,100.f,120.f})
+            for(float Y=-480;Y<340;Y+=12)
+                Box(White,FVector(X,Y,.39f),FVector(.15f,5,.025f));
+        for(float X:{TerminalLayout::AGVApronNorthX/100.f,TerminalLayout::AGVApronSouthX/100.f})
+            for(float Y=-465;Y<335;Y+=70)
+            {
+                const float Sign=X==TerminalLayout::AGVApronNorthX/100.f?1.f:-1.f;
+                Box(White,FVector(X,Y,.4f),FVector(.18f,3,.025f));
+                for(float Side:{-1.f,1.f})
+                    OrientedBox(White,FVector(TerminalLayout::SiteX(X)+Side*.55f,Y+Sign*.8f,.4f),
+                        FVector(.16f,1.6f,.025f),Side*Sign*45.f);
+            }
+        Label(TEXT("적재 AGV 운반 차선 ↑ ↓"),FVector(100,272,.5f),1.8f);
+    }
     // Rounded quay-side corners join the straight inland service road.
     BezierRoad(Roads,{145,-480},{145,-505},{170,-505},{195,-505},18,10);
     RoadSegment(Roads,{195,-505},{595,-505},18);
@@ -175,30 +200,32 @@ void AQuayCrane::BuildTerminalSite()
         {
             if (!TerminalLayout::IsOperationalYardBay(MarkBay)) continue;
             const float MX=TerminalLayout::YardBayX(MarkBay);
+            const int32 Size=bUnifiedTerminal?TerminalLayout::YardSizeFt(MarkBay):40;
+            const float CellLength=Size==20?12.192f:TerminalLayout::YardLengthCm(Size)/100.f;
             for(int32 Edge=0;Edge<=7;++Edge)
-                OrientedBox(White,FVector(MX,Y-10.5f+Edge*3.f,.39),FVector(12.2f,.12f,.025f),0);
+                OrientedBox(White,FVector(MX,Y-10.5f+Edge*3.f,.39),FVector(CellLength,.12f,.025f),0);
             for(float Side:{-1.f,1.f})
-                OrientedBox(White,FVector(MX+Side*6.1f,Y,.39),FVector(.12f,21.f,.025f),0);
+                OrientedBox(White,FVector(MX+Side*CellLength*.5f,Y,.39),FVector(.12f,21.f,.025f),0);
+            if(Size==20) OrientedBox(White,FVector(MX,Y,.39),FVector(.12f,21.f,.025f),0);
+            if(bUnifiedTerminal) Label(Size==20?TEXT("20ft x2"):Size==45?TEXT("45ft"):TEXT("40ft"),
+                FVector(205.f+MarkBay*13.f,Y-11.6f,.45f),1.1f);
         }
         for (int32 Bay=0;Bay<30;Bay+=2)
             for (int32 Row=0;Row<7;++Row)
-                for (int32 Tier=0;Tier<2+(Bay+Row+Block)%3;++Tier)
+                for (int32 Tier=0;Tier<TerminalLayout::YardTiers(Block,Bay,Row);++Tier)
                 {
-                    if (!TerminalLayout::IsOperationalYardBay(Bay)) continue;
-                    const bool FormerSource=(Bay==4 || Bay==23) && Row==2;
-                    const bool FormerDestination=(Bay==6 || Bay==25) && Row==4;
-                    constexpr bool FourZones=false;
-                    if (FourZones && (Bay==6 || Bay==14 || Bay==21)) continue;
-                    if (FormerDestination || (FormerSource && Tier>0)) continue;
-                    if (!FormerSource && (Bay*7+Row+Block)%11==0) continue;
-                    FSiteYardSlot Slot;
-                    Slot.Position=FVector(TerminalLayout::YardBayX(Bay)*100,(Y+(Row-3)*3)*100,149.5f+Tier*259);
-                    Slot.Block=Block; Slot.Half=Bay>=15?1:0; Slot.Color=(Bay+Row+Block)%4;
-                    const int32 Zone=FourZones?(Bay<7?0:Bay<15?1:Bay<22?2:3):Slot.Half;
-                    Slot.Crane=WorkingCranes.Num()+Zone;
-                    const float DockX=FourZones?(205.f+(Zone==0?0:Zone==1?7:Zone==2?15:22)*13.f):(Slot.Half?420.f:180.f);
-                    Slot.Handover=FVector((FourZones?TerminalLayout::SiteX(DockX):TerminalLayout::RMGHandoverX(Slot.Half))*100,TerminalLayout::RMGHandoverY(Block)*100,0);
-                    YardSlots.Add(Slot);
+                    const int32 Size=bUnifiedTerminal?TerminalLayout::YardSizeFt(Bay):40;
+                    for(int32 Pad=0;Pad<TerminalLayout::YardPads(Size);++Pad)
+                    {
+                        FSiteYardSlot Slot;
+                        Slot.Position=FVector(TerminalLayout::YardBayX(Bay)*100+TerminalLayout::YardPadOffsetCm(Size,Pad),
+                            (Y+(Row-3)*3)*100,149.5f+Tier*259);
+                        Slot.Block=Block; Slot.Half=Bay>=15?1:0; Slot.Color=(Bay+Row+Block)%4;
+                        Slot.Cell=TerminalLayout::YardCell(Block,Bay,Row); Slot.LengthFt=Size; Slot.Subslot=Pad;
+                        Slot.Crane=WorkingCranes.Num()+Slot.Half;
+                        Slot.Handover=FVector(TerminalLayout::RMGHandoverX(Slot.Half)*100,TerminalLayout::RMGHandoverY(Block)*100,0);
+                        YardSlots.Add(Slot);
+                    }
                 }
         // Two disjoint work reservations per block: no shared gantry travel zone.
         constexpr int32 ZoneCount=2;
@@ -260,8 +287,8 @@ void AQuayCrane::BuildTerminalSite()
         if (!bUnifiedTerminal) SiteLogistics->AddShipCargo(Position,STSIndex);
         ++STSIndex;
     }
-    // Fast-test fleet: 10 rows x 10 bays x 2 tiers = 200 per vessel.
-    // Spread bays over the hull so all three STSs on each vessel still participate.
+    // Seed bookings and provisional vessel membership. Unified Initialize then
+    // replaces these coordinates with its actual supported arrival stowage plan.
     const int32 ShipRows=bUnifiedTerminal?TerminalLayout::VesselRows:11;
     const int32 ShipBays=bUnifiedTerminal?TerminalLayout::VesselBays:16;
     const int32 ShipTiers=bUnifiedTerminal?TerminalLayout::VesselTiers:3;
@@ -277,17 +304,22 @@ void AQuayCrane::BuildTerminalSite()
             Box(Roads,FVector(-32,Y+146,-1),FVector(29,7,10));
             Box(Buildings,FVector(-32,Y-125,14),FVector(38,18,20));
         }
+        const FPortVesselInput* Imported=bUnifiedTerminal?GetVesselInput(VesselIndex):nullptr;
         const int32 Count=bUnifiedTerminal?ConfiguredCargo[VesselIndex]:ShipRows*ShipBays*ShipTiers;
         for(int32 Index=0;Index<Count;++Index)
                 {
                     const int32 Capacity=ShipRows*ShipBays*ShipTiers;
                     const int32 Local=Index%Capacity;
-                    const int32 Row=Local%ShipRows, Bay=(Local/ShipRows)%ShipBays, Tier=Local/(ShipRows*ShipBays);
+                    const auto* InputRow=Imported?&Imported->Rows[Index]:nullptr;
+                    const int32 Row=InputRow?InputRow->GridSlot.Y:Local%ShipRows;
+                    const int32 Bay=InputRow?InputRow->GridSlot.X:(Local/ShipRows)%ShipBays;
+                    const int32 Tier=InputRow?InputRow->GridSlot.Z:Local/(ShipRows*ShipBays);
                     const float BayY=bUnifiedTerminal?-81.f+Bay*18.f:-99.f+Bay*13.f;
                     const FVector Position(-49+Row*3,Y+BayY,5.695+Tier*2.59);
                     const float CraneSpacing=bUnifiedTerminal?70.f:100.f;
                     const int32 Nearest=FMath::Clamp(FMath::RoundToInt((Position.Y-(Y-CraneSpacing))/CraneSpacing),0,2)+(bUnifiedTerminal?VesselIndex*3:(Y<0?0:5));
-                    SiteLogistics->AddShipCargo(Position*100.,Nearest,bUnifiedTerminal?Index/Capacity:0);
+                    SiteLogistics->AddShipCargo(Position*100.,Nearest,bUnifiedTerminal && !Imported?Index/Capacity:0,
+                        InputRow?FName(*InputRow->ContainerId):NAME_None);
                 }
         ++VesselIndex;
     }

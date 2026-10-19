@@ -6,8 +6,10 @@
 #include "GameFramework/HUD.h"
 #include "TerminalActors.h"
 #include "STSOperatingProfile.h"
+#include "VesselInput.h"
 #include "QuayCrane.generated.h"
 
+class FJsonObject;
 class APortWorkingCrane;
 class APortSiteLogistics;
 class UStaticMeshComponent;
@@ -128,6 +130,20 @@ public:
     double AutoElapsed = 0;
     int32 ConfiguredShips=3, PendingShips=3;
     int32 ConfiguredCargo[3]={200,200,200}, PendingCargo[3]={200,200,200};
+    FPortVesselInput VesselInputs[3][2];
+    int32 SelectedVesselInput[3]={-1,-1,-1};
+    bool PendingFileMode[3]={false,false,false};
+    bool ConfiguredFileMode[3]={false,false,false};
+    int32 ManualCargo[3]={200,200,200};
+    FPortVesselInput ConfiguredVesselInputs[3];
+    void SetVesselInputMode(int32 Vessel,bool FileMode);
+    bool ApplyPendingVesselInputs();
+    const FPortVesselInput* GetPendingVesselInput(int32 Vessel) const;
+    FString VesselInputError;
+    void RestoreVesselInputs(const FJsonObject& Settings);
+    void SaveVesselInputs(FJsonObject& Settings) const;
+    const FPortVesselInput* GetVesselInput(int32 Vessel) const;
+    bool ValidateVesselInput(int32 Vessel,const FPortVesselInput& Input,FString& Error) const;
     void LoadRunSettings();
     bool SaveRunSettings();
     void SetPendingShips(int32 Count);
@@ -244,6 +260,7 @@ private:
     float SiteTestTime=0.f;
     float SiteTestHold=0.f;
     int32 SiteTestStage=0;
+    bool bTrafficFlowCheckpoint=false;
     TArray<FVector> SiteTestPositions;
     UPROPERTY() TObjectPtr<AActor> SiteActor;
     void ResetTerminal();
@@ -356,6 +373,8 @@ public:
     virtual void NotifyHitBoxRelease(FName BoxName) override;
 private:
     int32 DragSlider=-2;
+    FString VesselImportStatus;
+    void LoadVesselInput(int32 Vessel,int32 Kind);
     void UpdateSlider(float MouseX);
     void DrawWindCompass(const UPortEnvironmentComponent& Environment,float Scale);
     void DrawSeaState(const UPortEnvironmentComponent& Environment,float Scale);

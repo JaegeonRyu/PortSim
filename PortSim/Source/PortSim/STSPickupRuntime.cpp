@@ -77,6 +77,7 @@ void APortWorkingCrane::AdvancePickup(float Dt)
     }
     if(Pickup.Phase==ESTSPickupPhase::Attach)
     {
+        FlushParts();
         if(!Observation.AllLocked()){Stop(TEXT("Pickup attachment requires four lock feedback signals"));return;}
         if(bDestinationReady&&!DestinationClear()){Stop(TEXT("Destination slot occupied"));return;}
         // Mechanical coupling preserves the achieved pose; never snap a misaligned box onto the head.

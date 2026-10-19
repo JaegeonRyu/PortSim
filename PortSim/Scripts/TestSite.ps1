@@ -1,8 +1,17 @@
 param([string]$Engine = 'C:\Program Files\Epic Games\UE_5.6',
-    [ValidateSet('All','Normal','Full','Faults','SensorFault','LockFault','Overload','AGVFault')][string]$Mode = 'All',
+    [ValidateSet('All','Normal','Full','Flow','Faults','SensorFault','LockFault','Overload','AGVFault')][string]$Mode = 'All',
     [ValidateRange(1,60)][int]$FixedFPS = 10,
-    [ValidateRange(1,120)][int]$TimeoutMinutes = 30)
+    # 0 keeps the repeatable unpaced fixed-step benchmark; 4 is normal test playback.
+    [ValidateSet(0,1,2,4,8,16)][int]$PlaybackRate = 4,
+    [ValidateRange(1,120)][int]$TimeoutMinutes = 30,
+    [switch]$CheckStowage, [switch]$RequirePairedTrip, [switch]$Profile,
+    [switch]$CheckDispatch, [string]$DispatchBaselineReport,
+    [ValidateSet('Depot','Legacy')][string]$ParkingLayout='Depot',
+    [ValidateSet('Reused','Previous')][string]$ApronLayout='Reused',
+    [int]$EnvironmentSeed=166290927,
+    [string]$ResultSummaryPath)
 $ErrorActionPreference = 'Stop'
+if($RequirePairedTrip) { $CheckStowage=$true }
 $root = Split-Path $PSScriptRoot -Parent
 $project = Join-Path $root 'PortSim.uproject'
 $editor = Join-Path $Engine 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
@@ -13,11 +22,18 @@ foreach ($case in $cases) {
     # A terminated Unreal process can leave the previous log handle pending in
     # Windows for a short time. Use a per-run file so that stale handles never
     # prevent the next verification from starting.
-    $testLog = Join-Path $root "Saved\Logs\SiteTest_${case}_$PID.log"
+    $testLog = Join-Path $root "Saved\Logs\SiteTest_${case}_${ParkingLayout}_${ApronLayout}_$PID.log"
     if (Test-Path -LiteralPath $testLog) { Remove-Item -LiteralPath $testLog -Force }
     $arguments = @("`"$project`"", '/Engine/Maps/Entry','-game','-nullrhi','-nosound','-unattended','-nosplash','-benchmark',"-fps=$FixedFPS",'-PortSimSiteTest',"`"-abslog=$testLog`"")
+    if($PlaybackRate -gt 0) { $arguments += "-PortSimPlayback=$PlaybackRate" }
+    if($Profile) { $arguments += '-PortSimProfile' }
+    $arguments += @("-PortSimEnvironmentSeed=$EnvironmentSeed",'-PortSimShips=3',
+        '-PortSimCargo1=200','-PortSimCargo2=200','-PortSimCargo3=200')
+    if($ParkingLayout -eq 'Legacy') { $arguments += '-PortSimLegacyParking' }
+    if($ApronLayout -eq 'Previous') { $arguments += '-PortSimPreviousApron' }
     if($case -eq 'Full') { $arguments += '-PortSimFullUnloadTest' }
-    $expectedShipments=if($case -eq 'Full') {600} else {120}
+    if($case -eq 'Flow') { $arguments += @('-PortSimContinuousTrafficTest','-PortSimSiteShipmentLimit=240') }
+    $expectedShipments=if($case -eq 'Full') {600} elseif($case -eq 'Flow') {240} else {120}
     $expected = $null
     if ($case -eq 'SensorFault') { $arguments += '-PortSimSTSSensorFault'; $expected = 'Required STS sensor observation invalid/stale' }
     if ($case -eq 'LockFault') { $arguments += '-PortSimSTSLockFault=0'; $expected = 'Twist lock alignment failed' }
@@ -32,10 +48,10 @@ foreach ($case in $cases) {
         $arguments += "`"-PortSimSTSSettings=$path`""
         $expected = 'Payload exceeds resolved STS reference capacity'
     }
-    Write-Output "RUN Site $case"
+    Write-Output "RUN Site $case (parking=$ParkingLayout seed=$EnvironmentSeed playback=$PlaybackRate; 0=unpaced benchmark)"
     $process = Start-Process -FilePath $editor -ArgumentList $arguments -WindowStyle Hidden -PassThru
     $null = $process.Handle
-    $timeoutMs = if ($case -in @('Normal','Full')) { $TimeoutMinutes*60000 } else { 900000 }
+    $timeoutMs = if ($case -in @('Normal','Full','Flow')) { $TimeoutMinutes*60000 } else { 900000 }
     if (-not $process.WaitForExit($timeoutMs)) { $process.Kill(); throw "Site $case timed out" }
     $process.Refresh()
     $text = Get-Content -LiteralPath $testLog -Raw
@@ -53,7 +69,7 @@ foreach ($case in $cases) {
         $reports = Get-ChildItem -LiteralPath (Join-Path $root 'Saved\Results') -Filter 'Site_*.csv' | Where-Object { $_.LastWriteTime -ge $started }
         foreach ($report in $reports) {
             $rows = @(Import-Csv -LiteralPath $report.FullName)
-            if ($rows.Count -ne $expectedShipments) { continue }
+            if ($rows.Count -lt $expectedShipments -or ($case -ne 'Flow' -and $rows.Count -ne $expectedShipments)) { continue }
             $completed++
             if (@($rows.STSLane | Sort-Object -Unique).Count -ne 9) { throw 'Not all nine STSs completed shipments' }
             if (@($rows.AGVID | Sort-Object -Unique).Count -lt 9) { throw 'Cost-aware dispatch did not sustain concurrent STS service' }
@@ -71,8 +87,37 @@ foreach ($case in $cases) {
                     throw "Site timing/mass mismatch: $($row.ContainerID)"
                 }
             }
+            if($CheckStowage) {
+                & (Join-Path $PSScriptRoot 'AssertStowageReport.ps1') -ReportPath $report.FullName -LogPath $testLog -RequirePairedTrip:$RequirePairedTrip
+            }
+            if($CheckDispatch -or $DispatchBaselineReport) {
+                & (Join-Path $PSScriptRoot 'AssertDispatchReport.ps1') -ReportPath $report.FullName -BaselineReport $DispatchBaselineReport
+            }
             $snapshot = Get-Content -LiteralPath ($report.FullName.Replace('.csv','_profile.json')) -Raw | ConvertFrom-Json
             if ($snapshot.sts_profile.reference.geometry.rail_gauge.value -ne 30.48) { throw 'Site reference snapshot missing' }
+            if($snapshot.ship_arrival_layout -ne 'applied_bay_row_tier' -or
+                @([regex]::Matches($text,'SHIP_ARRIVAL_STOWAGE: vessel=\d applied=200 ')).Count -ne 3) {
+                throw 'Physical arrival plans for all three 200-container vessels were not applied'
+            }
+            $expectedParking=if($ParkingLayout -eq 'Depot') {'depot'} else {'legacy_distributed'}
+            if($snapshot.agv_parking_layout -ne $expectedParking) { throw 'Parking baseline switch not applied' }
+            $expectedApron=if($ParkingLayout -eq 'Depot' -and $ApronLayout -eq 'Reused') {'reused_transport_lanes'} else {'previous_routes'}
+            if($snapshot.agv_apron_layout -ne $expectedApron) { throw 'Apron route switch not applied' }
+            $expectedPriority=if($expectedApron -eq 'reused_transport_lanes') {'yard_support_path'} else {'oldest_ready'}
+            if($snapshot.agv_dispatch_priority -ne $expectedPriority) { throw 'Yard support dispatch priority not applied' }
+            if($expectedApron -eq 'reused_transport_lanes' -and $text -notmatch 'AGV_APRON_ROUTE:') {
+                throw 'Loaded AGVs did not use the converted apron roads'
+            }
+            if($ResultSummaryPath) {
+                $lastPlacement=($rows | ForEach-Object {[double]$_.FinalPlacementAtSeconds} | Measure-Object -Maximum).Maximum
+                $returnTime=[regex]::Match($text,'RECEIVING_METRICS:.*elapsed_simulation=([0-9.]+)').Groups[1].Value
+                [ordered]@{ParkingLayout=$ParkingLayout;ApronLayout=$ApronLayout;EnvironmentSeed=$EnvironmentSeed;PlaybackRate=$PlaybackRate;
+                    FixedFPS=$FixedFPS;Shipments=$rows.Count;Report=$report.FullName;Log=$testLog;
+                    LastPlacementSeconds=$lastPlacement;ContinuousTraffic=($case -eq 'Flow');
+                    ProgressReachedSeconds=[double]$returnTime;
+                    ReturnCompletedSeconds=$(if($case -eq 'Flow') {$null} else {[double]$returnTime})} |
+                    ConvertTo-Json | Set-Content -LiteralPath $ResultSummaryPath -Encoding utf8
+            }
             Write-Output "TIMING Site: 9 STSs, $expectedShipments shipments; final placement $($rows[-1].FinalPlacementAtSeconds) seconds"
         }
         if ($completed -ne 1) { throw "Expected one completed $expectedShipments-shipment report" }

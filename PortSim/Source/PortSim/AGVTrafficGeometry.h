@@ -4,6 +4,9 @@
 
 namespace AGVTrafficGeometry
 {
+    // Solid chassis dimensions used by the runtime overlap guard. Published
+    // road envelopes (730/210 cm) additionally reserve a clearance buffer.
+    constexpr float BodyHalfLengthCm=689.f, BodyHalfWidthCm=169.f;
     // Connect parallel lanes with two opposite constant-radius arcs. Two
     // independent right-angle fillets overlap when the lane offset is < 2R.
     inline bool LaneChange(FVector A,FVector B,FVector C,FVector D,TArray<FVector>& Points)
@@ -59,5 +62,16 @@ namespace AGVTrafficGeometry
             if(FMath::Abs(FVector::DotProduct(Delta,Axis))>Own+Other) return false;
         }
         return true;
+    }
+    inline bool ClearReverseSweep(FVector Start,FVector Goal,FVector Other,FVector OtherLong)
+    {
+        if(!SweptChassisIntersects(Start,Goal,Other,OtherLong,730,210,170)) return true;
+        // A safety stop may already be inside the reserved clearance buffer.
+        // Permit only an escape that increases separation and whose complete
+        // solid-body sweep is clear. Never ignore an obstacle behind the AGV.
+        const FVector InitialTangent=Start+(Goal-Start).GetSafeNormal2D()*.01f;
+        return SweptChassisIntersects(Start,InitialTangent,Other,OtherLong,730,210,170) &&
+            FVector::DotProduct(Goal-Start,Other-Start)<0 &&
+            !SweptChassisIntersects(Start,Goal,Other,OtherLong,BodyHalfLengthCm,BodyHalfWidthCm);
     }
 }

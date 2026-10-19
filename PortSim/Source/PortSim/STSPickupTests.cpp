@@ -80,6 +80,20 @@ bool FSTSPickupTest::RunTest(const FString& Parameters)
     }
     TestTrue(TEXT("20 Hz sensor hold completes on time with 120 Hz control"),P.EstimateValid&&P.Fault.IsEmpty());
 
+    // A locked load has zero cargo/spreader relative speed even while the
+    // entire assembly is moving. Trial proof must still require absolute rest.
+    P=FSTSPickupController(); O=FSTSObservation(); O.bValid=true;
+    for(bool& Lock:O.Locked) Lock=true;
+    for(float& Force:O.CornerLoadsN) Force=12000*9.80665/4;
+    P.Attached(FVector::ZeroVector); O.SpreaderPosition=FVector(0,0,C.TrialHeight);
+    O.SpreaderVelocity=O.CargoVelocity=FVector(3.68,.20,0);
+    for(int I=0;I<14;++I) Tick();
+    TestFalse(TEXT("Zero relative speed does not prove stationary trial load"),P.EstimateValid);
+    P.PhaseTime=C.TrialTimeout+1; Tick();
+    TestTrue(TEXT("Trial timeout reports absolute speed and original phase"),
+        P.Fault.Contains(TEXT("absolute_speed_cmps=")) && P.Fault.Contains(TEXT("trial_phase=trial_lift")));
+    O.SpreaderVelocity=O.CargoVelocity=FVector::ZeroVector;
+
     // Losing the downward camera during large sway must command a return to
     // the reserved cargo location, otherwise the spreader freezes outside the
     // camera cone and can never reacquire the target.

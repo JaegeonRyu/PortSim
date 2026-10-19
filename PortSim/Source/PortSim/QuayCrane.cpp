@@ -444,11 +444,16 @@ void AQuayCrane::UpdateRopes()
 void AQuayCrane::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
-    Environment->AdvanceEnvironment(DeltaSeconds);
-    ApplySeaMotion();
+    const bool EnvironmentFrozen=bAutoPaused || bEmergencyStop || (bUnifiedTerminal && !bAutoRunning) ||
+        (SiteLogistics && !SiteLogistics->Fault.IsEmpty());
+    if(!EnvironmentFrozen)
+    {
+        Environment->AdvanceEnvironment(DeltaSeconds);
+        ApplySeaMotion();
+    }
     const FVector WindVelocity=Environment->GetEffectiveWindVelocity();
     if(SiteLogistics) SiteLogistics->SetWindVelocity(WindVelocity);
-    for(const auto& Container:ContainerActors) if(IsValid(Container)) Container->ApplyWind(WindVelocity);
+    if(!EnvironmentFrozen) for(const auto& Container:ContainerActors) if(IsValid(Container)) Container->ApplyWind(WindVelocity);
     if(bPickupTest){TickPickupTest(DeltaSeconds);return;}
     // World timers, control and Chaos consume the same accelerated delta.
     // Chaos subdivides the frame into small physics steps.
@@ -837,7 +842,7 @@ void APortSimHUD::DrawHUD()
             { if(PC->GetMousePosition(MX,MY)) UpdateSlider(MX); }
             else { DragSlider=-2; CranePawn->SaveRunSettings(); }
         }
-        DrawRect(FLinearColor(.015f,.03f,.05f,.94f),16,16,680*Scale,(351+CranePawn->PendingShips*66)*Scale);
+        DrawRect(FLinearColor(.015f,.03f,.05f,.94f),16,16,680*Scale,(383+CranePawn->PendingShips*134)*Scale);
         float Y=28;
         auto Text=[&](const FString& T,FLinearColor C=FLinearColor::White)
         { DrawText(T,C,30,Y,GEngine->GetSmallFont(),TextScale); Y+=30*Scale; };
@@ -863,8 +868,43 @@ void APortSimHUD::DrawHUD()
         };
         Slider(FString::Printf(TEXT("선박 %d대"),CranePawn->PendingShips),CranePawn->PendingShips,3,TEXT("ShipsSlider"));
         for(int32 I=0;I<CranePawn->PendingShips;++I)
-            Slider(FString::Printf(TEXT("선박 %d · 컨테이너 %d개"),I+1,CranePawn->PendingCargo[I]),
-                CranePawn->PendingCargo[I],CranePawn->PendingCargoLimit(I),FName(*FString::Printf(TEXT("CargoSlider%d"),I)));
+        {
+            DrawText(FString::Printf(TEXT("선박 %d"),I+1),FLinearColor::White,30,Y+6*Scale,GEngine->GetSmallFont(),TextScale);
+            for(int32 Mode=0;Mode<2;++Mode)
+            {
+                const float X=30+(170+Mode*160)*Scale;
+                const bool Active=CranePawn->PendingFileMode[I]==(Mode==1);
+                DrawRect(Active?FLinearColor(.05f,.48f,.53f):FLinearColor(.06f,.2f,.27f),X,Y,150*Scale,28*Scale);
+                DrawText(Mode?TEXT("불러오기"):TEXT("직접 설정"),FLinearColor::White,X+10*Scale,Y+5*Scale,GEngine->GetSmallFont(),TextScale);
+                AddHitBox(FVector2D(X,Y),FVector2D(150*Scale,28*Scale),
+                    FName(*FString::Printf(TEXT("VesselMode%d_%d"),I,Mode)),true,60);
+            }
+            Y+=34*Scale;
+            if(!CranePawn->PendingFileMode[I])
+                Slider(FString::Printf(TEXT("컨테이너 %d개 · 리셋 시 적용"),CranePawn->PendingCargo[I]),
+                    CranePawn->PendingCargo[I],CranePawn->PendingCargoLimit(I),FName(*FString::Printf(TEXT("CargoSlider%d"),I)));
+            else
+            {
+                Text(CranePawn->GetPendingVesselInput(I)?FString::Printf(TEXT("파일 배치 %d개 · 리셋 시 적용"),CranePawn->PendingCargo[I]):TEXT("적용할 CSV 파일을 선택하세요."));
+                for(int32 Kind=0;Kind<2;++Kind)
+                {
+                    const float X=30+Kind*326*Scale;
+                    DrawRect(FLinearColor(.06f,.28f,.35f),X,Y,314*Scale,28*Scale);
+                    DrawText(Kind?TEXT("선내 적재도 불러오기"):TEXT("양하/선적 목록 불러오기"),FLinearColor::White,
+                        X+8*Scale,Y+5*Scale,GEngine->GetSmallFont(),TextScale);
+                    AddHitBox(FVector2D(X,Y),FVector2D(314*Scale,28*Scale),
+                        FName(*FString::Printf(TEXT("VesselImport%d_%d"),I,Kind)),true,60);
+                    const auto& Input=CranePawn->VesselInputs[I][Kind];
+                    const FString Summary=Input.FileName.IsEmpty()?TEXT("미등록 (CSV)"):
+                        FString::Printf(TEXT("%s · %d건"),*(FString(CranePawn->SelectedVesselInput[I]==Kind?TEXT("[선택] "):TEXT(""))+Input.FileName.Left(20)),Input.Rows.Num());
+                    DrawText(Summary,FLinearColor(.6f,.85f,.8f),X,Y+33*Scale,GEngine->GetSmallFont(),Scale);
+                }
+                Y+=62*Scale;
+            }
+            Y+=8*Scale;
+        }
+        Text(!CranePawn->VesselInputError.IsEmpty()?CranePawn->VesselInputError:(VesselImportStatus.IsEmpty()?TEXT("설정·파일 선택 후 리셋 버튼으로 적용하세요."):VesselImportStatus),
+            FLinearColor(.7f,.85f,.9f));
         int32 ActiveTotal=0; for(int32 I=0;I<CranePawn->ConfiguredShips;++I) ActiveTotal+=CranePawn->ConfiguredCargo[I];
         Text(FString::Printf(TEXT("현재 %d척 · %d개 / 완료 %d개"),CranePawn->ConfiguredShips,ActiveTotal,CranePawn->Deliveries));
         const float BY=Y;
@@ -949,7 +989,7 @@ void APortSimHUD::UpdateSlider(float MouseX)
 {
     auto* C=Cast<AQuayCrane>(GetOwningPlayerController()->GetPawn());
     if(!C || !Canvas) return;
-    const float Scale=FMath::Clamp(Canvas->SizeX/1440.f,.65f,1.4f);
+    const float Scale=FMath::Clamp(FMath::Min(Canvas->SizeX/1440.f,Canvas->SizeY/900.f),.5f,1.4f);
     const float Ratio=FMath::Clamp((MouseX-40)/(480*Scale),0.f,1.f);
     if(DragSlider==-1) C->SetPendingShips(1+FMath::RoundToInt(Ratio*2));
     else if(DragSlider>=0 && DragSlider<C->PendingShips)
@@ -961,9 +1001,16 @@ void APortSimHUD::NotifyHitBoxClick(FName BoxName)
     auto* PC=GetOwningPlayerController(); auto* C=PC?Cast<AQuayCrane>(PC->GetPawn()):nullptr;
     if(!C) return;
     if(BoxName==TEXT("TogglePortHUD")) { C->SaveRunSettings(); DragSlider=-2; C->ToggleHUD(); return; }
+    for(int32 I=0;I<C->PendingShips;++I) for(int32 Mode=0;Mode<2;++Mode)
+        if(BoxName==FName(*FString::Printf(TEXT("VesselMode%d_%d"),I,Mode)))
+        { DragSlider=-2; VesselImportStatus.Empty(); C->SetVesselInputMode(I,Mode==1); return; }
+    for(int32 I=0;I<C->PendingShips;++I) for(int32 Kind=0;Kind<2;++Kind)
+        if(BoxName==FName(*FString::Printf(TEXT("VesselImport%d_%d"),I,Kind)))
+        { DragSlider=-2; LoadVesselInput(I,Kind); return; }
     if(BoxName==TEXT("RunSimulation")) C->StartAutomatic(false);
     else if(BoxName==TEXT("PauseSimulation") && C->bAutoRunning) C->bAutoPaused=!C->bAutoPaused;
-    else if(BoxName==TEXT("ResetSimulation") || BoxName==TEXT("StopSimulation")) C->StopSimulation();
+    else if(BoxName==TEXT("ResetSimulation") || BoxName==TEXT("StopSimulation"))
+    { VesselImportStatus.Empty(); C->StopSimulation(); if(C->VesselInputError.IsEmpty()) VesselImportStatus=TEXT("리셋 완료 · 선택한 수량과 배치를 적용했습니다."); }
     else if(BoxName==TEXT("SpeedDown")) C->DecreaseSimulationSpeed();
     else if(BoxName==TEXT("SpeedUp")) C->IncreaseSimulationSpeed();
     else
