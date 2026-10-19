@@ -387,6 +387,11 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     Root->SetStringField(TEXT("yard_stacking_policy"),TEXT("outbound_order > handling/hazard zones > compatible size > heavy below light"));
     Root->SetStringField(TEXT("cargo_information_basis"),TEXT("synthetic_simulation_booking"));
     Root->SetStringField(TEXT("paired_transport_mode"),TEXT("two sequential verified crane lifts, one AGV journey"));
+    Root->SetBoolField(TEXT("fog_enabled"),FogVisibilityMeters<MAX_flt);
+    Root->SetNumberField(TEXT("fog_visibility_m"),FogVisibilityMeters<MAX_flt?FogVisibilityMeters:-1.f);
+    Root->SetBoolField(TEXT("rain_enabled"),RainState.bRainEnabled);
+    Root->SetNumberField(TEXT("rainfall_mm_per_hour"),RainState.bRainEnabled?RainState.RainfallMmPerHour:0.f);
+    Root->SetNumberField(TEXT("wet_traction_scale"),RainState.WetTractionScale());
     TArray<TSharedPtr<FJsonValue>> ReturnCorridors;
     static const TCHAR* ReturnNames[]={TEXT("south"),TEXT("central"),TEXT("north")};
     for(int32 Corridor=0;Corridor<TerminalLayout::AGVReturnCorridorCount;++Corridor)
@@ -549,6 +554,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             O->SetNumberField(TEXT("lidar_front_obstacle_m"),V->Sensors.FrontObstacleDistanceCm<0?-1:V->Sensors.FrontObstacleDistanceCm*.01f);
             O->SetNumberField(TEXT("lidar_rear_obstacle_m"),V->Sensors.RearObstacleDistanceCm<0?-1:V->Sensors.RearObstacleDistanceCm*.01f);
             O->SetNumberField(TEXT("lidar_safety_distance_m"),V->Sensors.LiDARSafetyDistanceCm*.01f);
+            O->SetNumberField(TEXT("lidar_detection_range_m"),V->Sensors.LiDARDetectionRangeCm<0?-1:V->Sensors.LiDARDetectionRangeCm*.01f);
             O->SetNumberField(TEXT("lidar_blocking_agv"),V->Sensors.LiDARBlockingVehicleID);
             O->SetBoolField(TEXT("lidar_clear"),V->Sensors.bLiDARClear);
             O->SetBoolField(TEXT("controlled_stop"),V->Sensors.bControlledStop);

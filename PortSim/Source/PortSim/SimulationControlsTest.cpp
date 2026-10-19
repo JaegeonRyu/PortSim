@@ -1,4 +1,5 @@
 #include "QuayCrane.h"
+#include "PortEnvironmentComponent.h"
 #include "PortSiteLogistics.h"
 #include "TerminalLayout.h"
 #include "GameFramework/PlayerController.h"
@@ -34,6 +35,20 @@ void AQuayCrane::TickControlsTest(float Dt)
         AutoElapsed=90061;
         if(ElapsedText()!=TEXT("25시 01분 01초")) { Fail(TEXT("Elapsed formatting wraps days")); return; }
         AutoElapsed=0;
+        if(!Environment) { Fail(TEXT("Missing environment controls")); return; }
+        for(const FName Toggle:{FName(TEXT("ToggleWindSetting")),FName(TEXT("ToggleSeaSetting")),
+            FName(TEXT("ToggleRainSetting")),FName(TEXT("ToggleFogSetting"))})
+        {
+            const bool Before=Toggle==TEXT("ToggleWindSetting")?Environment->IsWindEnabled():
+                Toggle==TEXT("ToggleSeaSetting")?Environment->IsSeaMotionEnabled():
+                Toggle==TEXT("ToggleRainSetting")?Environment->IsRainEnabled():Environment->IsFogEnabled();
+            HUD->NotifyHitBoxClick(Toggle);
+            const bool After=Toggle==TEXT("ToggleWindSetting")?Environment->IsWindEnabled():
+                Toggle==TEXT("ToggleSeaSetting")?Environment->IsSeaMotionEnabled():
+                Toggle==TEXT("ToggleRainSetting")?Environment->IsRainEnabled():Environment->IsFogEnabled();
+            if(Before==After) { Fail(TEXT("Environment UI toggle did not change state")); return; }
+            HUD->NotifyHitBoxClick(Toggle);
+        }
         HUD->NotifyHitBoxClick(TEXT("SpeedUp"));
         if(SimulationSpeed!=2) { Fail(TEXT("Speed button")); return; }
         HUD->NotifyHitBoxClick(TEXT("RunSimulation"));

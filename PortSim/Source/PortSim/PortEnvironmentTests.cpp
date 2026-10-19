@@ -153,4 +153,63 @@ bool FPortSeaStateTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("ON resumes frozen sea clock"),Sea.ElapsedSeconds>FrozenAt);
     return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPortFogStateTest,"PortSim.Environment.FogState",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FPortFogStateTest::RunTest(const FString& Parameters)
+{
+    FPortFogState Fog;
+    TestFalse(TEXT("Fog defaults OFF to preserve existing scenarios"),Fog.bFogEnabled);
+    TestEqual(TEXT("Dense-fog visibility assumption"),Fog.VisibilityMeters,FPortFogState::DefaultVisibilityMeters);
+    TestEqual(TEXT("OFF preserves camera range"),Fog.SensorRangeMeters(TEXT("spreader_camera"),50.f),50.f);
+    Fog.bFogEnabled=true;
+    TestEqual(TEXT("Fog limits camera range"),Fog.SensorRangeMeters(TEXT("spreader_camera"),50.f),Fog.VisibilityMeters);
+    TestEqual(TEXT("Fog limits LiDAR range case-insensitively"),Fog.SensorRangeMeters(TEXT("AGV_Position_LiDAR"),100.f),Fog.VisibilityMeters);
+    TestEqual(TEXT("Fog does not alter encoders"),Fog.SensorRangeMeters(TEXT("hoist_encoder"),100.f),100.f);
+    auto* Component=NewObject<UPortEnvironmentComponent>();
+    TestFalse(TEXT("Component fog defaults OFF"),Component->IsFogEnabled());
+    Component->ToggleFog();
+    TestTrue(TEXT("Fog toggle enables sensor attenuation"),Component->IsFogEnabled());
+    TestEqual(TEXT("Component applies fog range"),Component->GetFogLimitedSensorRangeMeters(TEXT("camera"),100.f),
+        FPortFogState::DefaultVisibilityMeters);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPortRainStateTest,"PortSim.Environment.RainState",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FPortRainStateTest::RunTest(const FString& Parameters)
+{
+    FPortRainState Rain;
+    TestFalse(TEXT("Rain defaults OFF to preserve existing scenarios"),Rain.bRainEnabled);
+    TestEqual(TEXT("OFF preserves camera range"),Rain.SensorRangeScale(TEXT("spreader_camera")),1.f);
+    TestEqual(TEXT("OFF preserves dry traction"),Rain.WetTractionScale(),1.f);
+    Rain.bRainEnabled=true;
+    TestTrue(TEXT("Rain reduces camera range"),Rain.SensorRangeScale(TEXT("spreader_camera"))<1.f);
+    TestTrue(TEXT("Rain reduces LiDAR range"),Rain.SensorRangeScale(TEXT("front_lidar"))<1.f);
+    TestEqual(TEXT("Rain does not alter encoders"),Rain.SensorRangeScale(TEXT("hoist_encoder")),1.f);
+    TestTrue(TEXT("Wet surface reduces traction"),Rain.WetTractionScale()<1.f);
+    auto* Component=NewObject<UPortEnvironmentComponent>();
+    Component->ToggleRain();
+    TestTrue(TEXT("Rain toggle enables operational effects"),Component->IsRainEnabled());
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPortEnvironmentUISettingsTest,"PortSim.Environment.UISettings",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FPortEnvironmentUISettingsTest::RunTest(const FString& Parameters)
+{
+    auto* Component=NewObject<UPortEnvironmentComponent>();
+    Component->SetWindSpeedMetersPerSecond(6.f);
+    TestEqual(TEXT("Wind slider sets mean speed"),Component->GetWindSpeedMetersPerSecond(),6.f);
+    Component->SetSeaIntensity(.75f);
+    TestTrue(TEXT("Sea slider round trips"),FMath::IsNearlyEqual(Component->GetSeaIntensity(),.75f));
+    Component->SetRainIntensity(.5f);
+    TestTrue(TEXT("Rain slider round trips"),FMath::IsNearlyEqual(Component->GetRainIntensity(),.5f));
+    Component->SetFogIntensity(.8f);
+    TestTrue(TEXT("Fog slider round trips logarithmically"),FMath::IsNearlyEqual(Component->GetFogIntensity(),.8f,.0001f));
+    Component->SetWindEnabled(false); Component->SetSeaMotionEnabled(false);
+    Component->SetRainEnabled(true); Component->SetFogEnabled(true);
+    TestFalse(TEXT("Wind UI OFF"),Component->IsWindEnabled());
+    TestFalse(TEXT("Sea UI OFF"),Component->IsSeaMotionEnabled());
+    TestTrue(TEXT("Rain UI ON"),Component->IsRainEnabled());
+    TestTrue(TEXT("Fog UI ON"),Component->IsFogEnabled());
+    return true;
+}
 #endif

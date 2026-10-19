@@ -281,6 +281,62 @@ UPortEnvironmentComponent::UPortEnvironmentComponent()
     PrimaryComponentTick.bCanEverTick=false;
 }
 
+void UPortEnvironmentComponent::SetWindSpeedMetersPerSecond(float Speed)
+{
+    if(!FMath::IsFinite(Speed)) return;
+    Wind.WindSpeedMetersPerSecond=Wind.TargetWindSpeedMetersPerSecond=
+        FMath::Clamp(Speed,FPortWindState::MinimumSpeed,FPortWindState::MaximumSpeed);
+    // A UI-selected mean remains stable; gusts still follow their independent schedule.
+    Wind.SecondsUntilTarget=TNumericLimits<double>::Max();
+}
+
+void UPortEnvironmentComponent::SetSeaIntensity(float Intensity)
+{
+    Intensity=FMath::Clamp(Intensity,0.f,1.f);
+    Sea.WaveHeightMeters=FMath::Lerp(FPortSeaState::MinimumWaveHeightMeters,FPortSeaState::MaximumWaveHeightMeters,Intensity);
+    Sea.SwellHeightMeters=FMath::Lerp(FPortSeaState::MinimumSwellHeightMeters,FPortSeaState::MaximumSwellHeightMeters,Intensity);
+}
+
+float UPortEnvironmentComponent::GetSeaIntensity() const
+{
+    const float Wave=(Sea.WaveHeightMeters-FPortSeaState::MinimumWaveHeightMeters)/
+        (FPortSeaState::MaximumWaveHeightMeters-FPortSeaState::MinimumWaveHeightMeters);
+    const float Swell=(Sea.SwellHeightMeters-FPortSeaState::MinimumSwellHeightMeters)/
+        (FPortSeaState::MaximumSwellHeightMeters-FPortSeaState::MinimumSwellHeightMeters);
+    return FMath::Clamp((Wave+Swell)*.5f,0.f,1.f);
+}
+
+void UPortEnvironmentComponent::SetFogIntensity(float Intensity)
+{
+    Intensity=FMath::Clamp(Intensity,0.f,1.f);
+    Fog.VisibilityMeters=FPortFogState::MaximumVisibilityMeters*FMath::Pow(
+        FPortFogState::MinimumVisibilityMeters/FPortFogState::MaximumVisibilityMeters,Intensity);
+}
+
+float UPortEnvironmentComponent::GetFogIntensity() const
+{
+    return FMath::Clamp(FMath::Loge(FPortFogState::MaximumVisibilityMeters/Fog.VisibilityMeters)/
+        FMath::Loge(FPortFogState::MaximumVisibilityMeters/FPortFogState::MinimumVisibilityMeters),0.f,1.f);
+}
+
+void UPortEnvironmentComponent::SetFogVisibilityMeters(float VisibilityMeters)
+{
+    if(FMath::IsFinite(VisibilityMeters))
+        Fog.VisibilityMeters=FMath::Clamp(VisibilityMeters,FPortFogState::MinimumVisibilityMeters,FPortFogState::MaximumVisibilityMeters);
+}
+
+void UPortEnvironmentComponent::SetRainIntensity(float Intensity)
+{
+    Intensity=FMath::Clamp(Intensity,0.f,1.f);
+    Rain.RainfallMmPerHour=FMath::Lerp(FPortRainState::MinimumRainfallMmPerHour,FPortRainState::MaximumRainfallMmPerHour,Intensity);
+}
+
+void UPortEnvironmentComponent::SetRainfallMmPerHour(float RainfallMmPerHour)
+{
+    if(FMath::IsFinite(RainfallMmPerHour))
+        Rain.RainfallMmPerHour=FMath::Clamp(RainfallMmPerHour,FPortRainState::MinimumRainfallMmPerHour,FPortRainState::MaximumRainfallMmPerHour);
+}
+
 void UPortEnvironmentComponent::BeginPlay()
 {
     Super::BeginPlay();
@@ -288,10 +344,23 @@ void UPortEnvironmentComponent::BeginPlay()
     FParse::Value(FCommandLine::Get(),TEXT("PortSimEnvironmentSeed="),Seed);
     Wind.Initialize(Seed);
     Sea.Initialize(Seed);
+    float FogVisibility=Fog.VisibilityMeters;
+    if(FParse::Value(FCommandLine::Get(),TEXT("PortSimFogVisibility="),FogVisibility) && FMath::IsFinite(FogVisibility))
+        Fog.VisibilityMeters=FMath::Clamp(FogVisibility,FPortFogState::MinimumVisibilityMeters,FPortFogState::MaximumVisibilityMeters);
+    Fog.bFogEnabled=FParse::Param(FCommandLine::Get(),TEXT("PortSimFog"));
+    float Rainfall=Rain.RainfallMmPerHour;
+    if(FParse::Value(FCommandLine::Get(),TEXT("PortSimRainRate="),Rainfall) && FMath::IsFinite(Rainfall))
+        Rain.RainfallMmPerHour=FMath::Clamp(Rainfall,FPortRainState::MinimumRainfallMmPerHour,FPortRainState::MaximumRainfallMmPerHour);
+    Rain.bRainEnabled=FParse::Param(FCommandLine::Get(),TEXT("PortSimRain"));
     LastReportedGustCount=Wind.GustCount;
     UE_LOG(LogTemp,Display,TEXT("PORTSIM_SEA_STATE: seed=%d Hs_m=%.3f wave_m=%.3f wave_period_s=%.3f swell_m=%.3f swell_period_s=%.3f"),
         Seed,Sea.SignificantWaveHeightMeters(),Sea.WaveHeightMeters,Sea.WavePeriodSeconds,
         Sea.SwellHeightMeters,Sea.SwellPeriodSeconds);
+    UE_LOG(LogTemp,Display,TEXT("PORTSIM_FOG_STATE: enabled=%d visibility_m=%.1f sensor_only=1"),
+        Fog.bFogEnabled,Fog.VisibilityMeters);
+    UE_LOG(LogTemp,Display,TEXT("PORTSIM_RAIN_STATE: enabled=%d rate_mmph=%.1f camera_scale=%.3f lidar_scale=%.3f traction_scale=%.3f visual=0"),
+        Rain.bRainEnabled,Rain.RainfallMmPerHour,Rain.SensorRangeScale(TEXT("camera")),
+        Rain.SensorRangeScale(TEXT("lidar")),Rain.WetTractionScale());
 }
 
 void UPortEnvironmentComponent::AdvanceEnvironment(float SimulationSeconds)

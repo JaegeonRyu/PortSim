@@ -444,6 +444,7 @@ bool APortWorkingCrane::ValidateOperation(FString& Error) const
     // remains inside the reservation.
     const FVector ControlledPosition=Head+SuspendedOffset;
     double Margin=STSProfile.Pickup.AcquisitionRadius;
+    double VerticalMargin=1.;
     if(STSProfile.bReady)
     {
         FSTSDynamicsParameters WindConfig=STSProfile.Dynamics;
@@ -457,12 +458,18 @@ bool APortWorkingCrane::ValidateOperation(FString& Error) const
         const double TrolleyStopping=FMath::Square(double(STSProfile.TrolleySpeed))/(2.*STSProfile.TrolleyAcceleration);
         const double GantryStopping=FMath::Square(double(STSProfile.GantrySpeed))/(2.*STSProfile.GantryAcceleration);
         Margin+=FMath::Max(TrolleyStopping,GantryStopping);
+        // SafeZ is a transfer target rather than a hard mechanical travel stop.
+        // A hoist that reaches it with upward velocity must decelerate before it
+        // can descend toward the next target. Reserve the same physically bounded
+        // stopping distance used for the horizontal axes so this normal transient
+        // is not reported as a terminal-wide failure at accelerated playback.
+        VerticalMargin+=FMath::Square(double(STSProfile.EmptyHoistSpeed))/(2.*STSProfile.HoistAcceleration);
     }
     if (ControlledPosition.X<FMath::Min3(A.X,B.X,JobStartHead.X)-Margin || ControlledPosition.X>FMath::Max3(A.X,B.X,JobStartHead.X)+Margin ||
-        ControlledPosition.Y<FMath::Min3(A.Y,B.Y,JobStartHead.Y)-Margin || ControlledPosition.Y>FMath::Max3(A.Y,B.Y,JobStartHead.Y)+Margin || Head.Z>SafeZ+1)
+        ControlledPosition.Y<FMath::Min3(A.Y,B.Y,JobStartHead.Y)-Margin || ControlledPosition.Y>FMath::Max3(A.Y,B.Y,JobStartHead.Y)+Margin || Head.Z>SafeZ+VerticalMargin)
     {
-        Error=FString::Printf(TEXT("Crane left its reserved envelope: stage=%d head=%s suspended=%s source=%s destination=%s start=%s margin=%.2f"),
-            Stage,*Head.ToCompactString(),*ControlledPosition.ToCompactString(),*A.ToCompactString(),*B.ToCompactString(),*JobStartHead.ToCompactString(),Margin);
+        Error=FString::Printf(TEXT("Crane left its reserved envelope: stage=%d head=%s suspended=%s source=%s destination=%s start=%s margin=%.2f vertical_margin=%.2f"),
+            Stage,*Head.ToCompactString(),*ControlledPosition.ToCompactString(),*A.ToCompactString(),*B.ToCompactString(),*JobStartHead.ToCompactString(),Margin,VerticalMargin);
         return false;
     }
     if (bCarrying && (CargoActor->GetAttachParentActor()!=this || CargoActor->GetBody()->IsSimulatingPhysics() ||
