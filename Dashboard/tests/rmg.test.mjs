@@ -2,13 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
+import {renderFrictionDetails} from '../public/friction-view.mjs';
 
 // Exercise rendering with an RMG snapshot before a live UE session is available.
 // This is a render-function test, not a substitute for live transport validation.
 const settings=JSON.parse(readFileSync(new URL('../../PortSim/Config/RMG_Simulation.json',import.meta.url),'utf8'));
-const source=readFileSync(new URL('../public/app.mjs',import.meta.url),'utf8').replace(/^\uFEFF?import [^\n]*\n/,'').replace(/\ninit\(\);\s*$/,'');
+const source=readFileSync(new URL('../public/app.mjs',import.meta.url),'utf8').replace(/^\uFEFF?import [^\n]*\n/gm,'').replace(/\ninit\(\);\s*$/,'');
 function context(){
- const c=vm.createContext({document:{querySelectorAll:()=>[],addEventListener:()=>{}},localStorage:{getItem:()=>null},settingsFixture:settings});
+ const c=vm.createContext({document:{querySelectorAll:()=>[],addEventListener:()=>{}},localStorage:{getItem:()=>null},settingsFixture:settings,renderFrictionDetails});
  vm.runInContext(source,c);
  vm.runInContext(`state={actors:[{id:'rmg-1',type:'rmg',name:'RMG-01',stage:5,busy:true,observation:{active:true,valid:true,stack_profile_valid:false,crane_clear:true},pickup:{phase:'complete',corners:[]},applied_crane_profile:{reference:settingsFixture.reference,simulation_assumptions:settingsFixture},mounted_sensors:settingsFixture.sensor_mounts.map(m=>({...m,world_position_m:m.position_m,mount_position_m:m.position_m,forward:[0,0,-1],rays:[],reference:m}))}]};selected='rmg-1';reference={sensors:[{id:'S01',key:'sts-only',name:'STS_ONLY_SENTINEL'}]};`,c);
  return c;

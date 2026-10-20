@@ -95,6 +95,11 @@ public:
     void SetWindVelocity(FVector WorldVelocityMetersPerSecond);
     void SetFogVisibilityMeters(float VisibilityMeters);
     void SetRainState(const FPortRainState& State);
+    void SetSurfaceConditions(const FPortSurfaceState& State,const FPortFrictionSettings& Settings,UPhysicalMaterial* Material);
+    FPortSurfaceState Surface;
+    FPortFrictionSettings Friction;
+    UPROPERTY() TObjectPtr<UPhysicalMaterial> SurfaceMaterial;
+    int32 SurfaceActorCount=-1;
     void SetVesselMotions(const TArray<FPortVesselMotion>& Motions,const TArray<FVector>& BasePivots,const FPortSeaState& SeaState);
     bool MoveVehicle(APortAGVActor* Vehicle,FVector Target,float Dt);
     void Advance(float Dt,bool Paused);

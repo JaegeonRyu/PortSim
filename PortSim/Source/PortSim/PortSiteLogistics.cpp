@@ -29,6 +29,7 @@
 #include "EngineUtils.h"
 #include "PhysicsEngine/PhysicsSettings.h"
 #include "PhysicsEngine/BodyInstance.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Physics/Experimental/PhysScene_Chaos.h"
 
 namespace SiteLogistics
@@ -213,11 +214,36 @@ APortSiteLogistics::APortSiteLogistics()
     bCargoAlignedHandover=FParse::Param(FCommandLine::Get(),TEXT("PortSimCargoAlignedHandover"));
 }
 
+void APortSiteLogistics::SetSurfaceConditions(const FPortSurfaceState& State,const FPortFrictionSettings& Settings,UPhysicalMaterial* Material)
+{
+    const int32 Count=TrafficVehicles.Num()+Equipment.Num()+ShipContainers.Num()+PlacedContainers.Num();
+    if(!Material) return;
+    const bool BindMaterial=SurfaceMaterial!=Material || SurfaceActorCount!=Count;
+    SurfaceActorCount=Count;
+    Surface=State; Friction=Settings; SurfaceMaterial=Material;
+    auto Apply=[&](AActor* Actor)
+    {
+        if(!IsValid(Actor)) return;
+        TInlineComponentArray<UPrimitiveComponent*> Parts(Actor);
+        for(auto* Part:Parts) if(Part->GetCollisionEnabled()!=ECollisionEnabled::NoCollision) Part->SetPhysMaterialOverride(Material);
+    };
+    for(const auto& Vehicle:TrafficVehicles) if(IsValid(Vehicle))
+    { Vehicle->Surface=State; Vehicle->Friction=Settings; if(BindMaterial) Apply(Vehicle); }
+    for(const auto& Crane:Equipment) if(IsValid(Crane))
+    { Crane->Surface=State; Crane->Friction=Settings; if(BindMaterial) Apply(Crane); }
+    if(BindMaterial)
+    {
+        for(const auto& Cargo:ShipContainers) Apply(Cargo);
+        for(const auto& Cargo:PlacedContainers) Apply(Cargo);
+    }
+}
+
 void APortSiteLogistics::SetWindVelocity(FVector WorldVelocityMetersPerSecond)
 {
     WindVelocityMetersPerSecond=WorldVelocityMetersPerSecond.ContainsNaN()?FVector::ZeroVector:
         WorldVelocityMetersPerSecond.GetClampedToMaxSize(50.f);
     for(const auto& Crane:Equipment) if(IsValid(Crane)) Crane->SetWindVelocity(WindVelocityMetersPerSecond);
+    for(const auto& Vehicle:TrafficVehicles) if(IsValid(Vehicle)) Vehicle->WindVelocity=WindVelocityMetersPerSecond;
 }
 
 void APortSiteLogistics::SetFogVisibilityMeters(float VisibilityMeters)
@@ -231,9 +257,7 @@ void APortSiteLogistics::SetRainState(const FPortRainState& State)
     RainState=State;
     const float CameraScale=RainState.SensorRangeScale(TEXT("camera"));
     const float LiDARScale=RainState.SensorRangeScale(TEXT("lidar"));
-    const float TractionScale=RainState.WetTractionScale();
     for(const auto& Crane:Equipment) if(IsValid(Crane)) Crane->SetRainSensorRangeScales(CameraScale,LiDARScale);
-    for(const auto& Vehicle:TrafficVehicles) if(IsValid(Vehicle)) Vehicle->SetWetTractionScale(TractionScale);
 }
 
 void APortSiteLogistics::SetVesselMotions(const TArray<FPortVesselMotion>& Motions,const TArray<FVector>& BasePivots,const FPortSeaState& SeaState)
@@ -1723,7 +1747,6 @@ void APortSiteLogistics::BeginTrafficFrame()
 
 bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float Dt)
 {
-    Vehicle->SetWetTractionScale(RainState.WetTractionScale());
     if (!bTrafficIndexReady) BeginTrafficFrame();
     const int32 FleetIndex=Vehicles.IndexOfByKey(Vehicle);
     if (Jobs.IsValidIndex(FleetIndex))
@@ -1780,9 +1803,9 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
                 // Brake before the tangent point, including node acceptance.
                 // Waiting for a heading error allowed a 6-7 m/s vehicle to
                 // enter the complete arc before it could slow to 2.5 m/s.
-                const float Curve=AGVReference::ReferenceCurveSpeedCmPerSecond;
+                const float Curve=Vehicle->CurveSpeedCmPerSecond();
                 ApproachLimit=FMath::Min(ApproachLimit,FMath::Sqrt(Curve*Curve+
-                    2*Vehicle->AccelerationCmPerSecondSquared()*FMath::Max(0.f,DistanceToCorner-100.f)));
+                    2*Vehicle->BrakingCmPerSecondSquared()*FMath::Max(0.f,DistanceToCorner-100.f)));
                 break;
             }
             From=Point;
@@ -1793,7 +1816,7 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
         if(EnvironmentalLiDARRangeCm<MAX_flt)
         {
             const float LocalizationAllowance=2.f*AGVReference::PositionAccuracyCm;
-            const float SensorSafeSpeed=FMath::Sqrt(2.f*Vehicle->AccelerationCmPerSecondSquared()*
+            const float SensorSafeSpeed=FMath::Sqrt(2.f*Vehicle->BrakingCmPerSecondSquared()*
                 FMath::Max(0.f,EnvironmentalLiDARRangeCm-LocalizationAllowance));
             ApproachLimit=FMath::Min(ApproachLimit,SensorSafeSpeed);
         }
@@ -1887,7 +1910,7 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
     const float FrontDistance=Reversing?BehindDistance:AheadDistance;
     const float RearDistance=Reversing?AheadDistance:BehindDistance;
     const float LiDARSafetyDistance=AGVReference::DynamicLiDARSafetyDistance(
-        Vehicle->Speed,Vehicle->AccelerationCmPerSecondSquared());
+        Vehicle->Speed,Vehicle->BrakingCmPerSecondSquared());
     const float LeadingDistance=Reversing?RearDistance:FrontDistance;
     // If visibility degrades while travelling above the new sensor-safe speed,
     // command one controlled stop before resuming at the visibility-limited rate.

@@ -455,8 +455,8 @@ bool APortWorkingCrane::ValidateOperation(FString& Error) const
         // A loaded trolley can enter the end of the reserved segment at full
         // reference speed. Include its bounded braking distance as well as the
         // wind deflection instead of treating controlled deceleration as escape.
-        const double TrolleyStopping=FMath::Square(double(STSProfile.TrolleySpeed))/(2.*STSProfile.TrolleyAcceleration);
-        const double GantryStopping=FMath::Square(double(STSProfile.GantrySpeed))/(2.*STSProfile.GantryAcceleration);
+        const double TrolleyStopping=FMath::Square(double(STSProfile.TrolleySpeed))/(2.*FMath::Max(.001,RailAccelerationLimit(STSProfile.TrolleyAcceleration)));
+        const double GantryStopping=FMath::Square(double(STSProfile.GantrySpeed))/(2.*FMath::Max(.001,RailAccelerationLimit(STSProfile.GantryAcceleration)));
         Margin+=FMath::Max(TrolleyStopping,GantryStopping);
         // SafeZ is a transfer target rather than a hard mechanical travel stop.
         // A hoist that reaches it with upward velocity must decelerate before it

@@ -236,6 +236,14 @@ void APortWorkingCrane::SampleSTS(bool Force)
     }
 }
 
+double APortWorkingCrane::RailAccelerationLimit(double RequestedCmps2) const
+{
+    // Wheel/rail adhesion limits horizontal travel, not hoist cable tension.
+    const double Available=100*PortFriction::Gravity*FMath::Max(0.,
+        double(Friction.Utilization*Friction.Rail.Static(Surface)-Friction.RailRollingResistance));
+    return FMath::Min(RequestedCmps2,Available);
+}
+
 bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
 {
     PortSimPerformance::FScope Timing(TEXT("crane_dynamics"));
@@ -255,7 +263,9 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
     C.Wind=Orientation.UnrotateVector(WindVelocityMetersPerSecond);
     Hoist=FMath::Min(Hoist,float(C.MotorMaxRPM*2*PI/60*C.DrumRadius/(C.Parts*C.GearRatio)*100));
     const FVector Limits(STSProfile.TrolleySpeed,STSProfile.GantrySpeed,Hoist);
-    const FVector Accelerations(STSProfile.TrolleyAcceleration,STSProfile.GantryAcceleration,STSProfile.HoistAcceleration);
+    const FVector Accelerations(RailAccelerationLimit(STSProfile.TrolleyAcceleration),RailAccelerationLimit(STSProfile.GantryAcceleration),STSProfile.HoistAcceleration);
+    if(Accelerations.X<=0 || Accelerations.Y<=0)
+    { Stop(TEXT("Insufficient wheel/rail adhesion for automatic travel")); return false; }
     // True mass/CoG below belong only to the actuator/suspension plant. Position feedback comes from sensors.
     const double Payload=bCarrying?CargoActor->MassKg:0, Mass=STSProfile.SpreaderMassKg+Payload;
     const FVector MeasuredPosition=Local(Observation.SpreaderPosition);
@@ -273,8 +283,8 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
     double SensorSwayAngle=PI*.5;
     for(const auto& Mount:STSProfile.Dynamics.Mounts) if(Mount.Key==TEXT("sway_sensor") && Mount.Maximum>0)
         SensorSwayAngle=FMath::Min(SensorSwayAngle,FMath::DegreesToRadians(Mount.Maximum));
-    const double BrakingStroke=FMath::Max(FMath::Square(double(Limits.X))/(2*Accelerations.X),
-        FMath::Square(double(Limits.Y))/(2*Accelerations.Y));
+    const double BrakingStroke=FMath::Max(FMath::Square(double(Limits.X))/(2*FMath::Max(.001,Accelerations.X)),
+        FMath::Square(double(Limits.Y))/(2*FMath::Max(.001,Accelerations.Y)));
     const double SwingStroke=(.5*STSProfile.Pickup.AcquisitionRadius+BrakingStroke)*.01;
     const FVector CoG=bCarrying?CargoActor->CoGOffsetCm*.01*(Payload/Mass):FVector::ZeroVector;
     // Equal slices avoid a nanosecond remainder from float tick durations.

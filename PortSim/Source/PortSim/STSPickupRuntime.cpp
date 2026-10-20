@@ -4,6 +4,7 @@
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "SpreaderTelescope.h"
+#include "PortEnvironmentComponent.h"
 
 void APortWorkingCrane::SamplePickupGeometry()
 {
@@ -34,6 +35,17 @@ void APortWorkingCrane::SamplePickupGeometry()
     const FQuat CornerRotation=FRotator(CargoAngles.Pitch,EquivalentCargoYaw,CargoAngles.Roll).Quaternion();
     O.RelativeYawDegrees=FMath::FindDeltaAngleDegrees(EquivalentCargoYaw,SpreaderRotation.Rotator().Yaw);
     O.TargetTiltDegrees=FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(CargoActor->GetActorUpVector().Z,-1.,1.)));
+    // Pre-lock seating has limited downforce while the hoist supports most weight.
+    // Once mechanically coupled, friction must never replace four-lock retention.
+    const double Normal=STSProfile.SpreaderMassKg*PortFriction::Gravity*Friction.SeatingWeightFraction*
+        FMath::Max(0.,FMath::Cos(FMath::DegreesToRadians(double(O.TargetTiltDegrees))));
+    const double WindN=FPortWindAerodynamics::DragForceNewtons(WindVelocityMetersPerSecond,
+        O.SpreaderVelocity,SpreaderRotation,FVector(2.44,TelescopeLengthCm*.01,.6),1.2).Size2D();
+    SeatingFrictionCapacityN=Friction.Utilization*Friction.Steel.Static(Surface)*Normal;
+    SeatingFrictionDemandN=PortFriction::SeatingDemand(STSProfile.SpreaderMassKg,
+        (O.SpreaderVelocity-O.CargoVelocity).Size2D()*.01,C.CornerTolerance*.01,
+        O.CargoAcceleration.Size2D()*.01,O.TargetTiltDegrees,WindN);
+    bSeatingFrictionOK=PortFriction::CanSeat(SeatingFrictionDemandN,SeatingFrictionCapacityN,bCarrying);
     bool All=true;
     for(int32 I=0;I<4;++I)
     {
@@ -41,7 +53,7 @@ void APortWorkingCrane::SamplePickupGeometry()
         const FVector CargoCorner((I&1)?CargoHalfWidth:-CargoHalfWidth,(I&2)?CargoHalfLength:-CargoHalfLength,0);
         const FVector RotationGap=SpreaderRotation.RotateVector(SpreaderCorner)-CornerRotation.RotateVector(CargoCorner)-FVector(0,0,154.5);
         const FVector ActualError=Orientation.UnrotateVector(HeadPosition()-CargoActor->GetActorLocation()+RotationGap);
-        PhysicalSeating[I]=ActualError.Size2D()<=C.CornerTolerance && FMath::Abs(ActualError.Z)<=C.VerticalTolerance && O.TargetTiltDegrees<=C.TiltTolerance;
+        PhysicalSeating[I]=bSeatingFrictionOK && ActualError.Size2D()<=C.CornerTolerance && FMath::Abs(ActualError.Z)<=C.VerticalTolerance && O.TargetTiltDegrees<=C.TiltTolerance;
         O.CornerError[I]=Orientation.UnrotateVector(O.SpreaderPosition-O.CargoPosition+RotationGap);
         int32 Missing=INDEX_NONE;FParse::Value(FCommandLine::Get(),bSTS?TEXT("PortSimSTSSeatFault="):TEXT("PortSimRMGSeatFault="),Missing);
         O.CornerSeated[I]=PhysicalSeating[I]&&I!=Missing; All &= O.CornerSeated[I];

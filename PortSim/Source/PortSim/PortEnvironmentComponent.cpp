@@ -2,6 +2,10 @@
 #include "Misc/CommandLine.h"
 #include "Misc/Guid.h"
 #include "Misc/Parse.h"
+#include "Misc/Paths.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "UObject/Class.h"
+#include "Chaos/ChaosEngineInterface.h"
 
 namespace PortSea
 {
@@ -337,6 +341,66 @@ void UPortEnvironmentComponent::SetRainfallMmPerHour(float RainfallMmPerHour)
         Rain.RainfallMmPerHour=FMath::Clamp(RainfallMmPerHour,FPortRainState::MinimumRainfallMmPerHour,FPortRainState::MaximumRainfallMmPerHour);
 }
 
+void UPortEnvironmentComponent::SetSnowIntensity(float Intensity)
+{ if(FMath::IsFinite(Intensity)) SnowIntensity=FMath::Clamp(Intensity,0.f,1.f); }
+
+void UPortEnvironmentComponent::SetIceIntensity(float Intensity)
+{ if(FMath::IsFinite(Intensity)) IceIntensity=FMath::Clamp(Intensity,0.f,1.f); }
+
+FPortSurfaceState UPortEnvironmentComponent::GetSurfaceConditions() const
+{
+    auto Result=Surface; Result.Sanitize(); return Result;
+}
+
+float UPortEnvironmentComponent::GetSnowfallMmPerHour() const
+{
+    return FMath::Clamp(SnowIntensity,0.f,1.f)*FrictionSettings.SurfaceDynamics.MaximumSnowfallMmPerHour;
+}
+
+void UPortEnvironmentComponent::SetSnowfallMmPerHour(float Rate)
+{
+    if(FMath::IsFinite(Rate)) SetSnowIntensity(Rate/FMath::Max(1.f,FrictionSettings.SurfaceDynamics.MaximumSnowfallMmPerHour));
+}
+
+void UPortEnvironmentComponent::SynchronizeSurfaceInputs()
+{
+    FrictionSettings.Sanitize(); Surface.Sanitize();
+    if(!bSurfaceInitialized || Surface.Wetness!=PublishedSurface.Wetness ||
+        Surface.Snow!=PublishedSurface.Snow || Surface.Ice!=PublishedSurface.Ice)
+    {
+        Accumulation.Initialize(Surface,FrictionSettings.SurfaceDynamics);
+        bSurfaceInitialized=true;
+    }
+    PublishSurface();
+}
+
+void UPortEnvironmentComponent::PublishSurface()
+{
+    Surface=Accumulation.Sample(FrictionSettings.SurfaceDynamics);
+    PublishedSurface=Surface;
+}
+
+void UPortEnvironmentComponent::SetWaterFilmMm(float Mm)
+{
+    if(!FMath::IsFinite(Mm)) return;
+    SynchronizeSurfaceInputs();
+    Accumulation.WaterMm=FMath::Clamp(double(Mm),0.,double(FrictionSettings.SurfaceDynamics.MaxWaterFilmMm));
+    Accumulation.WaterRate=0; PublishSurface();
+}
+
+void UPortEnvironmentComponent::SetSnowDepthMm(float Mm)
+{
+    if(!FMath::IsFinite(Mm)) return;
+    SynchronizeSurfaceInputs();
+    Accumulation.SnowMm=FMath::Clamp(double(Mm),0.,double(FrictionSettings.SurfaceDynamics.MaxSnowDepthMm));
+    Accumulation.SnowRate=0; PublishSurface();
+}
+
+void UPortEnvironmentComponent::SetFrictionSettings(const FPortFrictionSettings& Settings)
+{
+    FrictionSettings=Settings; FrictionSettings.Sanitize(); GetContactMaterial();
+}
+
 void UPortEnvironmentComponent::BeginPlay()
 {
     Super::BeginPlay();
@@ -352,19 +416,71 @@ void UPortEnvironmentComponent::BeginPlay()
     if(FParse::Value(FCommandLine::Get(),TEXT("PortSimRainRate="),Rainfall) && FMath::IsFinite(Rainfall))
         Rain.RainfallMmPerHour=FMath::Clamp(Rainfall,FPortRainState::MinimumRainfallMmPerHour,FPortRainState::MaximumRainfallMmPerHour);
     Rain.bRainEnabled=FParse::Param(FCommandLine::Get(),TEXT("PortSimRain"));
+    if(FParse::Param(FCommandLine::Get(),TEXT("PortSimSnowWeather"))) SetSnowEnabled(true);
+    if(FParse::Param(FCommandLine::Get(),TEXT("PortSimIcing"))) SetIceEnabled(true);
+    float WinterIntensity=SnowIntensity;
+    if(FParse::Value(FCommandLine::Get(),TEXT("PortSimSnowIntensity="),WinterIntensity)) SetSnowIntensity(WinterIntensity);
+    WinterIntensity=IceIntensity;
+    if(FParse::Value(FCommandLine::Get(),TEXT("PortSimIceIntensity="),WinterIntensity)) SetIceIntensity(WinterIntensity);
+    FString FrictionPath=FPaths::ProjectConfigDir()/TEXT("Weather_Friction.json");
+    FParse::Value(FCommandLine::Get(),TEXT("PortSimFrictionConfig="),FrictionPath);
+    if(!FrictionSettings.Load(FrictionPath)) UE_LOG(LogTemp,Warning,TEXT("Friction config missing/invalid: %s; using assumed defaults"),*FrictionPath);
+    float SnowfallRate=GetSnowfallMmPerHour();
+    if(FParse::Value(FCommandLine::Get(),TEXT("PortSimSnowRate="),SnowfallRate)) SetSnowfallMmPerHour(SnowfallRate);
+    FParse::Value(FCommandLine::Get(),TEXT("PortSimWetness="),Surface.Wetness);
+    FParse::Value(FCommandLine::Get(),TEXT("PortSimSnow="),Surface.Snow);
+    FParse::Value(FCommandLine::Get(),TEXT("PortSimIce="),Surface.Ice);
+    SetSurfaceConditions(Surface.Wetness,Surface.Snow,Surface.Ice);
     LastReportedGustCount=Wind.GustCount;
     UE_LOG(LogTemp,Display,TEXT("PORTSIM_SEA_STATE: seed=%d Hs_m=%.3f wave_m=%.3f wave_period_s=%.3f swell_m=%.3f swell_period_s=%.3f"),
         Seed,Sea.SignificantWaveHeightMeters(),Sea.WaveHeightMeters,Sea.WavePeriodSeconds,
         Sea.SwellHeightMeters,Sea.SwellPeriodSeconds);
     UE_LOG(LogTemp,Display,TEXT("PORTSIM_FOG_STATE: enabled=%d visibility_m=%.1f sensor_only=1"),
         Fog.bFogEnabled,Fog.VisibilityMeters);
-    UE_LOG(LogTemp,Display,TEXT("PORTSIM_RAIN_STATE: enabled=%d rate_mmph=%.1f camera_scale=%.3f lidar_scale=%.3f traction_scale=%.3f visual=0"),
+    UE_LOG(LogTemp,Display,TEXT("PORTSIM_RAIN_STATE: enabled=%d rate_mmph=%.1f camera_scale=%.3f lidar_scale=%.3f surface_wetness=%.3f visual=0"),
         Rain.bRainEnabled,Rain.RainfallMmPerHour,Rain.SensorRangeScale(TEXT("camera")),
-        Rain.SensorRangeScale(TEXT("lidar")),Rain.WetTractionScale());
+        Rain.SensorRangeScale(TEXT("lidar")),GetSurfaceConditions().Wetness);
+}
+
+void UPortEnvironmentComponent::SetSurfaceConditions(float Wetness,float Snow,float Ice)
+{
+    Surface.Wetness=Wetness; Surface.Snow=Snow; Surface.Ice=Ice; Surface.Sanitize(); FrictionSettings.Sanitize();
+    Accumulation.Initialize(Surface,FrictionSettings.SurfaceDynamics); bSurfaceInitialized=true; PublishSurface();
+    GetContactMaterial();
+}
+
+UPhysicalMaterial* UPortEnvironmentComponent::GetContactMaterial()
+{
+    SynchronizeSurfaceInputs();
+    const auto Effective=GetSurfaceConditions();
+    const float StaticMu=FrictionSettings.Steel.Static(Effective),KineticMu=FrictionSettings.Steel.Kinetic(Effective);
+    // Reuse until weather or coefficients change, even while the operation is paused.
+    if(ContactMaterial && MaterialSurface.Wetness==Effective.Wetness && MaterialSurface.Snow==Effective.Snow &&
+        MaterialSurface.Ice==Effective.Ice && ContactMaterial->StaticFriction==StaticMu && ContactMaterial->Friction==KineticMu &&
+        FPortFrictionSettings::StaticStruct()->CompareScriptStruct(&FrictionSettings,&MaterialSettings,0))
+        return ContactMaterial;
+    const bool SettingsChanged=!FPortFrictionSettings::StaticStruct()->CompareScriptStruct(&FrictionSettings,&MaterialSettings,0);
+    MaterialSurface=Effective; MaterialSettings=FrictionSettings;
+    const bool NewMaterial=!ContactMaterial;
+    if(NewMaterial) ContactMaterial=NewObject<UPhysicalMaterial>(this);
+    ContactMaterial->StaticFriction=StaticMu;
+    ContactMaterial->Friction=KineticMu;
+    ContactMaterial->bOverrideFrictionCombineMode=true;
+    ContactMaterial->FrictionCombineMode=EFrictionCombineMode::Min;
+    // UE's runtime material API updates the shared Chaos handle. No body rebinding
+    // or new UObject per frame is needed while the film drains continuously.
+    FChaosEngineInterface::UpdateMaterial(ContactMaterial->GetPhysicsMaterial(),ContactMaterial);
+    if(NewMaterial || SettingsChanged) UE_LOG(LogTemp,Display,TEXT("PORTSIM_SURFACE: wet=%.3f snow=%.3f ice=%.3f tire_mu=%.3f rail_mu=%.3f steel_mu=%.3f (assumed)"),
+        Effective.Wetness,Effective.Snow,Effective.Ice,FrictionSettings.Tire.Static(Effective),FrictionSettings.Rail.Static(Effective),StaticMu);
+    return ContactMaterial;
 }
 
 void UPortEnvironmentComponent::AdvanceEnvironment(float SimulationSeconds)
 {
+    SynchronizeSurfaceInputs();
+    Accumulation.Advance(FrictionSettings.SurfaceDynamics,Rain.bRainEnabled?Rain.RainfallMmPerHour:0,
+        bSnowEnabled?GetSnowfallMmPerHour():0,bIceEnabled?FMath::Clamp(IceIntensity,0.f,1.f):0,SimulationSeconds);
+    PublishSurface();
     Wind.Advance(SimulationSeconds);
     Sea.Advance(SimulationSeconds);
     if(Wind.GustCount!=LastReportedGustCount)

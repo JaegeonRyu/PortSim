@@ -10,7 +10,8 @@ const files = new Map([
   ['/', ['index.html', 'text/html']],
   ['/style.css', ['style.css', 'text/css']],
   ['/app.mjs', ['app.mjs', 'text/javascript']],
-  ['/metrics.mjs', ['metrics.mjs', 'text/javascript']]
+  ['/metrics.mjs', ['metrics.mjs', 'text/javascript']],
+  ['/friction-view.mjs', ['friction-view.mjs', 'text/javascript']]
 ]);
 let cache = {mtime: 0, state: null};
 async function readState() {

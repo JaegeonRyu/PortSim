@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "PortEquipmentActor.h"
+#include "WeatherFriction.h"
 #include "PortAGVActor.generated.h"
 
 class UStaticMeshComponent;
@@ -59,9 +60,17 @@ public:
         bool ControlledStop,int32 BlockingVehicleID=INDEX_NONE);
     float SpeedLimitCmPerSecond() const;
     void SetApproachSpeedLimit(float Limit) { FMSApproachSpeedLimit=Limit; }
-    void SetWetTractionScale(float Scale) { WetTractionScale=FMath::Clamp(Scale,.5f,1.f); }
     void SetSteeringLookAhead(FVector Target,bool Enabled) { SteeringLookAhead=Target; bSteeringLookAhead=Enabled; }
     float AccelerationCmPerSecondSquared() const;
+    float BrakingCmPerSecondSquared() const;
+    float CurveSpeedCmPerSecond() const;
+    float TireGripCmPerSecondSquared() const;
+    float LongitudinalGripCmPerSecondSquared() const;
+    float WindResistanceNewtons() const;
+    FPortSurfaceState Surface;
+    FPortFrictionSettings Friction;
+    FVector WindVelocity=FVector::ZeroVector;
+    float LastCurvaturePerCm=0;
     bool PayloadWithinReferenceLimit() const;
     // Usable 60 percentage points: 8 operating hours, 30-minute fast charge.
     static constexpr double LowBatteryPercent=20.;
@@ -87,7 +96,6 @@ private:
     void CorrectAtTransponder(FVector Position);
     float FMSAcceptanceCm=800.f;
     float FMSApproachSpeedLimit=MAX_flt;
-    float WetTractionScale=1.f;
     FVector SteeringLookAhead=FVector::ZeroVector;
     bool bSteeringLookAhead=false;
     FVector DockingAxis=FVector::ZeroVector;

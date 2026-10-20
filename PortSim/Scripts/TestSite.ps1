@@ -9,6 +9,9 @@ param([string]$Engine = 'C:\Program Files\Epic Games\UE_5.6',
     [ValidateSet('Depot','Legacy')][string]$ParkingLayout='Depot',
     [ValidateSet('Reused','Previous')][string]$ApronLayout='Reused',
     [int]$EnvironmentSeed=166290927,
+    [ValidateRange(0,1)][double]$Wetness=0,
+    [ValidateRange(0,1)][double]$Snow=0,
+    [ValidateRange(0,1)][double]$Ice=0,
     [string]$ResultSummaryPath)
 $ErrorActionPreference = 'Stop'
 if($RequirePairedTrip) { $CheckStowage=$true }
@@ -27,6 +30,8 @@ foreach ($case in $cases) {
     $arguments = @("`"$project`"", '/Engine/Maps/Entry','-game','-nullrhi','-nosound','-unattended','-nosplash','-benchmark',"-fps=$FixedFPS",'-PortSimSiteTest',"`"-abslog=$testLog`"")
     if($PlaybackRate -gt 0) { $arguments += "-PortSimPlayback=$PlaybackRate" }
     if($Profile) { $arguments += '-PortSimProfile' }
+    $culture=[Globalization.CultureInfo]::InvariantCulture
+    $arguments += @("-PortSimWetness=$($Wetness.ToString($culture))","-PortSimSnow=$($Snow.ToString($culture))","-PortSimIce=$($Ice.ToString($culture))")
     $arguments += @("-PortSimEnvironmentSeed=$EnvironmentSeed",'-PortSimShips=3',
         '-PortSimCargo1=200','-PortSimCargo2=200','-PortSimCargo3=200')
     if($ParkingLayout -eq 'Legacy') { $arguments += '-PortSimLegacyParking' }

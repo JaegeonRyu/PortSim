@@ -180,15 +180,18 @@ bool FPortRainStateTest::RunTest(const FString& Parameters)
     FPortRainState Rain;
     TestFalse(TEXT("Rain defaults OFF to preserve existing scenarios"),Rain.bRainEnabled);
     TestEqual(TEXT("OFF preserves camera range"),Rain.SensorRangeScale(TEXT("spreader_camera")),1.f);
-    TestEqual(TEXT("OFF preserves dry traction"),Rain.WetTractionScale(),1.f);
+    TestEqual(TEXT("OFF produces no weather wetness"),Rain.Severity(),0.f);
     Rain.bRainEnabled=true;
     TestTrue(TEXT("Rain reduces camera range"),Rain.SensorRangeScale(TEXT("spreader_camera"))<1.f);
     TestTrue(TEXT("Rain reduces LiDAR range"),Rain.SensorRangeScale(TEXT("front_lidar"))<1.f);
     TestEqual(TEXT("Rain does not alter encoders"),Rain.SensorRangeScale(TEXT("hoist_encoder")),1.f);
-    TestTrue(TEXT("Wet surface reduces traction"),Rain.WetTractionScale()<1.f);
+    TestTrue(TEXT("Enabled rain supplies wetness to friction model"),Rain.Severity()>0.f);
     auto* Component=NewObject<UPortEnvironmentComponent>();
     Component->ToggleRain();
     TestTrue(TEXT("Rain toggle enables operational effects"),Component->IsRainEnabled());
+    TestEqual(TEXT("Rain toggle does not teleport surface wetness"),Component->GetSurfaceConditions().Wetness,0.f);
+    Component->AdvanceEnvironment(1);
+    TestTrue(TEXT("Rain accumulates water as simulation time advances"),Component->GetSurfaceConditions().Wetness>0.f);
     return true;
 }
 
@@ -210,6 +213,12 @@ bool FPortEnvironmentUISettingsTest::RunTest(const FString& Parameters)
     TestFalse(TEXT("Sea UI OFF"),Component->IsSeaMotionEnabled());
     TestTrue(TEXT("Rain UI ON"),Component->IsRainEnabled());
     TestTrue(TEXT("Fog UI ON"),Component->IsFogEnabled());
+    Component->SetSnowIntensity(.75f); Component->SetSnowEnabled(true);
+    Component->SetIceIntensity(.4f); Component->SetIceEnabled(true);
+    TestTrue(TEXT("Snow UI supplies snowfall rate"),FMath::IsNearlyEqual(Component->GetSnowfallMmPerHour(),75.f));
+    Component->AdvanceEnvironment(60);
+    TestTrue(TEXT("Snow UI accumulates a measured depth"),Component->GetSurfaceConditions().SnowDepthMm>0);
+    TestTrue(TEXT("Ice UI approaches the selected amount over time"),Component->GetSurfaceConditions().Ice>0 && Component->GetSurfaceConditions().Ice<=.4f);
     return true;
 }
 #endif

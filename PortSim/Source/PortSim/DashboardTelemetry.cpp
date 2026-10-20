@@ -25,6 +25,23 @@ namespace Dashboard
 {
     using FObject=TSharedRef<FJsonObject>;
     FObject Object() { return MakeShared<FJsonObject>(); }
+    FObject SurfaceData(const FPortSurfaceState& State,const FPortFrictionSettings& Settings)
+    {
+        auto F=Object();
+        F->SetStringField(TEXT("source"),TEXT("engineering_assumptions"));
+        F->SetNumberField(TEXT("wetness"),State.Wetness); F->SetNumberField(TEXT("snow"),State.Snow); F->SetNumberField(TEXT("ice"),State.Ice);
+        F->SetNumberField(TEXT("dryness"),1-State.Wetness);
+        F->SetNumberField(TEXT("water_film_mm"),State.WaterFilmMm);
+        F->SetNumberField(TEXT("snow_depth_mm"),State.SnowDepthMm);
+        F->SetNumberField(TEXT("water_change_mm_per_hour"),State.WaterChangeMmPerHour);
+        F->SetNumberField(TEXT("snow_change_mm_per_hour"),State.SnowChangeMmPerHour);
+        F->SetBoolField(TEXT("drying"),State.WaterChangeMmPerHour<0);
+        F->SetNumberField(TEXT("tire_static_mu"),Settings.Tire.Static(State)); F->SetNumberField(TEXT("tire_kinetic_mu"),Settings.Tire.Kinetic(State));
+        F->SetNumberField(TEXT("rail_static_mu"),Settings.Rail.Static(State)); F->SetNumberField(TEXT("rail_kinetic_mu"),Settings.Rail.Kinetic(State));
+        F->SetNumberField(TEXT("steel_static_mu"),Settings.Steel.Static(State)); F->SetNumberField(TEXT("steel_kinetic_mu"),Settings.Steel.Kinetic(State));
+        F->SetNumberField(TEXT("utilization"),Settings.Utilization);
+        return F;
+    }
     TSharedPtr<FJsonValue> Value(FObject O) { return MakeShared<FJsonValueObject>(O); }
     void Vector(FObject O,const TCHAR* Key,FVector V,float Scale=1.f)
     {
@@ -91,6 +108,15 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
     O->SetNumberField(TEXT("stage"),Stage);
     O->SetBoolField(TEXT("busy"),bJobActive);
     O->SetBoolField(TEXT("carrying"),bCarrying);
+    auto Grip=SurfaceData(Surface,Friction);
+    Grip->SetNumberField(TEXT("trolley_acceleration_limit_mps2"),RailAccelerationLimit(STSProfile.TrolleyAcceleration)*.01);
+    Grip->SetNumberField(TEXT("gantry_acceleration_limit_mps2"),RailAccelerationLimit(STSProfile.GantryAcceleration)*.01);
+    Grip->SetNumberField(TEXT("seating_demand_n"),SeatingFrictionDemandN);
+    Grip->SetNumberField(TEXT("seating_capacity_n"),SeatingFrictionCapacityN);
+    Grip->SetBoolField(TEXT("seating_grip_ok"),bSeatingFrictionOK);
+    Grip->SetBoolField(TEXT("seating_active"),bJobActive && Stage==2 && !bCarrying);
+    Grip->SetBoolField(TEXT("mechanically_locked"),bCarrying);
+    O->SetObjectField(TEXT("friction"),Grip);
     O->SetBoolField(TEXT("destination_ready"),bDestinationReady);
     O->SetNumberField(TEXT("completed"),CompletedJobs);
     O->SetNumberField(TEXT("job_seconds"),JobSeconds);
@@ -391,7 +417,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     Root->SetNumberField(TEXT("fog_visibility_m"),FogVisibilityMeters<MAX_flt?FogVisibilityMeters:-1.f);
     Root->SetBoolField(TEXT("rain_enabled"),RainState.bRainEnabled);
     Root->SetNumberField(TEXT("rainfall_mm_per_hour"),RainState.bRainEnabled?RainState.RainfallMmPerHour:0.f);
-    Root->SetNumberField(TEXT("wet_traction_scale"),RainState.WetTractionScale());
+    Root->SetObjectField(TEXT("surface_conditions"),SurfaceData(Surface,Friction));
     TArray<TSharedPtr<FJsonValue>> ReturnCorridors;
     static const TCHAR* ReturnNames[]={TEXT("south"),TEXT("central"),TEXT("north")};
     for(int32 Corridor=0;Corridor<TerminalLayout::AGVReturnCorridorCount;++Corridor)
@@ -521,6 +547,16 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             O->SetNumberField(TEXT("speed_mps"),V->Speed*.01);
             O->SetNumberField(TEXT("speed_limit_mps"),V->SpeedLimitCmPerSecond()*.01);
             O->SetNumberField(TEXT("acceleration_mps2"),V->AccelerationCmPerSecondSquared()*.01);
+            auto Grip=SurfaceData(V->Surface,V->Friction);
+            Grip->SetNumberField(TEXT("grip_acceleration_mps2"),V->TireGripCmPerSecondSquared()*.01);
+            Grip->SetNumberField(TEXT("braking_mps2"),V->BrakingCmPerSecondSquared()*.01);
+            Grip->SetNumberField(TEXT("curve_speed_mps"),V->CurveSpeedCmPerSecond()*.01);
+            Grip->SetNumberField(TEXT("wind_reserve_n"),V->WindResistanceNewtons());
+            Grip->SetNumberField(TEXT("normal_force_n"),(V->Friction.AGVEmptyMassKg+V->PayloadKg)*PortFriction::Gravity);
+            Grip->SetNumberField(TEXT("stopping_distance_m"),V->BrakingCmPerSecondSquared()>0?
+                V->Speed*V->Speed/(2*V->BrakingCmPerSecondSquared())*.01:0);
+            Grip->SetBoolField(TEXT("traction_available"),V->TireGripCmPerSecondSquared()>0);
+            O->SetObjectField(TEXT("friction"),Grip);
             O->SetNumberField(TEXT("completed"),V->CompletedJobs);
             O->SetStringField(TEXT("state"),V->Speed>0?TEXT("working"):TEXT("idle"));
             O->SetNumberField(TEXT("payload_kg"),0);

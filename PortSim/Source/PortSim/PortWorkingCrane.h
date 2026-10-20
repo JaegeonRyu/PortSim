@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "PortEquipmentActor.h"
 #include "STSOperatingProfile.h"
+#include "WeatherFriction.h"
 #include "PortWorkingCrane.generated.h"
 
 class APortContainerActor;
@@ -25,6 +26,11 @@ public:
     void SetWindVelocity(FVector WorldVelocityMetersPerSecond);
     void SetFogVisibilityMeters(float VisibilityMeters);
     void SetRainSensorRangeScales(float CameraScale,float LiDARScale);
+    FPortSurfaceState Surface;
+    FPortFrictionSettings Friction;
+    double RailAccelerationLimit(double RequestedCmps2) const;
+    double SeatingFrictionDemandN=0, SeatingFrictionCapacityN=0;
+    bool bSeatingFrictionOK=true;
     void UpdateMovingShipSource(APortContainerActor* Cargo,FVector WorldPosition);
     FVector GetWindVelocity() const { return WindVelocityMetersPerSecond; }
     bool HasSTSProfile() const { return bSTS && STSProfile.bReady; }

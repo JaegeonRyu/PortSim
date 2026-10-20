@@ -1,0 +1,26 @@
+{
+  "notes": "ASSUMED engineering coefficients, not measured OEM/site values. Wetness, snow and ice coverage are blended sequentially. Replace with measured data before real equipment use.",
+  "tire": {"dry_static": 0.8, "wet_static": 0.5, "snow_static": 0.2, "ice_static": 0.08, "dry_kinetic": 0.65, "wet_kinetic": 0.4, "snow_kinetic": 0.15, "ice_kinetic": 0.05},
+  "rail": {"dry_static": 0.25, "wet_static": 0.12, "snow_static": 0.07, "ice_static": 0.03, "dry_kinetic": 0.2, "wet_kinetic": 0.09, "snow_kinetic": 0.05, "ice_kinetic": 0.02},
+  "steel": {"dry_static": 0.4, "wet_static": 0.2, "snow_static": 0.12, "ice_static": 0.05, "dry_kinetic": 0.3, "wet_kinetic": 0.15, "snow_kinetic": 0.08, "ice_kinetic": 0.03},
+  "utilization": 0.8,
+  "agv_empty_mass_kg": 40000,
+  "driven_weight_fraction": 0.5,
+  "tire_rolling_resistance": 0.012,
+  "rail_rolling_resistance": 0.002,
+  "seating_weight_fraction": 0.1,
+  "surface_dynamics": {
+    "full_wet_water_mm": 0.5,
+    "max_water_film_mm": 5,
+    "drain_half_life_seconds": 600,
+    "evaporation_mm_per_hour": 0.5,
+    "full_snow_depth_mm": 10,
+    "max_snow_depth_mm": 500,
+    "maximum_snowfall_mm_per_hour": 100,
+    "snow_melt_mm_per_hour": 20,
+    "snow_water_ratio": 0.1,
+    "ice_build_seconds": 120,
+    "ice_melt_seconds": 1800,
+    "ice_water_equivalent_mm": 1
+  }
+}
