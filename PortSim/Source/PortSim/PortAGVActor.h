@@ -56,6 +56,8 @@ public:
     void SetFMSCommand(FVector Target,int32 NodeIndex,int32 NodeCount,bool Docking,float AcceptanceCm=-1.f,
         FVector ExpectedDockingAxis=FVector::ZeroVector);
     void SetFMSHold(bool Hold);
+    void SetDriveFailure(bool Failed) { bDriveFault=Failed; SetFMSHold(Failed); }
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="AGV|Failures") bool bDriveFault=false;
     void UpdateLiDARObservation(float FrontDistanceCm,float RearDistanceCm,float SafetyDistanceCm,float DetectionRangeCm,
         bool ControlledStop,int32 BlockingVehicleID=INDEX_NONE);
     float SpeedLimitCmPerSecond() const;
@@ -76,7 +78,7 @@ public:
     static constexpr double LowBatteryPercent=20.;
     static constexpr double ChargeLimitPercent=80.;
     void AdvanceBattery(double Seconds,bool Operating,bool Charging);
-    bool CanAcceptWork() const { return BatteryPercent>LowBatteryPercent && !bNeedsCharge && !bCharging; }
+    bool CanAcceptWork() const { return !bDriveFault && BatteryPercent>LowBatteryPercent && !bNeedsCharge && !bCharging; }
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV|Battery") double BatteryPercent=80.;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV|Battery") bool bNeedsCharge=false;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV|Battery") bool bCharging=false;

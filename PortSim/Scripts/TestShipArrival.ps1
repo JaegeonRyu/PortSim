@@ -21,14 +21,14 @@ $text=Get-Content -LiteralPath $log -Raw
 # Judge the actual PortSim session and its explicit completion results.
 $start=$text.IndexOf('Test Started. Name=')
 $session=if($start -ge 0) {$text.Substring($start)} else {''}
-if($text -notmatch '32 tests performed' -or
-    @([regex]::Matches($session,'Test Completed\. Result=\{Success\}[^\r\n]+Path=\{PortSim\.')).Count -ne 32 -or
+if($text -notmatch '34 tests performed' -or
+    @([regex]::Matches($session,'Test Completed\. Result=\{Success\}[^\r\n]+Path=\{PortSim\.')).Count -ne 34 -or
     $session -match 'Result=\{Fail|LogAutomationTest: Error:|Fatal error:' -or
     $text -notmatch 'Result=\{Success\} Name=\{ArrivalActorsAndAccess\}') {
     Select-String -LiteralPath $log -Pattern 'Error:|Result=\{Fail' | Select-Object -Last 12
     throw "Native arrival validation failed: $log"
 }
-Write-Output "PASS 32 native tests: $log"
+Write-Output "PASS 34 native tests: $log"
 $summary=Join-Path $root "Saved/Tests/ShipArrival_$stamp.json"
 New-Item -ItemType Directory -Path (Split-Path $summary -Parent) -Force | Out-Null
 $mode=if($ContinuousTraffic) {'Flow'} else {'Normal'}

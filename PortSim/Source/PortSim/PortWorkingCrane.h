@@ -11,6 +11,9 @@ class UTextRenderComponent;
 class APortAGVActor;
 class FJsonObject;
 
+UENUM(BlueprintType)
+enum class EPortCraneFault : uint8 { None, SensorUnavailable, Safety };
+
 /** Independently reserved two-slot crane job. Gantry/trolley/hoist are driven;
  * cargo is locked to the spreader during transport and physically released. */
 UCLASS(Blueprintable)
@@ -43,6 +46,15 @@ public:
     bool IsWaitingForAGV() const;
     APortAGVActor* GetHandoverVehicle() const;
     bool IsBusy() const { return bJobActive; }
+    UFUNCTION(BlueprintCallable,Category="Failures") void SetSensorFailure(bool Failed);
+    UFUNCTION(BlueprintCallable,CallInEditor,Category="Failures") void RepairSensors() { SetSensorFailure(false); }
+    bool IsSensorUnavailable() const { return FaultType==EPortCraneFault::SensorUnavailable && !Fault.IsEmpty(); }
+    bool RetainsLoad() const;
+    bool CancelUnliftedJob();
+    bool CanReach(FVector Source,FVector Destination) const;
+    FVector AssignedDestination() const { return Slots[1-SourceSlot]; }
+    FVector2D RailWorkInterval() const;
+    float GantryWorldY() const;
     UFUNCTION(BlueprintCallable, Category="Operation") void ResetOperation();
     UFUNCTION(BlueprintCallable, Category="Operation") void SetOperationPaused(bool Paused);
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
@@ -58,8 +70,13 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") int32 CompletedJobs=0;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") int32 Stage=0;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") FString Fault;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Failures") EPortCraneFault FaultType=EPortCraneFault::None;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Failures") bool bSensorFault=false;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Failures") FString RecoveryStatus;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Failures") bool bRailSafetyHold=false;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") TObjectPtr<APortContainerActor> CargoActor;
 private:
+    friend class FEquipmentRecoveryTest;
     bool bDeferRopeVisuals=false, bRopeVisualsDirty=false;
     void UpdateRopeVisuals();
     double ShipControlFraction=1;
@@ -96,7 +113,7 @@ private:
     double SimulationTime=0, NextSample=0, JobSeconds=0, PausedSeconds=0;
     double AGVAlignmentWait=0;
     bool CornerLocked[4]={false,false,false,false};
-    bool bSensorFault=false;
+    bool bAppliedSensorFault=false, bFatalSensorTest=false;
     FString SensorInvalidReason;
     int32 LockFault=INDEX_NONE;
     void SampleSTS(bool Force=false);
@@ -147,5 +164,5 @@ private:
     bool MoveHead(FVector Target, float Dt);
     void UpdateParts();
     bool DestinationClear() const;
-    void Stop(const FString& Reason);
+    void Stop(const FString& Reason,EPortCraneFault Kind=EPortCraneFault::Safety);
 };

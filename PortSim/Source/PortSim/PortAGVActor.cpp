@@ -62,6 +62,7 @@ void APortAGVActor::InitializeVehicle(int32 Number)
 void APortAGVActor::ResetVehicle(FVector Position)
 {
     ActiveDeckOffsetCm=0;
+    bDriveFault=false;
     DeckCoGOffsetCm=FVector::ZeroVector;
     Speed=0; CompletedJobs=0; PayloadKg=0; LastCurvaturePerCm=0;
     BatteryPercent=ChargeLimitPercent; bNeedsCharge=bCharging=false;
@@ -124,6 +125,7 @@ FVector APortAGVActor::PlannedMotionDirection(FVector Target) const
 
 bool APortAGVActor::MoveToPosition(FVector Target,float Dt,bool StopAtTarget)
 {
+    if(bDriveFault) { SetFMSHold(true); return false; }
     const FVector Previous=GetActorLocation();
     const FVector ToTarget=Target-Previous;
     const float Distance=ToTarget.Size2D();

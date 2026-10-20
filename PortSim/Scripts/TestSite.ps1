@@ -13,6 +13,8 @@ param([string]$Engine = 'C:\Program Files\Epic Games\UE_5.6',
     [ValidateRange(0,1)][double]$Snow=0,
     [ValidateRange(0,1)][double]$Ice=0,
     [switch]$NoSea, [switch]$LegacyRoadPriority,
+    [ValidateRange(0,9)][int]$FailedSTS=0, [ValidateRange(0,46)][int]$FailedRMG=0,
+    [ValidateRange(0,100000)][double]$FailureAt=60, [ValidateRange(-1,100000)][double]$RepairAfter=-1,
     [string]$ResultSummaryPath)
 $ErrorActionPreference = 'Stop'
 if($RequirePairedTrip) { $CheckStowage=$true }
@@ -34,6 +36,10 @@ foreach ($case in $cases) {
     if($NoSea) { $arguments += '-PortSimNoSea' }
     if($LegacyRoadPriority) { $arguments += '-PortSimLegacyRoadPriority' }
     $culture=[Globalization.CultureInfo]::InvariantCulture
+    if($FailedSTS -gt 0 -or $FailedRMG -gt 0) {
+        $arguments += @("-PortSimFailedSTS=$FailedSTS","-PortSimFailedRMG=$FailedRMG",
+            "-PortSimFailureAt=$($FailureAt.ToString($culture))","-PortSimRepairAfter=$($RepairAfter.ToString($culture))")
+    }
     $arguments += @("-PortSimWetness=$($Wetness.ToString($culture))","-PortSimSnow=$($Snow.ToString($culture))","-PortSimIce=$($Ice.ToString($culture))")
     $arguments += @("-PortSimEnvironmentSeed=$EnvironmentSeed",'-PortSimShips=3',
         '-PortSimCargo1=200','-PortSimCargo2=200','-PortSimCargo3=200')
@@ -113,6 +119,12 @@ foreach ($case in $cases) {
             if($snapshot.agv_apron_layout -ne $expectedApron) { throw 'Apron route switch not applied' }
             $expectedRoadPriority=if($LegacyRoadPriority) {'fifo'} else {'pickup_with_aging'}
             if($snapshot.agv_road_priority -ne $expectedRoadPriority) { throw 'Road priority A/B switch not applied' }
+            if($FailedSTS -gt 0 -or $FailedRMG -gt 0) {
+                $expectedFaults=[int]($FailedSTS -gt 0)+[int]($FailedRMG -gt 0)
+                if($snapshot.equipment_fault_events -lt $expectedFaults -or $text -notmatch 'EQUIPMENT_SENSOR_ISOLATED:') { throw 'Equipment isolation scenario was not exercised' }
+                if($FailedRMG -gt 0 -and $snapshot.yard_reassignments -lt 1) { throw 'No yard destinations were reassigned' }
+                if($RepairAfter -ge 0 -and $text -notmatch 'EQUIPMENT_SENSOR_REPAIRED:') { throw 'Scheduled repair was not exercised' }
+            }
             $expectedPriority=if($expectedApron -eq 'reused_transport_lanes') {'yard_support_path'} else {'oldest_ready'}
             if($snapshot.agv_dispatch_priority -ne $expectedPriority) { throw 'Yard support dispatch priority not applied' }
             if($expectedApron -eq 'reused_transport_lanes' -and $text -notmatch 'AGV_APRON_ROUTE:') {
@@ -124,6 +136,7 @@ foreach ($case in $cases) {
                 [ordered]@{ParkingLayout=$ParkingLayout;ApronLayout=$ApronLayout;EnvironmentSeed=$EnvironmentSeed;PlaybackRate=$PlaybackRate;
                     FixedFPS=$FixedFPS;Shipments=$rows.Count;Report=$report.FullName;Log=$testLog;
                     RoadPriority=$expectedRoadPriority;SeaEnabled=(-not $NoSea);
+                    EquipmentFaultEvents=$snapshot.equipment_fault_events;STSReassignments=$snapshot.sts_reassignments;YardReassignments=$snapshot.yard_reassignments;
                     LastPlacementSeconds=$lastPlacement;ContinuousTraffic=($case -eq 'Flow');
                     ProgressReachedSeconds=[double]$returnTime;
                     ReturnCompletedSeconds=$(if($case -eq 'Flow') {$null} else {[double]$returnTime})} |

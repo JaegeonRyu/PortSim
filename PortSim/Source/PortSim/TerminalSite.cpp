@@ -126,6 +126,9 @@ void AQuayCrane::BuildTerminalSite()
         Text->SetPivot(FVector2D(.5f,.5f));
         Text->SetRelativeScale3D(FVector(Size*100.f/80.f));
         Text->SetTwoSided(true);
+        // World labels are display overlays, never physical stack supports.
+        Text->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        Text->SetGenerateOverlapEvents(false);
         // These signs never change: keep their render texture, not a Slate
         // repaint for every simulation/render frame and offscreen sign.
         Text->SetManuallyRedraw(true);

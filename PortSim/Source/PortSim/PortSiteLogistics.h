@@ -42,6 +42,8 @@ struct FSiteShipCargo
     double EstimatedPairSavingSeconds=0;
     double PlannedPairSavingSeconds=0;
     int32 STS=0, ID=0, State=0, PlannedSlot=INDEX_NONE; // same actor: 0 aboard, 1 transfer, 2 yard
+    int32 OriginalSTS=INDEX_NONE, Reassignments=0;
+    FString RecoveryHold;
     uint8 HandoverMask=0; // STS->AGV, AGV->RMG, RMG->yard
     double StartedAt=0, PreparedPausedSeconds=0;
 };
@@ -69,6 +71,11 @@ struct FSiteTransfer
     int32 ReturnSTS=INDEX_NONE, ReturnCargo=INDEX_NONE;
     int32 YardEntryWaypoint=INDEX_NONE;
     int32 ReturnCorridor=INDEX_NONE, QuayClearWaypoint=INDEX_NONE;
+    bool bEquipmentWaiting=false, bRecoveryRoutePending=false;
+    bool bYardAdmissionSuspended=false;
+    double EquipmentDowntimeSeconds=0;
+    int32 RecoveryOriginSlot=INDEX_NONE;
+    FVector RecoveryAnchor=FVector::ZeroVector;
 };
 
 /** One manifest, conserved cargo IDs and reserved yard slots across STS -> AGV -> RMG. */
@@ -79,6 +86,7 @@ class PORTSIM_API APortSiteLogistics : public AActor
 public:
     APortSiteLogistics();
     void SetSTSProfile(const FSTSOperatingProfile& Profile) { STSProfile=Profile; }
+    bool CanSTSGantryMove(const APortWorkingCrane* Crane,float WorldY) const;
     void AddShipCargo(FVector Position,int32 STS,int32 Wave=0,FName ContainerName=NAME_None);
     int32 ConfiguredShips=3;
     int32 ConfiguredCargo[3]={200,200,200};
@@ -128,6 +136,9 @@ public:
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 Delivered=0;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 DispatchLimit=MAX_int32;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) FString Fault;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 EquipmentFaultEvents=0;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 STSReassignments=0;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 YardReassignments=0;
     UPROPERTY() TArray<TObjectPtr<APortAGVActor>> Vehicles;
     UPROPERTY() TArray<TObjectPtr<APortAGVActor>> TrafficVehicles;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 PeakMovingVehicles=0;
@@ -144,6 +155,17 @@ private:
     friend class FNoEventCollisionTest;
     friend class FInlandRoadTrafficTest;
     friend class FTrafficJunctionTest;
+    friend class FEquipmentRecoveryTest;
+    friend class FDashboardControlTest;
+    FString DashboardControlSession=FGuid::NewGuid().ToString(EGuidFormats::Digits);
+    double NextControlPoll=0;
+    TArray<TSharedPtr<FJsonObject>> DashboardCommandResults, RecoveryEvents;
+    TSet<FString> SeenDashboardCommands;
+    int32 RecoverySequence=0;
+    void ProcessDashboardCommands();
+    bool ApplyDashboardCommand(const FJsonObject& Command,FString& Error);
+    void RecordRecoveryEvent(const FString& Kind,AActor* Cause,AActor* From,AActor* To,
+        AActor* Cargo=nullptr,const FVector& OldPosition=FVector::ZeroVector,const FVector& NewPosition=FVector::ZeroVector);
     FSTSOperatingProfile STSProfile;
     double SimulationTime=0;
     double NextDashboardWall=0;
@@ -162,6 +184,24 @@ private:
     bool SaveReports() const;
     void BeginReport();
     TArray<FSiteShipCargo> Manifest;
+    TArray<FSiteShipCargo> InitialManifestPlan;
+    struct FDeferredYardLease { int32 Vehicle,Slot; };
+    TArray<FDeferredYardLease> DeferredYardLeases;
+    TSet<int32> IsolatedEquipment;
+    double NextRecoveryAttempt=0;
+    int32 ScheduledFailedSTS=0,ScheduledFailedRMG=0;
+    double ScheduledFailureAt=60,ScheduledRepairAfter=-1;
+    bool bFailureInjected=false,bFailureRepaired=false;
+    bool bRecoveryRailGuard=false;
+    void ManageEquipmentFailures();
+    bool CraneAvailable(int32 Index) const;
+    bool CanSTSService(int32 STS,int32 Cargo,const FVector* DestinationOverride=nullptr) const;
+    void RebuildSTSStreams();
+    bool ReplanFailedYards(int32 FailedRMG=INDEX_NONE);
+    bool ReplanBlockedYards();
+    bool ReplanYardGroup(const TSet<int32>& Affected,const TSet<int32>& UnavailableSupports,AActor* Cause=nullptr);
+    void ReleaseDeferredYardLeases();
+    bool JobHeldByFailure(int32 Vehicle) const;
     TArray<TArray<int32>> SourceAbove;
     TArray<TArray<int32>> ManifestBySTS;
     FPortShipStowageAssumptions ShipStowageAssumptions;
@@ -224,7 +264,7 @@ private:
     void PrepareNextCargo(int32 Lane);
     bool SourceAccessible(int32 Cargo) const;
     void PrepareExecutableCargo(int32 Lane);
-    FString YardAdmissionReason(int32 Cargo) const;
+    FString YardAdmissionReason(int32 Cargo,int32 Vehicle=INDEX_NONE) const;
     bool ReserveYardApproach(int32 Lane);
     void ReleaseYardApproachIfClear(int32 Lane);
     bool YardApproachAvailable(int32 Cargo) const;

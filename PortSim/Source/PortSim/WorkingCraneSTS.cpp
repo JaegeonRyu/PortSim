@@ -3,6 +3,7 @@
 #include "CraneTravelBraking.h"
 #include "PortContainerActor.h"
 #include "PortAGVActor.h"
+#include "PortSiteLogistics.h"
 #include "AGVReference.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
@@ -246,6 +247,7 @@ double APortWorkingCrane::RailAccelerationLimit(double RequestedCmps2) const
 
 bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
 {
+    bRailSafetyHold=false;
     PortSimPerformance::FScope Timing(TEXT("crane_dynamics"));
     if(!STSProfile.ContainsTarget(Target)) { Stop(TEXT("Automatic target outside STS envelope")); return false; }
     const double ControlPayload=bCarrying?(Pickup.EstimateValid?Pickup.EstimatedMass:STSProfile.ContainerMassKg):0;
@@ -386,7 +388,11 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
                         -double(Limits[I]),double(Limits[I]));
                 }
                 else AxisVelocity[I]=FMath::FInterpConstantTo(AxisVelocity[I],FMath::Clamp(Desired,-double(Limits[I]),double(Limits[I])),Step,Acceleration);
-                Head[I]+=AxisVelocity[I]*Step;
+                const double Next=Head[I]+AxisVelocity[I]*Step;
+                const auto* Site=IsValid(CargoActor)?Cast<APortSiteLogistics>(CargoActor->GetOwner()):nullptr;
+                if(I==1 && bSTS && Site && !Site->CanSTSGantryMove(this,(Home+Orientation.RotateVector(FVector(0,Next,0))).Y))
+                { AxisVelocity[I]=0; TravelAcceleration.Y=0; bRailSafetyHold=true; }
+                else Head[I]=Next;
             }
         }
         const double PredictionTime=Age+Substep*Step;
