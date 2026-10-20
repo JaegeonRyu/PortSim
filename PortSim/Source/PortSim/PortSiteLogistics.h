@@ -93,6 +93,8 @@ public:
     void RegisterBerthVehicles(const TArray<TObjectPtr<APortAGVActor>>& BerthVehicles);
     void BeginTrafficFrame();
     void SetWindVelocity(FVector WorldVelocityMetersPerSecond);
+    void SetFogVisibilityMeters(float VisibilityMeters);
+    void SetRainState(const FPortRainState& State);
     void SetVesselMotions(const TArray<FPortVesselMotion>& Motions,const TArray<FVector>& BasePivots,const FPortSeaState& SeaState);
     bool MoveVehicle(APortAGVActor* Vehicle,FVector Target,float Dt);
     void Advance(float Dt,bool Paused);
@@ -198,6 +200,8 @@ private:
     bool UpdateDispatchPriorities();
     FVector WindVelocityMetersPerSecond=FVector::ZeroVector;
     FPortSeaState FrameSeaState;
+    float FogVisibilityMeters=MAX_flt;
+    FPortRainState RainState;
     TArray<FPortVesselMotion> VesselMotions;
     TArray<FVector> VesselBasePivots;
     bool ResolveVesselTransform(const FSiteShipCargo& Cargo,FVector& Position,FQuat& Rotation,FVector& Velocity,FVector& Acceleration,FVector& Jerk) const;

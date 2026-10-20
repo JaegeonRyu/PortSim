@@ -32,6 +32,7 @@ struct FAGVSensorState
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="AGV|Safety") float FrontObstacleDistanceCm=-1;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="AGV|Safety") float RearObstacleDistanceCm=-1;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="AGV|Safety") float LiDARSafetyDistanceCm=0;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="AGV|Safety") float LiDARDetectionRangeCm=-1;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="AGV|Safety") int32 LiDARBlockingVehicleID=INDEX_NONE;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="AGV|Safety") bool bLiDARClear=true;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="AGV|Safety") bool bControlledStop=false;
@@ -54,10 +55,11 @@ public:
     void SetFMSCommand(FVector Target,int32 NodeIndex,int32 NodeCount,bool Docking,float AcceptanceCm=-1.f,
         FVector ExpectedDockingAxis=FVector::ZeroVector);
     void SetFMSHold(bool Hold);
-    void UpdateLiDARObservation(float FrontDistanceCm,float RearDistanceCm,float SafetyDistanceCm,
+    void UpdateLiDARObservation(float FrontDistanceCm,float RearDistanceCm,float SafetyDistanceCm,float DetectionRangeCm,
         bool ControlledStop,int32 BlockingVehicleID=INDEX_NONE);
     float SpeedLimitCmPerSecond() const;
     void SetApproachSpeedLimit(float Limit) { FMSApproachSpeedLimit=Limit; }
+    void SetWetTractionScale(float Scale) { WetTractionScale=FMath::Clamp(Scale,.5f,1.f); }
     void SetSteeringLookAhead(FVector Target,bool Enabled) { SteeringLookAhead=Target; bSteeringLookAhead=Enabled; }
     float AccelerationCmPerSecondSquared() const;
     bool PayloadWithinReferenceLimit() const;
@@ -85,6 +87,7 @@ private:
     void CorrectAtTransponder(FVector Position);
     float FMSAcceptanceCm=800.f;
     float FMSApproachSpeedLimit=MAX_flt;
+    float WetTractionScale=1.f;
     FVector SteeringLookAhead=FVector::ZeroVector;
     bool bSteeringLookAhead=false;
     FVector DockingAxis=FVector::ZeroVector;
