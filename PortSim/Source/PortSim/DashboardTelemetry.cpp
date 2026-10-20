@@ -392,6 +392,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     Root->SetBoolField(TEXT("unified"),LaneCount==9);
     Root->SetStringField(TEXT("agv_parking_layout"),bDepotParking?TEXT("depot"):TEXT("legacy_distributed"));
     Root->SetStringField(TEXT("agv_apron_layout"),bReuseFreedApron?TEXT("reused_transport_lanes"):TEXT("previous_routes"));
+    Root->SetStringField(TEXT("agv_road_priority"),bPickupRoadPriority?TEXT("pickup_with_aging"):TEXT("fifo"));
     Root->SetStringField(TEXT("handover_policy"),UsesCargoAlignedHandover()?TEXT("cargo_aligned_quay"):TEXT("fixed_quay"));
     Root->SetStringField(TEXT("fault"),Fault);
     Root->SetNumberField(TEXT("delivered"),Delivered);
@@ -558,6 +559,9 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             Grip->SetBoolField(TEXT("traction_available"),V->TireGripCmPerSecondSquared()>0);
             O->SetObjectField(TEXT("friction"),Grip);
             O->SetNumberField(TEXT("completed"),V->CompletedJobs);
+            O->SetNumberField(TEXT("road_priority_bonus_seconds"),RoadPriorityBonus(V->VehicleID));
+            const double* RoadSince=RoadWaitSince.Find(V->VehicleID);
+            O->SetNumberField(TEXT("road_request_wait_seconds"),RoadSince?FMath::Max(0.,TrafficClock-*RoadSince):0.);
             O->SetStringField(TEXT("state"),V->Speed>0?TEXT("working"):TEXT("idle"));
             O->SetNumberField(TEXT("payload_kg"),0);
             O->SetNumberField(TEXT("reference_payload_max_kg"),AGVReference::MaximumPayloadKg);

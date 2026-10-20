@@ -359,6 +359,7 @@ void APortSiteLogistics::Initialize(const TArray<TObjectPtr<APortWorkingCrane>>&
     bDepotParking=!FParse::Param(FCommandLine::Get(),TEXT("PortSimLegacyParking"));
     Equipment=Cranes; Yard=MoveTemp(Slots); CentralCount=CentralCargo; YardCraneCount=Cranes.Num()-(CentralCount==0?9:8); LaneCount=Equipment.Num()-YardCraneCount;
     bReuseFreedApron=bDepotParking && LaneCount==9 && !FParse::Param(FCommandLine::Get(),TEXT("PortSimPreviousApron"));
+    bPickupRoadPriority=LaneCount==9 && !FParse::Param(FCommandLine::Get(),TEXT("PortSimLegacyRoadPriority"));
     DispatchPriorityLimit=INDEX_NONE;
     BaselineYard=Yard.Num()+FixedYard;
     check((LaneCount==8 || LaneCount==9) && Yard.Num()>=InitialShipCount());
@@ -1668,6 +1669,40 @@ void APortSiteLogistics::ClearPendingRoadRequest(int32 ID)
     PendingRoadRequests.Remove(ID); PendingRoadIndex.Remove(ID);
 }
 
+double APortSiteLogistics::RoadPriorityBonus(int32 ID) const
+{
+    const int32 I=ID-100;
+    if(!bPickupRoadPriority || !Jobs.IsValidIndex(I) || !Vehicles.IsValidIndex(I) || Vehicles[I]->VehicleID!=ID) return 0;
+    const auto& J=Jobs[I];
+    const bool Clearing=J.Stage==3 && STSOwners.IsValidIndex(J.STS) && STSOwners[J.STS]==I;
+    const bool Pickup=Vehicles[I]->PayloadKg<=.1f &&
+        (J.Stage==6 || J.Stage==7 || (J.Stage==5 && J.ReturnSTS!=INDEX_NONE));
+    const int32 STS=J.Stage==5?J.ReturnSTS:J.STS;
+    const int32 Cargo=J.Stage==5?J.ReturnCargo:J.Cargo;
+    double HeldSeconds=0;
+    if(Pickup && Manifest.IsValidIndex(Cargo) && Equipment.IsValidIndex(YardCraneCount+STS) && STS>=0)
+    {
+        const auto* Crane=Equipment[YardCraneCount+STS].Get();
+        if(Crane->IsWaitingForAGV() && Crane->CargoActor==Manifest[Cargo].Actor.Get())
+            HeldSeconds=Manifest[Cargo].STSWaitingForVehicleSeconds;
+    }
+    return TrafficJunctionPolicy::MissionBonus(Pickup,HeldSeconds,Clearing);
+}
+
+bool APortSiteLogistics::RoadRequestBefore(int32 A,int32 B) const
+{
+    const double* SinceA=RoadWaitSince.Find(A),*SinceB=RoadWaitSince.Find(B);
+    if(!bPickupRoadPriority) return TrafficJunctionPolicy::OlderRequestFirst(SinceA,SinceB,A,B);
+    const double PA=TrafficJunctionPolicy::PriorityTime(SinceA,TrafficClock,RoadPriorityBonus(A));
+    const double PB=TrafficJunctionPolicy::PriorityTime(SinceB,TrafficClock,RoadPriorityBonus(B));
+    if(PA!=PB) return PA<PB;
+    if(SinceA || SinceB) return TrafficJunctionPolicy::OlderRequestFirst(SinceA,SinceB,A,B);
+    const int32 IA=A-100,IB=B-100;
+    if(Jobs.IsValidIndex(IA) && Jobs.IsValidIndex(IB) && Jobs[IA].StartedAt!=Jobs[IB].StartedAt)
+        return Jobs[IA].StartedAt<Jobs[IB].StartedAt;
+    return A<B;
+}
+
 void APortSiteLogistics::IndexTrafficVehicle(int32 Index)
 {
     const auto* Vehicle=TrafficVehicles[Index].Get();
@@ -2085,14 +2120,12 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
             {
                 const double* WaitingSince=RoadWaitSince.Find(WaitingID);
                 if(!WaitingSince || TrafficClock-*WaitingSince<30.) continue;
-                if(WaitingID==ID || !TrafficJunctionPolicy::OlderRequestFirst(
-                    RoadWaitSince.Find(WaitingID),RoadWaitSince.Find(ID),WaitingID,ID)) continue;
+                if(WaitingID==ID || !RoadRequestBefore(WaitingID,ID)) continue;
                 const auto* Waiting=PendingRoadRequests.Find(WaitingID);
                 if(!Waiting || Waiting->ContainsByPredicate([&](const FBox& Box){return Box.Intersect(Body);})) continue;
                 bool Intersects=false;
                 for(const FBox& A:Segments) for(const FBox& B:*Waiting) Intersects|=A.Intersect(B);
-                if(Intersects && (Blocker==INDEX_NONE || TrafficJunctionPolicy::OlderRequestFirst(
-                    RoadWaitSince.Find(WaitingID),RoadWaitSince.Find(Blocker),WaitingID,Blocker))) Blocker=WaitingID;
+                if(Intersects && (Blocker==INDEX_NONE || RoadRequestBefore(WaitingID,Blocker))) Blocker=WaitingID;
             }
         }
         return Blocker;
@@ -2614,14 +2647,19 @@ void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
     if (LaneCount==9) { AdvanceFleetBatteries(Dt); if(!Fault.IsEmpty()) return; ScheduleFleet(); }
     RecoverTrafficCycle();
     if(!Fault.IsEmpty()) return;
-    // Age actual blocked road requests, not cargo preparation or crane service.
-    // Existing reservations are never preempted by an older waiting request.
+    // Age actual blocked road requests, with a capped pickup/STS-exit bonus.
+    // Existing reservations are never preempted by a higher priority request.
     TArray<int32> Order;
     for (int32 I=0;I<Jobs.Num();++I) Order.Add(I);
     Order.StableSort([this](int32 A,int32 B)
     {
         const double* WaitA=RoadWaitSince.Find(Vehicles[A]->VehicleID);
         const double* WaitB=RoadWaitSince.Find(Vehicles[B]->VehicleID);
+        if(bPickupRoadPriority)
+        {
+            if(bool(Jobs[A].Stage)!=bool(Jobs[B].Stage)) return Jobs[A].Stage!=0;
+            return RoadRequestBefore(Vehicles[A]->VehicleID,Vehicles[B]->VehicleID);
+        }
         if(WaitA || WaitB) return TrafficJunctionPolicy::OlderRequestFirst(WaitA,WaitB,Vehicles[A]->VehicleID,Vehicles[B]->VehicleID);
         if(bool(Jobs[A].Stage)!=bool(Jobs[B].Stage)) return Jobs[A].Stage!=0;
         if(Jobs[A].Stage && Jobs[B].Stage && Jobs[A].StartedAt!=Jobs[B].StartedAt) return Jobs[A].StartedAt<Jobs[B].StartedAt;
@@ -3300,7 +3338,8 @@ bool APortSiteLogistics::SaveReports() const
         TEXT(",\"ship_arrival_layout\":\"")+(LaneCount==9?TEXT("applied_bay_row_tier"):TEXT("legacy_grid"))+TEXT("\"")+
         TEXT(",\"agv_parking_layout\":\"")+(bDepotParking?TEXT("depot"):TEXT("legacy_distributed"))+
         TEXT("\",\"agv_apron_layout\":\"")+(bReuseFreedApron?TEXT("reused_transport_lanes"):TEXT("previous_routes"))+
-        TEXT("\",\"agv_dispatch_priority\":\"")+(bReuseFreedApron?TEXT("yard_support_path"):TEXT("oldest_ready"))+TEXT("\"}");
+        TEXT("\",\"agv_dispatch_priority\":\"")+(bReuseFreedApron?TEXT("yard_support_path"):TEXT("oldest_ready"))+
+        TEXT("\",\"agv_road_priority\":\"")+(bPickupRoadPriority?TEXT("pickup_with_aging"):TEXT("fifo"))+TEXT("\"}");
     return FFileHelper::SaveStringToFile(ResultsCsv,*(ReportBase+TEXT(".csv")),FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM) &&
         FFileHelper::SaveStringToFile(Snapshot,*(ReportBase+TEXT("_profile.json")),FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 }

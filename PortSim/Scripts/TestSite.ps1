@@ -12,6 +12,7 @@ param([string]$Engine = 'C:\Program Files\Epic Games\UE_5.6',
     [ValidateRange(0,1)][double]$Wetness=0,
     [ValidateRange(0,1)][double]$Snow=0,
     [ValidateRange(0,1)][double]$Ice=0,
+    [switch]$NoSea, [switch]$LegacyRoadPriority,
     [string]$ResultSummaryPath)
 $ErrorActionPreference = 'Stop'
 if($RequirePairedTrip) { $CheckStowage=$true }
@@ -30,6 +31,8 @@ foreach ($case in $cases) {
     $arguments = @("`"$project`"", '/Engine/Maps/Entry','-game','-nullrhi','-nosound','-unattended','-nosplash','-benchmark',"-fps=$FixedFPS",'-PortSimSiteTest',"`"-abslog=$testLog`"")
     if($PlaybackRate -gt 0) { $arguments += "-PortSimPlayback=$PlaybackRate" }
     if($Profile) { $arguments += '-PortSimProfile' }
+    if($NoSea) { $arguments += '-PortSimNoSea' }
+    if($LegacyRoadPriority) { $arguments += '-PortSimLegacyRoadPriority' }
     $culture=[Globalization.CultureInfo]::InvariantCulture
     $arguments += @("-PortSimWetness=$($Wetness.ToString($culture))","-PortSimSnow=$($Snow.ToString($culture))","-PortSimIce=$($Ice.ToString($culture))")
     $arguments += @("-PortSimEnvironmentSeed=$EnvironmentSeed",'-PortSimShips=3',
@@ -108,6 +111,8 @@ foreach ($case in $cases) {
             if($snapshot.agv_parking_layout -ne $expectedParking) { throw 'Parking baseline switch not applied' }
             $expectedApron=if($ParkingLayout -eq 'Depot' -and $ApronLayout -eq 'Reused') {'reused_transport_lanes'} else {'previous_routes'}
             if($snapshot.agv_apron_layout -ne $expectedApron) { throw 'Apron route switch not applied' }
+            $expectedRoadPriority=if($LegacyRoadPriority) {'fifo'} else {'pickup_with_aging'}
+            if($snapshot.agv_road_priority -ne $expectedRoadPriority) { throw 'Road priority A/B switch not applied' }
             $expectedPriority=if($expectedApron -eq 'reused_transport_lanes') {'yard_support_path'} else {'oldest_ready'}
             if($snapshot.agv_dispatch_priority -ne $expectedPriority) { throw 'Yard support dispatch priority not applied' }
             if($expectedApron -eq 'reused_transport_lanes' -and $text -notmatch 'AGV_APRON_ROUTE:') {
@@ -118,6 +123,7 @@ foreach ($case in $cases) {
                 $returnTime=[regex]::Match($text,'RECEIVING_METRICS:.*elapsed_simulation=([0-9.]+)').Groups[1].Value
                 [ordered]@{ParkingLayout=$ParkingLayout;ApronLayout=$ApronLayout;EnvironmentSeed=$EnvironmentSeed;PlaybackRate=$PlaybackRate;
                     FixedFPS=$FixedFPS;Shipments=$rows.Count;Report=$report.FullName;Log=$testLog;
+                    RoadPriority=$expectedRoadPriority;SeaEnabled=(-not $NoSea);
                     LastPlacementSeconds=$lastPlacement;ContinuousTraffic=($case -eq 'Flow');
                     ProgressReachedSeconds=[double]$returnTime;
                     ReturnCompletedSeconds=$(if($case -eq 'Flow') {$null} else {[double]$returnTime})} |

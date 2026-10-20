@@ -143,6 +143,7 @@ private:
     friend class FShipArrivalPlacementTest;
     friend class FNoEventCollisionTest;
     friend class FInlandRoadTrafficTest;
+    friend class FTrafficJunctionTest;
     FSTSOperatingProfile STSProfile;
     double SimulationTime=0;
     double NextDashboardWall=0;
@@ -189,6 +190,8 @@ private:
     TMap<int32,double> RoadWaitSince;
     TMap<int32,TArray<FBox>> PendingRoadRequests;
     void ClearPendingRoadRequest(int32 ID);
+    double RoadPriorityBonus(int32 ID) const;
+    bool RoadRequestBefore(int32 A,int32 B) const;
     double TrafficClock=0, LastCycleRecoveryAt=-10;
     float NoProgressTime=0;
     int32 LastProgressDelivered=0;
@@ -201,6 +204,7 @@ private:
     bool bCargoAlignedHandover=true;
     bool bDepotParking=true; // command-line A/B baseline; normal runs use depot
     bool bReuseFreedApron=true; // PreviousApron reproduces the pre-conversion depot routes
+    bool bPickupRoadPriority=true; // LegacyRoadPriority reproduces FIFO for A/B runs
     int32 DispatchPriorityLimit=INDEX_NONE;
     bool UpdateDispatchPriorities();
     FVector WindVelocityMetersPerSecond=FVector::ZeroVector;
