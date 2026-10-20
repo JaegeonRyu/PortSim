@@ -171,6 +171,12 @@ bool FPortFogStateTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Fog toggle enables sensor attenuation"),Component->IsFogEnabled());
     TestEqual(TEXT("Component applies fog range"),Component->GetFogLimitedSensorRangeMeters(TEXT("camera"),100.f),
         FPortFogState::DefaultVisibilityMeters);
+    Component->SetFogVisibilityMeters(5.f);
+    TestEqual(TEXT("Fog visibility is clamped to the operational 20 m minimum"),
+        Component->GetFogVisibilityMeters(),FPortFogState::MinimumVisibilityMeters);
+    Component->SetFogIntensity(1.f);
+    TestEqual(TEXT("Maximum fog slider intensity maps to the 20 m minimum"),
+        Component->GetFogVisibilityMeters(),FPortFogState::MinimumVisibilityMeters);
     return true;
 }
 

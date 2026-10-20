@@ -3,6 +3,7 @@
 #include "PortContainerActor.h"
 #include "PortSiteLogistics.h"
 #include "PortAGVActor.h"
+#include "AGVReference.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/World.h"
@@ -323,11 +324,14 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
             const FVector AGVCargo=bValidAGV?HandoverAGV->CargoPosition():FVector::ZeroVector;
             const float AGVSpeed=bValidAGV?HandoverAGV->Speed:-1.f;
             const float PositionError=bValidAGV?FVector::Distance(AGVCargo,Slots[1-SourceSlot]):-1.f;
-            const float HeadingError=bValidAGV?FMath::Abs(FMath::FindDeltaAngleDegrees(HandoverAGV->GetActorRotation().Yaw,Orientation.Rotator().Yaw)):-1.f;
+            const float HeadingError=bValidAGV?AGVReference::AxialHeadingErrorDegrees(
+                HandoverAGV->GetActorRotation().Yaw,Orientation.Rotator().Yaw):-1.f;
             const bool bInLidar=bValidAGV&&STSSensorContains(TEXT("agv_position_lidar"),AGVCargo);
-            UE_LOG(LogTemp,Error,TEXT("STS_ALIGNMENT_DETAIL: crane=%d stage=%d ready=%d agv=%s observed=%d speed_cmps=%.3f position_error_cm=%.3f position_limit_cm=%.3f heading_error_deg=%.3f heading_limit_deg=%.3f lidar=%d destination=%s cargo_position=%s"),
+            const bool bDockingFix=bValidAGV&&HandoverAGV->Sensors.bFMSConnected&&
+                HandoverAGV->Sensors.bDockingNode&&HandoverAGV->Sensors.bTransponderLocked;
+            UE_LOG(LogTemp,Error,TEXT("STS_ALIGNMENT_DETAIL: crane=%d stage=%d ready=%d agv=%s observed=%d speed_cmps=%.3f position_error_cm=%.3f position_limit_cm=%.3f axial_heading_error_deg=%.3f heading_limit_deg=%.3f lidar=%d docking_fix=%d destination=%s cargo_position=%s"),
                 CraneID,Stage,bDestinationReady,*GetNameSafe(HandoverAGV),Observation.bAGVAligned,AGVSpeed,PositionError,STSProfile.AGVTolerance,
-                HeadingError,STSProfile.AGVHeadingTolerance,bInLidar,*Slots[1-SourceSlot].ToString(),*AGVCargo.ToString());
+                HeadingError,STSProfile.AGVHeadingTolerance,bInLidar,bDockingFix,*Slots[1-SourceSlot].ToString(),*AGVCargo.ToString());
             UE_LOG(LogTemp,Error,TEXT("CRANE_ALIGNMENT_TIMEOUT: crane=%d kind=%s stage=%d ready=%d agv=%s observed=%d destination=%s wait=%.2f"),
                 CraneID,bSTS?TEXT("STS"):TEXT("RMG"),Stage,bDestinationReady,*GetNameSafe(HandoverAGV),
                 Observation.bAGVAligned,*Slots[bSTS?1-SourceSlot:SourceSlot].ToString(),AGVAlignmentWait);

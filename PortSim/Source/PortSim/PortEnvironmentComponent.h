@@ -141,7 +141,7 @@ struct PORTSIM_API FPortWindAerodynamics
 struct PORTSIM_API FPortFogState
 {
     static constexpr float DefaultVisibilityMeters=30.f;
-    static constexpr float MinimumVisibilityMeters=5.f;
+    static constexpr float MinimumVisibilityMeters=20.f;
     static constexpr float MaximumVisibilityMeters=1000.f;
     bool bFogEnabled=false;
     float VisibilityMeters=DefaultVisibilityMeters;

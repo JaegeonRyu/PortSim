@@ -139,9 +139,19 @@ void APortWorkingCrane::UpdateSpreaderGeometry()
 bool APortWorkingCrane::AGVAligned() const
 {
     if(!bExternalJobs) return true;
-    return IsValid(HandoverAGV) && HandoverAGV->Speed<=0.1f &&
+    if(!IsValid(HandoverAGV)) return false;
+    // Fog and heavy rain may hide the gantry-mounted long-range LiDAR even
+    // after the AGV has completed its final docking move.  The docking node's
+    // buried transponder/FMS fix is independent of optical visibility and is a
+    // valid redundant confirmation, but never bypasses the physical position,
+    // speed or heading interlocks below.
+    const bool bDockingFix=HandoverAGV->Sensors.bFMSConnected &&
+        HandoverAGV->Sensors.bDockingNode && HandoverAGV->Sensors.bTransponderLocked;
+    const bool bPositionConfirmed=(bSTS?Stage<5:Stage<2) || bDockingFix ||
+        STSSensorContains(TEXT("agv_position_lidar"),HandoverAGV->CargoPosition());
+    return HandoverAGV->Speed<=0.1f &&
         HandoverAGV->CargoPosition().Equals(Slots[bSTS?1-SourceSlot:SourceSlot],STSProfile.AGVTolerance) &&
-        ((bSTS?Stage<5:Stage<2) || STSSensorContains(TEXT("agv_position_lidar"),HandoverAGV->CargoPosition())) &&
+        bPositionConfirmed &&
         AGVReference::AxialHeadingErrorDegrees(HandoverAGV->GetActorRotation().Yaw,Orientation.Rotator().Yaw)<=STSProfile.AGVHeadingTolerance;
 }
 
