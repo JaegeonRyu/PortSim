@@ -204,6 +204,20 @@ bool FPortEnvironmentUISettingsTest::RunTest(const FString& Parameters)
     auto* Component=NewObject<UPortEnvironmentComponent>();
     Component->SetWindSpeedMetersPerSecond(6.f);
     TestEqual(TEXT("Wind slider sets mean speed"),Component->GetWindSpeedMetersPerSecond(),6.f);
+    TestEqual(TEXT("Wind slider retains its selected setting"),Component->GetWindSettingMetersPerSecond(),6.f);
+    TestTrue(TEXT("Wind slider ratio uses its selected setting"),
+        FMath::IsNearlyEqual(Component->GetWindIntensity(),5.f/6.f,.0001f));
+    bool MeanChanged=false,MeanStayedNearReference=true;
+    for(int32 I=0;I<600;++I)
+    {
+        Component->AdvanceEnvironment(.5f);
+        const float LiveMean=Component->GetWindSpeedMetersPerSecond();
+        MeanChanged|=!FMath::IsNearlyEqual(LiveMean,6.f,.001f);
+        MeanStayedNearReference&=LiveMean>=5.f&&LiveMean<=7.f;
+    }
+    TestTrue(TEXT("Selected wind reference produces changing live mean wind"),MeanChanged);
+    TestTrue(TEXT("Live mean wind remains within one metre per second of its reference"),MeanStayedNearReference);
+    TestEqual(TEXT("Live wind does not move the setup slider"),Component->GetWindSettingMetersPerSecond(),6.f);
     Component->SetSeaIntensity(.75f);
     TestTrue(TEXT("Sea slider round trips"),FMath::IsNearlyEqual(Component->GetSeaIntensity(),.75f));
     Component->SetRainIntensity(.5f);

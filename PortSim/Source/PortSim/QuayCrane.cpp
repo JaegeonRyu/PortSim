@@ -965,7 +965,7 @@ void APortSimHUD::DrawHUD()
                 AddHitBox(FVector2D(LabelX-6.f*Scale,RowY+21.f*Scale),FVector2D(Width+12.f*Scale,28.f*Scale),SliderName,true,50);
                 Y+=52.f*Scale;
             };
-            EnvironmentSlider(FString::Printf(TEXT("바람 %.1f m/s  [Ctrl+0]"),Environment->GetWindSpeedMetersPerSecond()),
+            EnvironmentSlider(FString::Printf(TEXT("바람 설정 %.1f m/s  [Ctrl+0]"),Environment->GetWindSettingMetersPerSecond()),
                 Environment->GetWindIntensity(),Environment->IsWindEnabled(),TEXT("WindIntensitySlider"),TEXT("ToggleWindSetting"));
             EnvironmentSlider(FString::Printf(TEXT("파도·너울 Hs %.2f m  [Ctrl+1]"),Environment->GetSignificantWaveHeightMeters()),
                 Environment->GetSeaIntensity(),Environment->IsSeaMotionEnabled(),TEXT("SeaIntensitySlider"),TEXT("ToggleSeaSetting"));

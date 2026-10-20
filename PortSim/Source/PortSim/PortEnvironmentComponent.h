@@ -81,6 +81,7 @@ struct PORTSIM_API FPortWindState
     static constexpr float MinimumSpeed=1.f;
     static constexpr float TypicalSpeed=3.5f;
     static constexpr float MaximumSpeed=7.f;
+    static constexpr float MeanVariationMetersPerSecond=1.f;
     // Normal-operation gust assumptions. These are not measured DGT limits.
     // A short plateau represents the meteorological three-second gust sample.
     static constexpr float MinimumGustPeak=2.f;
@@ -92,6 +93,7 @@ struct PORTSIM_API FPortWindState
     static constexpr float MaximumGustDirectionOffset=15.f;
     bool bWindEnabled=true;
     float WindSpeedMetersPerSecond=TypicalSpeed;
+    float ReferenceWindSpeedMetersPerSecond=TypicalSpeed;
     float WindDirectionDegrees=0;
     FVector WindDirectionVector=FVector(-1,0,0);
     float TargetWindSpeedMetersPerSecond=TypicalSpeed;
@@ -109,6 +111,7 @@ struct PORTSIM_API FPortWindState
 
     void Initialize(int32 Seed);
     void Advance(double SimulationSeconds);
+    void SetReferenceSpeed(float Speed);
     FVector EffectiveVelocity() const;
     float EffectiveDirectionDegrees() const;
     static float NormalizeDirection(float Degrees);
@@ -121,6 +124,7 @@ struct PORTSIM_API FPortWindState
 private:
     FRandomStream Random,GustRandom;
     float SampleSpeed();
+    float SampleTargetSpeed();
     void SelectTarget();
     void AdvanceMean(double SimulationSeconds);
     void AdvanceGust(double SimulationSeconds);
@@ -203,8 +207,10 @@ public:
     UFUNCTION(BlueprintCallable, Category="Environment|Wind") void ToggleWind() { Wind.bWindEnabled=!Wind.bWindEnabled; }
     UFUNCTION(BlueprintCallable, Category="Environment|Wind") void SetWindEnabled(bool Enabled) { Wind.bWindEnabled=Enabled; }
     UFUNCTION(BlueprintCallable, Category="Environment|Wind") void SetWindSpeedMetersPerSecond(float Speed);
+    /** User-selected slider value. Unlike live mean/gust wind, this does not drift with weather. */
+    UFUNCTION(BlueprintPure, Category="Environment|Wind") float GetWindSettingMetersPerSecond() const { return Wind.ReferenceWindSpeedMetersPerSecond; }
     UFUNCTION(BlueprintPure, Category="Environment|Wind") float GetWindIntensity() const
-    { return (Wind.WindSpeedMetersPerSecond-FPortWindState::MinimumSpeed)/(FPortWindState::MaximumSpeed-FPortWindState::MinimumSpeed); }
+    { return (Wind.ReferenceWindSpeedMetersPerSecond-FPortWindState::MinimumSpeed)/(FPortWindState::MaximumSpeed-FPortWindState::MinimumSpeed); }
     const FPortWindState& GetWindState() const { return Wind; }
     UFUNCTION(BlueprintPure, Category="Environment|Sea") bool IsSeaMotionEnabled() const { return Sea.bSeaMotionEnabled; }
     UFUNCTION(BlueprintPure, Category="Environment|Sea") float GetSignificantWaveHeightMeters() const { return Sea.SignificantWaveHeightMeters(); }

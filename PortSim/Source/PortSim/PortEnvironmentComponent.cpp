@@ -122,9 +122,17 @@ float FPortWindState::SampleSpeed()
         MaximumSpeed-FMath::Sqrt((1-U)*Width*(MaximumSpeed-TypicalSpeed)),MinimumSpeed,MaximumSpeed);
 }
 
+float FPortWindState::SampleTargetSpeed()
+{
+    // Two independent uniform samples produce a triangular fluctuation that
+    // spends more time near the user-selected reference than at its bounds.
+    const float Offset=(Random.FRand()+Random.FRand()-1.f)*MeanVariationMetersPerSecond;
+    return FMath::Clamp(ReferenceWindSpeedMetersPerSecond+Offset,MinimumSpeed,MaximumSpeed);
+}
+
 void FPortWindState::SelectTarget()
 {
-    TargetWindSpeedMetersPerSecond=SampleSpeed();
+    TargetWindSpeedMetersPerSecond=SampleTargetSpeed();
     TargetWindDirectionDegrees=NormalizeDirection(WindDirectionDegrees+Random.FRandRange(-60.f,60.f));
     SecondsUntilTarget=Random.FRandRange(20.f,60.f);
 }
@@ -167,6 +175,7 @@ void FPortWindState::Initialize(int32 Seed)
     GustRandom.Initialize(Seed^0x6D2B79F5);
     bWindEnabled=true;
     WindSpeedMetersPerSecond=SampleSpeed();
+    ReferenceWindSpeedMetersPerSecond=WindSpeedMetersPerSecond;
     WindDirectionDegrees=NormalizeDirection(Random.FRandRange(0.f,360.f));
     WindDirectionVector=FlowDirection(WindDirectionDegrees);
     TargetWindSpeedMetersPerSecond=WindSpeedMetersPerSecond;
@@ -180,6 +189,15 @@ void FPortWindState::Initialize(int32 Seed)
     GustElapsedSeconds=GustDurationSeconds=0;
     GustCount=0;
     ScheduleNextGust(true);
+}
+
+void FPortWindState::SetReferenceSpeed(float Speed)
+{
+    ReferenceWindSpeedMetersPerSecond=FMath::Clamp(Speed,MinimumSpeed,MaximumSpeed);
+    WindSpeedMetersPerSecond=TargetWindSpeedMetersPerSecond=ReferenceWindSpeedMetersPerSecond;
+    // Preserve a calm transition from the newly selected reference before
+    // choosing the next bounded mean-wind target. Gust scheduling is separate.
+    SecondsUntilTarget=Random.FRandRange(20.f,60.f);
 }
 
 float FPortWindState::InterpolateDirection(float Current,float Target,double Seconds)
@@ -284,10 +302,7 @@ UPortEnvironmentComponent::UPortEnvironmentComponent()
 void UPortEnvironmentComponent::SetWindSpeedMetersPerSecond(float Speed)
 {
     if(!FMath::IsFinite(Speed)) return;
-    Wind.WindSpeedMetersPerSecond=Wind.TargetWindSpeedMetersPerSecond=
-        FMath::Clamp(Speed,FPortWindState::MinimumSpeed,FPortWindState::MaximumSpeed);
-    // A UI-selected mean remains stable; gusts still follow their independent schedule.
-    Wind.SecondsUntilTarget=TNumericLimits<double>::Max();
+    Wind.SetReferenceSpeed(Speed);
 }
 
 void UPortEnvironmentComponent::SetSeaIntensity(float Intensity)
