@@ -20,7 +20,8 @@ public:
     APortWorkingCrane();
     void Configure(int32 Number, bool bQuayside, FVector Source, FVector Destination, bool bCreateCargo=true);
     void Advance(float Dt, bool bGlobalPaused);
-    bool AssignCargo(APortContainerActor* Cargo, FVector Source, FVector Destination, bool SourceSupport, bool DestinationSupport, APortAGVActor* HandoverVehicle=nullptr);
+    bool AssignCargo(APortContainerActor* Cargo, FVector Source, FVector Destination, bool SourceSupport, bool DestinationSupport, APortAGVActor* HandoverVehicle=nullptr,bool ReverseTransfer=false);
+    void UpdateShipLandingTarget(FVector Target);
     void SetSTSProfile(const FSTSOperatingProfile& Profile) { STSProfile=Profile; }
     void SetWindVelocity(FVector WorldVelocityMetersPerSecond);
     void SetFogVisibilityMeters(float VisibilityMeters);
@@ -54,6 +55,8 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") FString Fault;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") TObjectPtr<APortContainerActor> CargoActor;
 private:
+    bool bReverseTransfer=false;
+    bool AGVAtDestination() const { return bSTS!=bReverseTransfer; }
     bool bDeferRopeVisuals=false, bRopeVisualsDirty=false;
     void UpdateRopeVisuals();
     double ShipControlFraction=1;

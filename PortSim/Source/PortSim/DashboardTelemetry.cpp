@@ -369,6 +369,8 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     Root->SetStringField(TEXT("handover_policy"),UsesCargoAlignedHandover()?TEXT("cargo_aligned_quay"):TEXT("fixed_quay"));
     Root->SetStringField(TEXT("fault"),Fault);
     Root->SetNumberField(TEXT("delivered"),Delivered);
+    Root->SetNumberField(TEXT("loaded"),LoadedCount());
+    Root->SetNumberField(TEXT("load_total"),ExportCargo.Num());
     Root->SetNumberField(TEXT("initial_ship"),InitialShipCount());
     auto SizeMix=Object(); int32 Sizes[3]={0,0,0};
     for(const auto& C:ShipContainers) ++Sizes[C->LengthFt==20?0:C->LengthFt==40?1:2];

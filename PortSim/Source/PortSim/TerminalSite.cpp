@@ -315,12 +315,23 @@ void AQuayCrane::BuildTerminalSite()
                     const int32 Bay=InputRow?InputRow->GridSlot.X:(Local/ShipRows)%ShipBays;
                     const int32 Tier=InputRow?InputRow->GridSlot.Z:Local/(ShipRows*ShipBays);
                     const float BayY=bUnifiedTerminal?-81.f+Bay*18.f:-99.f+Bay*13.f;
-                    const FVector Position(-49+Row*3,Y+BayY,5.695+Tier*2.59);
+                    const FVector Position(InputRow?-45.5+Row*3:-49+Row*3,Y+BayY,
+                        InputRow?TerminalLayout::VesselDeckTopM+1.2955+Tier*2.591:5.695+Tier*2.59);
                     const float CraneSpacing=bUnifiedTerminal?70.f:100.f;
                     const int32 Nearest=FMath::Clamp(FMath::RoundToInt((Position.Y-(Y-CraneSpacing))/CraneSpacing),0,2)+(bUnifiedTerminal?VesselIndex*3:(Y<0?0:5));
                     SiteLogistics->AddShipCargo(Position*100.,Nearest,bUnifiedTerminal && !Imported?Index/Capacity:0,
-                        InputRow?FName(*InputRow->ContainerId):NAME_None);
+                        InputRow?FName(*InputRow->ContainerId):NAME_None,false,
+                        Imported && !ConfiguredVesselOperations[VesselIndex].Rows.ContainsByPredicate(
+                            [InputRow](const FPortVesselInputRow& R){return R.Operation==TEXT("DISCHARGE") && R.ContainerId==InputRow->ContainerId;}),
+                        InputRow?InputRow->GridSlot:FIntVector(-1));
                 }
+        if(Imported) for(const auto& R:ConfiguredVesselOperations[VesselIndex].Rows) if(R.Operation==TEXT("LOAD"))
+        {
+            const FVector Position(-45.5+R.GridSlot.Y*3,Y-81.f+R.GridSlot.X*18.f,
+                TerminalLayout::VesselDeckTopM+1.2955+R.GridSlot.Z*2.591);
+            const int32 Nearest=VesselIndex*3+FMath::Clamp(FMath::RoundToInt((Position.Y-Y)/70.f)+1,0,2);
+            SiteLogistics->AddShipCargo(Position*100.,Nearest,0,FName(*R.ContainerId),true,false,R.GridSlot);
+        }
         ++VesselIndex;
     }
     auto Building=[&](const TCHAR* Name,float X,float Y,FVector Size)
