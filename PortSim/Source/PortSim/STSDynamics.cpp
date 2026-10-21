@@ -70,7 +70,14 @@ bool FSTSDynamicsConfig::Load(TSharedPtr<FJsonObject> Root,FString& Error)
 FVector FSTSDynamicsParameters::AerodynamicForce(FVector BodyVelocityMps) const
 {
     const FVector RelativeWind=Wind-BodyVelocityMps;
-    return .5*1.225*WindDrag*WindArea*RelativeWind.Size()*RelativeWind;
+    const double Speed=RelativeWind.Size();
+    if(Speed<=KINDA_SMALL_NUMBER || RelativeWind.ContainsNaN()) return FVector::ZeroVector;
+    const bool bDirectionalAreas=WindProjectedAreasM2.X>0 && WindProjectedAreasM2.Y>0 &&
+        WindProjectedAreasM2.Z>0 && !WindProjectedAreasM2.ContainsNaN();
+    const FVector Areas=bDirectionalAreas
+        ?WindProjectedAreasM2:FVector(WindArea);
+    const double ProjectedArea=FVector::DotProduct((RelativeWind/Speed).GetAbs(),Areas);
+    return .5*1.225*WindDrag*ProjectedArea*Speed*RelativeWind;
 }
 
 FVector FSTSDynamicsParameters::WindEquilibriumOffset(double LengthM,double MassKg) const

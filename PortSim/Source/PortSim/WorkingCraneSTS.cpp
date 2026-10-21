@@ -48,6 +48,13 @@ void APortWorkingCrane::SetRainSensorRangeScales(float CameraScale,float LiDARSc
     RainLiDARRangeScale=FMath::Clamp(LiDARScale,0.f,1.f);
 }
 
+FVector APortWorkingCrane::WindProjectedAreasM2() const
+{
+    if(bCarrying && IsValid(CargoActor))
+        return PortSpreaderTelescope::LoadedProjectedAreasM2(TelescopeLengthCm,CargoActor->ExternalDimensionsCm);
+    return PortSpreaderTelescope::EmptyProjectedAreasM2(TelescopeLengthCm);
+}
+
 void APortWorkingCrane::UpdateMovingShipSource(APortContainerActor* Cargo,FVector WorldPosition)
 {
     if(!bSTS || !bJobActive || bCarrying || CargoActor!=Cargo || Stage>2 || SourceSlot<0 || SourceSlot>1) return;
@@ -120,19 +127,22 @@ void APortWorkingCrane::UpdateSpreaderGeometry()
     if(!SpreaderCenter) return;
     const float EndY=PortSpreaderTelescope::TwistlockHalfLengthCm(TelescopeLengthCm);
     const float HalfWidth=PortSpreaderTelescope::TwistlockHalfWidthCm();
-    constexpr float CentreHalfLength=250.f;
+    constexpr float CentreHalfLength=PortSpreaderTelescope::CentreLengthCm*.5f;
     const float ArmLength=FMath::Max(40.f,EndY-CentreHalfLength);
     SpreaderCenter->SetRelativeLocation(FVector::ZeroVector);
-    SpreaderCenter->SetRelativeScale3D(FVector(243.8f,500.f,50.f)/100.f);
+    SpreaderCenter->SetRelativeScale3D(FVector(PortSpreaderTelescope::WidthCm,
+        PortSpreaderTelescope::CentreLengthCm,PortSpreaderTelescope::CentreHeightCm)/100.f);
     for(int32 End=0;End<2;++End)
     {
         const float Sign=End?1.f:-1.f;
         TelescopeArms[End]->SetRelativeLocation(FVector(0,Sign*(CentreHalfLength+ArmLength*.5f),0));
-        TelescopeArms[End]->SetRelativeScale3D(FVector(125.f,ArmLength,34.f)/100.f);
+        TelescopeArms[End]->SetRelativeScale3D(FVector(PortSpreaderTelescope::ArmWidthCm,
+            ArmLength,PortSpreaderTelescope::ArmHeightCm)/100.f);
         SpreaderEndBeams[End]->SetRelativeLocation(FVector(0,Sign*EndY,0));
     }
     for(int32 Corner=0;Corner<4;++Corner)
-        TwistLocks[Corner]->SetRelativeLocation(FVector((Corner&1)?HalfWidth:-HalfWidth,(Corner&2)?EndY:-EndY,-35.f));
+        TwistLocks[Corner]->SetRelativeLocation(FVector((Corner&1)?HalfWidth:-HalfWidth,
+            (Corner&2)?EndY:-EndY,PortSpreaderTelescope::TwistlockCenterZCm));
     UpdateSpreaderSensors();
 }
 
@@ -263,6 +273,7 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
     // The plant receives the current environment. The controller receives the
     // latest 20 Hz wind-sensor observation below, just like the other feedback.
     C.Wind=Orientation.UnrotateVector(WindVelocityMetersPerSecond);
+    C.WindProjectedAreasM2=WindProjectedAreasM2();
     Hoist=FMath::Min(Hoist,float(C.MotorMaxRPM*2*PI/60*C.DrumRadius/(C.Parts*C.GearRatio)*100));
     const FVector Limits(STSProfile.TrolleySpeed,STSProfile.GantrySpeed,Hoist);
     const FVector Accelerations(STSProfile.TrolleyAcceleration,STSProfile.GantryAcceleration,STSProfile.HoistAcceleration);

@@ -9,7 +9,13 @@ bool FSTSDynamicsTest::RunTest(const FString& Parameters)
 {
     FSTSOperatingProfile P;
     if(!TestTrue(TEXT("Read full assumed dynamics profile"),P.Load(FPaths::ProjectDir()/TEXT("../Document/STS/STS_ReferenceData.json"),FPaths::ProjectConfigDir()/TEXT("STS_Simulation.json")))) return false;
+    TestEqual(TEXT("Configured spreader mass is 8 tonnes"),P.SpreaderMassKg,8000.f);
     auto C=P.Dynamics; FSTSSuspension D;
+    auto Directional=C; Directional.WindProjectedAreasM2=FVector(10,2,1);
+    Directional.Wind=FVector(5,0,0); const FVector XWindForce=Directional.AerodynamicForce(FVector::ZeroVector);
+    Directional.Wind=FVector(0,5,0); const FVector YWindForce=Directional.AerodynamicForce(FVector::ZeroVector);
+    TestTrue(TEXT("Directional wind force uses the face presented to the wind"),
+        FMath::IsNearlyEqual(XWindForce.X/YWindForce.Y,5.,1.e-6));
     D.Step(C,.05,20,0,FVector::ZeroVector,FVector::ZeroVector,17000,FVector::ZeroVector,P.HoistPowerW);
     double Total=0;for(double T:D.Tension)Total+=T*C.Parts;
     TestTrue(TEXT("Static vertical rope forces balance suspended weight"),FMath::Abs(Total-17000*9.80665)<.01);

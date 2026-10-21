@@ -38,14 +38,18 @@ APortWorkingCrane::APortWorkingCrane()
     // telescopic arms, end beams and twistlocks move within this common frame.
     Spreader=Box(TEXT("Spreader"),RootComponent,FVector::ZeroVector,FVector(100));
     Spreader->SetVisibility(false);
-    SpreaderCenter=Box(TEXT("SpreaderCenter"),Spreader,FVector::ZeroVector,FVector(243.8f,500.f,50.f));
+    SpreaderCenter=Box(TEXT("SpreaderCenter"),Spreader,FVector::ZeroVector,
+        FVector(PortSpreaderTelescope::WidthCm,PortSpreaderTelescope::CentreLengthCm,PortSpreaderTelescope::CentreHeightCm));
     for(int32 End=0;End<2;++End)
     {
-        TelescopeArms.Add(Box(*FString::Printf(TEXT("TelescopeArm_%d"),End),Spreader,FVector::ZeroVector,FVector(125.f,350.f,34.f)));
-        SpreaderEndBeams.Add(Box(*FString::Printf(TEXT("SpreaderEndBeam_%d"),End),Spreader,FVector::ZeroVector,FVector(243.8f,40.f,60.f)));
+        TelescopeArms.Add(Box(*FString::Printf(TEXT("TelescopeArm_%d"),End),Spreader,FVector::ZeroVector,
+            FVector(PortSpreaderTelescope::ArmWidthCm,350.f,PortSpreaderTelescope::ArmHeightCm)));
+        SpreaderEndBeams.Add(Box(*FString::Printf(TEXT("SpreaderEndBeam_%d"),End),Spreader,FVector::ZeroVector,
+            FVector(PortSpreaderTelescope::WidthCm,PortSpreaderTelescope::EndBeamLengthCm,PortSpreaderTelescope::EndBeamHeightCm)));
     }
     for(int32 Corner=0;Corner<4;++Corner)
-        TwistLocks.Add(Box(*FString::Printf(TEXT("TwistLock_%d"),Corner),Spreader,FVector::ZeroVector,FVector(16.f,16.f,20.f)));
+        TwistLocks.Add(Box(*FString::Printf(TEXT("TwistLock_%d"),Corner),Spreader,FVector::ZeroVector,
+            FVector(PortSpreaderTelescope::TwistlockWidthCm,PortSpreaderTelescope::TwistlockLengthCm,PortSpreaderTelescope::TwistlockHeightCm)));
     Mast=Box(TEXT("Mast"),RootComponent,FVector::ZeroVector,FVector(100));
     NameLabel=Label(TEXT("CraneName"),FVector::ZeroVector);
     Tags.Add(TEXT("PortSim.WorkingCrane"));
@@ -453,6 +457,7 @@ bool APortWorkingCrane::ValidateOperation(FString& Error) const
     {
         FSTSDynamicsParameters WindConfig=STSProfile.Dynamics;
         WindConfig.Wind=Orientation.UnrotateVector(WindVelocityMetersPerSecond);
+        WindConfig.WindProjectedAreasM2=WindProjectedAreasM2();
         const FVector WindAllowance=WindConfig.WindEquilibriumOffset(STSProfile.MaxRope,
             FMath::Max(1.f,STSProfile.SpreaderMassKg))*100.;
         Margin+=FMath::Max(FMath::Abs(WindAllowance.X),FMath::Abs(WindAllowance.Y));

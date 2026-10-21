@@ -49,6 +49,22 @@ bool FContainerSpecificationTest::RunTest(const FString& Parameters)
     const float C45=PortSpreaderTelescope::TwistlockHalfLengthCm(PortSpreaderTelescope::Length45Cm);
     TestTrue(TEXT("Twistlock end beams have distinct ordered positions for 20/40/45 ft"),C20<C40 && C40<C45);
     TestTrue(TEXT("20 ft longitudinal twistlock centre spacing is approximately 5.852 m"),FMath::IsNearlyEqual(C20*2.f,585.2f,.2f));
+    const FVector Empty20=PortSpreaderTelescope::EmptyProjectedAreasM2(PortSpreaderTelescope::Length20Cm);
+    const FVector Empty40=PortSpreaderTelescope::EmptyProjectedAreasM2(PortSpreaderTelescope::Length40Cm);
+    const FVector Empty45=PortSpreaderTelescope::EmptyProjectedAreasM2(PortSpreaderTelescope::Length45Cm);
+    TestTrue(TEXT("Empty spreader broadside area follows 20/40/45 ft telescope length"),
+        Empty20.X<Empty40.X && Empty40.X<Empty45.X);
+    TestTrue(TEXT("Empty spreader end-on area is independent of telescope length"),
+        FMath::IsNearlyEqual(Empty20.Y,Empty40.Y) && FMath::IsNearlyEqual(Empty40.Y,Empty45.Y));
+    TestTrue(TEXT("Open-frame empty spreader horizontal areas stay below the legacy solid 30 m2 value"),
+        Empty45.X<30.f && Empty45.Y<30.f);
+    const FVector Container20(243.8f,605.8f,259.1f),Container40(243.8f,1219.2f,259.1f),Container45(243.8f,1371.6f,259.1f);
+    const FVector Loaded20=PortSpreaderTelescope::LoadedProjectedAreasM2(PortSpreaderTelescope::Length20Cm,Container20);
+    const FVector Loaded40=PortSpreaderTelescope::LoadedProjectedAreasM2(PortSpreaderTelescope::Length40Cm,Container40);
+    const FVector Loaded45=PortSpreaderTelescope::LoadedProjectedAreasM2(PortSpreaderTelescope::Length45Cm,Container45);
+    TestTrue(TEXT("Loaded broadside area follows container size"),Loaded20.X<Loaded40.X && Loaded40.X<Loaded45.X);
+    TestTrue(TEXT("Every loaded state exposes more horizontal area than its empty spreader"),
+        Loaded20.X>Empty20.X && Loaded40.X>Empty40.X && Loaded45.X>Empty45.X && Loaded40.Y>Empty40.Y);
     return true;
 }
 

@@ -162,7 +162,7 @@ TXT에는 직접적인 sway/skew 자세 센서가 별도 항목으로 없다. �
 | `PortSim/Source/PortSim/TerminalAutomation.cpp` | `DriveSpreaderTo` 및 단계 전환이 실제 위치/속도를 직접 사용 | 센서 관측과 유효성에 근거한 상태 전이 |
 | 동일 파일, `BuildTerminal` | 이동 350cm/s, 가속도 220cm/s², 권상 250cm/s로 덮어씀 | 프로파일 도입 시 초기화 덮어쓰기 제거; 도면에는 가속도 없음 |
 | `PortSim/Source/PortSim/PortContainerActor.cpp` | 컨테이너 12,000kg 고정 | 작업별 질량·무게중심·관성 입력 |
-| `PortSim/Source/PortSim/QuayCrane.cpp`, `BeginPlay` | 스프레더 5,000kg 고정 | 실제 자중은 별도 자료 필요. 현재값을 GA 값으로 승격하지 않음 |
+| `PortSim/Source/PortSim/QuayCrane.cpp`, `BeginPlay` | 스프레더 8,000kg 시뮬레이션 가정 | 실제 자중은 별도 자료 필요. 현재값을 GA 값으로 승격하지 않음 |
 | `PortSim/Source/PortSim/TerminalFleet.cpp` | AGV/RMG 보유 시 화물 물리를 끄고 위치를 따라가게 함 | 인계 구간 접촉·지지·장력 연속성을 검증할 물리 방식 필요 |
 | `PortSim/Source/PortSim/TerminalLayout.h` | 야드/레일/슬롯 좌표 상수 | 실제 STS 크기에 맞춰 선박·AGV·야드 배치를 함께 재검토 |
 

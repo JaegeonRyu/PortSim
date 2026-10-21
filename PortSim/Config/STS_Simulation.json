@@ -7,6 +7,7 @@
     "Sensors are synthetic observations. Four corner loads use a quasi-static bilinear load split, not independent constraint reactions.",
     "Positions, accelerations, sensor tolerances, masses and CoG below are simulation assumptions.",
     "Site STS uses a reduced-order taut-rope suspension; roll/pitch constrained. Cable elasticity is diagnostic only. Motor and mount data are assumptions, not verified installation data.",
+    "Spreader mass is an 8,000 kg simulation assumption. Wind uses the visible telescopic-frame silhouette when empty and adds the active 20/40/45 ft container dimensions when loaded; wind_area_m2 remains a legacy fallback for isolated dynamics.",
     "Sensor metadata identifies manufacturer specifications separately from derived/assumed installation geometry. Source CSV IDs are mapped by function, not by number."
   ],
   "assumed_kg_per_LT": 1016.0469088,
@@ -17,7 +18,7 @@
   "gantry_acceleration_mps2": 1.0,
   "hoist_acceleration_mps2": 1.0,
   "default_container_mass_kg": 12000,
-  "spreader_mass_kg": 5000,
+  "spreader_mass_kg": 8000,
   "container_cog_x_m": 0,
   "container_cog_y_m": 0,
   "container_cog_z_m": 0,

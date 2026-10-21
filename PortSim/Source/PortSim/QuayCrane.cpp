@@ -212,7 +212,7 @@ void AQuayCrane::BeginPlay()
     bHUDVisible=!FParse::Param(FCommandLine::Get(),TEXT("PortSimHUDHidden"));
     // Demo always starts at a known world origin, regardless of PlayerStart placement.
     SetActorLocationAndRotation(FVector::ZeroVector, FRotator::ZeroRotator);
-    Spreader->SetMassOverrideInKg(NAME_None, 5000.f);
+    Spreader->SetMassOverrideInKg(NAME_None, 8000.f);
     bSmokeTest = FParse::Param(FCommandLine::Get(), TEXT("PortSimSmokeTest"));
     bTerminalTest = FParse::Param(FCommandLine::Get(), TEXT("PortSimTerminalTest")) || FParse::Param(FCommandLine::Get(),TEXT("PortSimFleetResetTest"));
     bTerminalMode = !bSmokeTest;
