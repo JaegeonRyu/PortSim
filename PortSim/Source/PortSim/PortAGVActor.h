@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "PortEquipmentActor.h"
+#include "WeatherFriction.h"
 #include "PortAGVActor.generated.h"
 
 class UStaticMeshComponent;
@@ -55,19 +56,29 @@ public:
     void SetFMSCommand(FVector Target,int32 NodeIndex,int32 NodeCount,bool Docking,float AcceptanceCm=-1.f,
         FVector ExpectedDockingAxis=FVector::ZeroVector);
     void SetFMSHold(bool Hold);
+    void SetDriveFailure(bool Failed) { bDriveFault=Failed; SetFMSHold(Failed); }
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="AGV|Failures") bool bDriveFault=false;
     void UpdateLiDARObservation(float FrontDistanceCm,float RearDistanceCm,float SafetyDistanceCm,float DetectionRangeCm,
         bool ControlledStop,int32 BlockingVehicleID=INDEX_NONE);
     float SpeedLimitCmPerSecond() const;
     void SetApproachSpeedLimit(float Limit) { FMSApproachSpeedLimit=Limit; }
-    void SetWetTractionScale(float Scale) { WetTractionScale=FMath::Clamp(Scale,.5f,1.f); }
     void SetSteeringLookAhead(FVector Target,bool Enabled) { SteeringLookAhead=Target; bSteeringLookAhead=Enabled; }
     float AccelerationCmPerSecondSquared() const;
+    float BrakingCmPerSecondSquared() const;
+    float CurveSpeedCmPerSecond() const;
+    float TireGripCmPerSecondSquared() const;
+    float LongitudinalGripCmPerSecondSquared() const;
+    float WindResistanceNewtons() const;
+    FPortSurfaceState Surface;
+    FPortFrictionSettings Friction;
+    FVector WindVelocity=FVector::ZeroVector;
+    float LastCurvaturePerCm=0;
     bool PayloadWithinReferenceLimit() const;
     // Usable 60 percentage points: 8 operating hours, 30-minute fast charge.
     static constexpr double LowBatteryPercent=20.;
     static constexpr double ChargeLimitPercent=80.;
     void AdvanceBattery(double Seconds,bool Operating,bool Charging);
-    bool CanAcceptWork() const { return BatteryPercent>LowBatteryPercent && !bNeedsCharge && !bCharging; }
+    bool CanAcceptWork() const { return !bDriveFault && BatteryPercent>LowBatteryPercent && !bNeedsCharge && !bCharging; }
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV|Battery") double BatteryPercent=80.;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV|Battery") bool bNeedsCharge=false;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV|Battery") bool bCharging=false;
@@ -87,7 +98,6 @@ private:
     void CorrectAtTransponder(FVector Position);
     float FMSAcceptanceCm=800.f;
     float FMSApproachSpeedLimit=MAX_flt;
-    float WetTractionScale=1.f;
     FVector SteeringLookAhead=FVector::ZeroVector;
     bool bSteeringLookAhead=false;
     FVector DockingAxis=FVector::ZeroVector;

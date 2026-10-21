@@ -30,3 +30,20 @@ for(const vessel of state.vessels){
 }
 assert.equal(placements,600);assert.equal(short,168);
 console.log(`ARRIVAL TELEMETRY PASS: ${placements} real container slots; ${short} 20ft subslots`);
+const equipment=state.actors.filter(a=>['agv','sts','rmg'].includes(a.type));
+assert.equal(equipment.length,115);
+for(const a of equipment){
+ const f=a.friction;assert(f,`${a.name} missing surface physics`);
+ for(const k of ['wetness','snow','ice'])assert(Number.isFinite(f[k])&&f[k]>=0&&f[k]<=1);
+ for(const pair of ['tire','rail','steel']){
+  assert(f[`${pair}_kinetic_mu`]>0);
+  assert(f[`${pair}_kinetic_mu`]<=f[`${pair}_static_mu`]);
+ }
+ if(a.type==='agv'){
+  assert(Number.isFinite(f.braking_mps2)&&f.braking_mps2>=0);
+  assert(Number.isFinite(f.stopping_distance_m)&&f.stopping_distance_m>=0);
+ }else{
+  assert(Number.isFinite(f.seating_demand_n)&&Number.isFinite(f.seating_capacity_n));
+ }
+}
+console.log(`FRICTION TELEMETRY PASS: ${equipment.length} live equipment records`);

@@ -71,4 +71,14 @@ namespace TrafficJunctionPolicy
         if(A && B && *A!=*B) return *A<*B;
         return IDA<IDB;
     }
+
+    // A bounded head start in seconds, not an absolute right of way. Aging
+    // always lets a sufficiently older return beat a fresh pickup request.
+    inline double MissionBonus(bool Pickup,double SuspendedWaitSeconds,bool ClearingSTS)
+    {
+        if(ClearingSTS) return 40.;
+        return Pickup?20.+FMath::Clamp(SuspendedWaitSeconds*.1,0.,20.):0.;
+    }
+    inline double PriorityTime(const double* Since,double Now,double Bonus)
+    { return (Since?*Since:Now)-FMath::Clamp(Bonus,0.,40.); }
 }

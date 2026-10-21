@@ -2,6 +2,7 @@
 #include "PortSiteLogistics.h"
 #include "PortAGVActor.h"
 #include "PortContainerActor.h"
+#include "PortWorkingCrane.h"
 #include "TerminalLayout.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
@@ -67,6 +68,8 @@ bool FInlandRoadTrafficTest::RunTest(const FString& Parameters)
     Site->Jobs.Init(FSiteTransfer(),2); Site->Yard.SetNum(2); Site->Manifest.SetNum(2);
     Site->SlotAssigned.Init(false,2); Site->BlocksBusy.Init(false,1);
     Site->RMGBusy.Init(true,1); Site->YardApproachOwners.Init(0,1);
+    // Admission now also checks that the destination crane is operational.
+    Site->Equipment.Add(World->SpawnActor<APortWorkingCrane>());
     const FVector Dock(TerminalLayout::RMGHandoverX(1)*100.f,-8680,0);
     for(auto& Slot:Site->Yard)
     { Slot.Half=1; Slot.Crane=Slot.Block=0; Slot.Handover=Dock; Slot.Reserved=true; }

@@ -1,4 +1,5 @@
 #include "PortAGVActor.h"
+#include "PortEnvironmentComponent.h"
 #include "AGVReference.h"
 #include "TerminalLayout.h"
 #include "Components/StaticMeshComponent.h"
@@ -61,8 +62,9 @@ void APortAGVActor::InitializeVehicle(int32 Number)
 void APortAGVActor::ResetVehicle(FVector Position)
 {
     ActiveDeckOffsetCm=0;
+    bDriveFault=false;
     DeckCoGOffsetCm=FVector::ZeroVector;
-    Speed=0; CompletedJobs=0; PayloadKg=0;
+    Speed=0; CompletedJobs=0; PayloadKg=0; LastCurvaturePerCm=0;
     BatteryPercent=ChargeLimitPercent; bNeedsCharge=bCharging=false;
     DisplayedBattery=-1; RefreshBatteryLabel();
     // Park along the marked bay. Adjacent rows are separated for the vehicle
@@ -123,6 +125,7 @@ FVector APortAGVActor::PlannedMotionDirection(FVector Target) const
 
 bool APortAGVActor::MoveToPosition(FVector Target,float Dt,bool StopAtTarget)
 {
+    if(bDriveFault) { SetFMSHold(true); return false; }
     const FVector Previous=GetActorLocation();
     const FVector ToTarget=Target-Previous;
     const float Distance=ToTarget.Size2D();
@@ -181,15 +184,24 @@ bool APortAGVActor::MoveToPosition(FVector Target,float Dt,bool StopAtTarget)
     const float Dot=FMath::Clamp(FVector::DotProduct(MotionDirection,DesiredDirection),-1.f,1.f);
     const float Cross=MotionDirection.X*DesiredDirection.Y-MotionDirection.Y*DesiredDirection.X;
     const float HeadingError=FMath::Atan2(Cross,Dot);
+    const float SteeringDistance=bSteeringLookAhead && !Sensors.bDockingNode?SteeringVector.Size2D():Distance;
+    const float CurvatureLookAhead=FMath::Clamp(SteeringDistance,Sensors.bDockingNode?100.f:25.f,
+        2.f*AGVReference::MinimumInnerTurnRadiusCm);
+    const float RequestedCurvature=2.f*FMath::Sin(HeadingError)/CurvatureLookAhead;
+    const float Curvature=FMath::Clamp(RequestedCurvature,
+        -1.f/AGVReference::MinimumInnerTurnRadiusCm,1.f/AGVReference::MinimumInnerTurnRadiusCm);
+    LastCurvaturePerCm=Curvature;
     const float Acceleration=AccelerationCmPerSecondSquared();
     const float HeadingLimit=FMath::Abs(HeadingError)>FMath::DegreesToRadians(5.f)?
-        FMath::Min(SpeedLimitCmPerSecond(),AGVReference::ReferenceCurveSpeedCmPerSecond):SpeedLimitCmPerSecond();
-    const float Limit=FMath::Min(HeadingLimit,FMSApproachSpeedLimit);
-    float Desired=StopAtTarget?FMath::Min(Limit,FMath::Sqrt(2.f*Acceleration*Distance)):Limit;
+        FMath::Min(SpeedLimitCmPerSecond(),CurveSpeedCmPerSecond()):SpeedLimitCmPerSecond();
+    const float CurveLimit=FMath::Abs(Curvature)>1.e-6f?
+        FMath::Sqrt(.5f*TireGripCmPerSecondSquared()/FMath::Abs(Curvature)):SpeedLimitCmPerSecond();
+    const float Limit=FMath::Min3(HeadingLimit,FMSApproachSpeedLimit,CurveLimit);
+    float Desired=StopAtTarget?FMath::Min(Limit,FMath::Sqrt(2.f*BrakingCmPerSecondSquared()*Distance)):Limit;
     if((Sensors.bDockingNode || FMSAcceptanceCm<=100.f) &&
         Distance<=AGVReference::DockingApproachDistanceCm)
         Desired=FMath::Min(Desired,AGVReference::DockingSpeedCmPerSecond);
-    Speed=FMath::FInterpConstantTo(Speed,Desired,Dt,Acceleration);
+    Speed=FMath::FInterpConstantTo(Speed,Desired,Dt,Speed>Desired?BrakingCmPerSecondSquared():Acceleration);
     const float Travel=FMath::Min(Distance,Speed*Dt);
     // Pure-pursuit curvature steers the longitudinal vehicle axis through the
     // target.  Curvature is capped by the published 5.8 m inner turn radius.
@@ -202,12 +214,6 @@ bool APortAGVActor::MoveToPosition(FVector Target,float Dt,bool StopAtTarget)
     // huge and lets the AGV drift off the road before it aligns. Cap only the
     // far look-ahead; nearby arc points retain their actual distance so the
     // controller does not circle them.
-    const float SteeringDistance=bSteeringLookAhead && !Sensors.bDockingNode?SteeringVector.Size2D():Distance;
-    const float CurvatureLookAhead=FMath::Clamp(SteeringDistance,Sensors.bDockingNode?100.f:25.f,
-        2.f*AGVReference::MinimumInnerTurnRadiusCm);
-    const float RequestedCurvature=2.f*FMath::Sin(HeadingError)/CurvatureLookAhead;
-    const float Curvature=FMath::Clamp(RequestedCurvature,
-        -1.f/AGVReference::MinimumInnerTurnRadiusCm,1.f/AGVReference::MinimumInnerTurnRadiusCm);
     const float YawStepRadians=Travel*Curvature;
     const FVector BeforeAxis=Sensors.bReversing?-GetActorRightVector():GetActorRightVector();
     const float HalfYaw=YawStepRadians*.5f;
@@ -305,7 +311,35 @@ float APortAGVActor::SpeedLimitCmPerSecond() const
 
 float APortAGVActor::AccelerationCmPerSecondSquared() const
 {
-    return AGVReference::AccelerationLimit(PayloadKg)*WetTractionScale;
+    const float Traction=FMath::Max(0.f,LongitudinalGripCmPerSecondSquared()*Friction.DrivenWeightFraction-
+        float(100*PortFriction::Gravity*Friction.TireRollingResistance));
+    // Rain/snow/ice are already included in Surface; do not derate them twice.
+    return FMath::Min(AGVReference::AccelerationLimit(PayloadKg),Traction);
+}
+
+float APortAGVActor::WindResistanceNewtons() const
+{
+    const FVector Velocity=(Sensors.bReversing?-GetActorRightVector():GetActorRightVector())*Speed;
+    const FVector Size(4.2,14.6,PayloadKg>0?4.3:2.);
+    return FPortWindAerodynamics::DragForceNewtons(WindVelocity,Velocity,GetActorQuat(),Size,1.2).Size2D();
+}
+float APortAGVActor::TireGripCmPerSecondSquared() const
+{
+    // Reserve full drag magnitude conservatively for both headwind and crosswind.
+    return FMath::Max(0.f,float(100*(Friction.Utilization*Friction.Tire.Static(Surface)*PortFriction::Gravity-
+        WindResistanceNewtons()/(Friction.AGVEmptyMassKg+FMath::Max(0.f,PayloadKg)))));
+}
+float APortAGVActor::LongitudinalGripCmPerSecondSquared() const
+{ return PortFriction::LongitudinalBudget(TireGripCmPerSecondSquared(),Speed*Speed*FMath::Abs(LastCurvaturePerCm)); }
+float APortAGVActor::BrakingCmPerSecondSquared() const
+{
+    // Reserve half the adhesion for steering before entering a curve.
+    return FMath::Min(AGVReference::AccelerationLimit(PayloadKg),.5f*TireGripCmPerSecondSquared());
+}
+float APortAGVActor::CurveSpeedCmPerSecond() const
+{
+    return FMath::Min(AGVReference::ReferenceCurveSpeedCmPerSecond,
+        FMath::Sqrt(.5f*TireGripCmPerSecondSquared()*AGVReference::MinimumInnerTurnRadiusCm));
 }
 
 bool APortAGVActor::PayloadWithinReferenceLimit() const

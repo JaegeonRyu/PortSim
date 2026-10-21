@@ -78,6 +78,7 @@ bool APortSiteLogistics::PlanArrivalStowage()
             C.Transform.SetLocation(Position); C.Transform.SetRotation(FQuat::Identity);
             C.ShipSlot=P; C.Wave=0;
             C.STS=Vessel*3+FMath::Clamp(FMath::RoundToInt(P.PositionM.X/70.)+1,0,2);
+            C.OriginalSTS=C.STS;
             C.Actor->SetActorLocationAndRotation(Position,FQuat::Identity,false,nullptr,ETeleportType::TeleportPhysics);
             C.Actor->SetActorHiddenInGame(false); C.Actor->SetActorEnableCollision(true);
         }
