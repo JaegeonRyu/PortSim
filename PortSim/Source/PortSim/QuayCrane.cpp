@@ -924,7 +924,7 @@ void APortSimHUD::DrawHUD()
                     CranePawn->PendingCargo[I],CranePawn->PendingCargoLimit(I),FName(*FString::Printf(TEXT("CargoSlider%d"),I)));
             else
             {
-                Text(CranePawn->GetPendingVesselInput(I)?FString::Printf(TEXT("파일 배치 %d개 · 리셋 시 적용"),CranePawn->PendingCargo[I]):TEXT("적용할 CSV 파일을 선택하세요."));
+                Text(CranePawn->GetPendingVesselInput(I)?FString::Printf(TEXT("선내 적재도 %d개 · 작업 목록 별도 적용"),CranePawn->PendingCargo[I]):TEXT("선내 적재도 CSV를 선택하세요."));
                 for(int32 Kind=0;Kind<2;++Kind)
                 {
                     const float X=30+Kind*326*Scale;
@@ -935,7 +935,7 @@ void APortSimHUD::DrawHUD()
                         FName(*FString::Printf(TEXT("VesselImport%d_%d"),I,Kind)),true,60);
                     const auto& Input=CranePawn->VesselInputs[I][Kind];
                     const FString Summary=Input.FileName.IsEmpty()?TEXT("미등록 (CSV)"):
-                        FString::Printf(TEXT("%s · %d건"),*(FString(CranePawn->SelectedVesselInput[I]==Kind?TEXT("[선택] "):TEXT(""))+Input.FileName.Left(20)),Input.Rows.Num());
+                        FString::Printf(TEXT("%s · %d건"),*Input.FileName.Left(20),Input.Rows.Num());
                     DrawText(Summary,FLinearColor(.6f,.85f,.8f),X,Y+33*Scale,GEngine->GetSmallFont(),Scale);
                 }
                 Y+=62*Scale;

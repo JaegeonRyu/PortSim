@@ -136,6 +136,7 @@ public:
     bool ConfiguredFileMode[3]={false,false,false};
     int32 ManualCargo[3]={200,200,200};
     FPortVesselInput ConfiguredVesselInputs[3];
+    FPortVesselInput ConfiguredVesselOperations[3];
     void SetVesselInputMode(int32 Vessel,bool FileMode);
     bool ApplyPendingVesselInputs();
     const FPortVesselInput* GetPendingVesselInput(int32 Vessel) const;
