@@ -362,8 +362,8 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
         if(bCarrying && (!Observation.AllLocked() || Observation.DynamicPayloadEstimateKg()>STSProfile.RatedPayloadKg))
         { Stop(TEXT("Loaded hoist interlock: locks/load observation invalid")); return; }
     }
-    const bool bSTSNeedsAGV=bSTS && ((Stage==5 && bDestinationReady) || Stage==6 || Stage==7);
-    const bool bRMGNeedsAGV=!bSTS && Stage<=2 && IsValid(HandoverAGV);
+    const bool bSTSNeedsAGV=AGVAtDestination() && ((Stage==5 && bDestinationReady) || Stage==6 || Stage==7);
+    const bool bRMGNeedsAGV=!AGVAtDestination() && Stage<=2 && IsValid(HandoverAGV);
     if((bSTSNeedsAGV || bRMGNeedsAGV) && !Observation.bAGVAligned)
     {
         // A newly arrived vehicle can be visible one sensor period after the
@@ -475,7 +475,7 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
         Body->BodyInstance.SetBodyTransform(ReleasePose,ETeleportType::TeleportPhysics,false);
         Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
         Body->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
-        CargoActor->LocationOwner=bSTS && (1-SourceSlot)==0?ECargoOwner::Ship:ECargoOwner::Yard;
+        CargoActor->LocationOwner=bSTS && (bReverseTransfer || (1-SourceSlot)==0)?ECargoOwner::Ship:ECargoOwner::Yard;
         bCarrying=false;
     }
     StageHoldTarget=Head+SuspendedOffset;
@@ -569,7 +569,7 @@ bool APortWorkingCrane::IsWaitingForAGV() const
             (Local(Slots[1-SourceSlot])-(Head+SuspendedOffset)).Size2D()<=STSProfile.LandingTolerance));
 }
 
-bool APortWorkingCrane::AssignCargo(APortContainerActor* Cargo,FVector Source,FVector Destination,bool SourceSupport,bool DestinationSupport,APortAGVActor* HandoverVehicle)
+bool APortWorkingCrane::AssignCargo(APortContainerActor* Cargo,FVector Source,FVector Destination,bool SourceSupport,bool DestinationSupport,APortAGVActor* HandoverVehicle,bool ReverseTransfer)
 {
     // Dispatch can choose an otherwise passive box in the middle of a frame.
     if(IsValid(Cargo) && Cargo->LocationOwner==ECargoOwner::Ship && !Cargo->GetAttachParentActor())
@@ -584,7 +584,7 @@ bool APortWorkingCrane::AssignCargo(APortContainerActor* Cargo,FVector Source,FV
             !STSProfile.ContainsTarget(Local(Destination)+FVector(0,0,WorkingCrane::LiftOffset)))
         { Stop(TEXT("Source/destination outside reference crane working envelope")); return false; }
     }
-    ClearSTSState(); HandoverAGV=HandoverVehicle;
+    ClearSTSState(); HandoverAGV=HandoverVehicle; bReverseTransfer=ReverseTransfer;
     CargoActor=Cargo; Slots[0]=Source; Slots[1]=Destination; SourceSlot=Stage=0;
     TelescopeTargetLengthCm=Cargo->ExternalDimensionsCm.Y;
     bDestinationReady=true;

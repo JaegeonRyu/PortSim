@@ -32,6 +32,16 @@ bool APortSiteLogistics::PlanArrivalStowage()
     for(int32 I=0;I<Manifest.Num();++I) ByID.Add(Manifest[I].ID,I);
     for(int32 Vessel=0;Vessel<ConfiguredShips;++Vessel)
     {
+        if(Manifest.ContainsByPredicate([Vessel](const FSiteShipCargo& C){return C.STS/3==Vessel && C.bExplicitPlacement;}) ||
+            RetainedCargo.ContainsByPredicate([Vessel](const FSiteShipCargo& C){return C.STS/3==Vessel && C.bExplicitPlacement;}) ||
+            ExportCargo.ContainsByPredicate([Vessel](const FSiteShipCargo& C){return C.STS/3==Vessel && C.bExplicitPlacement;}))
+        {
+            FPortShipStowageResult Plan; Plan.Feasible=true;
+            for(const auto& C:Manifest) if(C.STS/3==Vessel) Plan.Placements.Add(C.ShipSlot);
+            for(const auto& C:RetainedCargo) if(C.STS/3==Vessel) Plan.Placements.Add(C.ShipSlot);
+            ShipStowagePlans.Add(MoveTemp(Plan));
+            continue;
+        }
         TArray<FPortShipPlanningCargo> Bookings;
         for(const auto& C:Manifest) if(C.STS/3==Vessel)
             Bookings.Add({C.ID,C.Actor->LengthFt,C.BookedGrossKg,C.Actor->CargoInformation,

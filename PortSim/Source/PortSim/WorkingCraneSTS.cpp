@@ -58,6 +58,7 @@ void APortWorkingCrane::UpdateMovingShipSource(APortContainerActor* Cargo,FVecto
 
 void APortWorkingCrane::ClearSTSState()
 {
+    bReverseTransfer=false;
     AxisVelocity=PlantAcceleration=FVector::ZeroVector;
     Pickup=FSTSPickupController();
     for(int32 I=0;I<4;++I){LockProgress[I]=0;PhysicalSeating[I]=false;}
@@ -141,8 +142,8 @@ bool APortWorkingCrane::AGVAligned() const
 {
     if(!bExternalJobs) return true;
     return IsValid(HandoverAGV) && HandoverAGV->Speed<=0.1f &&
-        HandoverAGV->CargoPosition().Equals(Slots[bSTS?1-SourceSlot:SourceSlot],STSProfile.AGVTolerance) &&
-        ((bSTS?Stage<5:Stage<2) || STSSensorContains(TEXT("agv_position_lidar"),HandoverAGV->CargoPosition())) &&
+        HandoverAGV->CargoPosition().Equals(Slots[AGVAtDestination()?1-SourceSlot:SourceSlot],STSProfile.AGVTolerance) &&
+        ((AGVAtDestination()?Stage<5:Stage<2) || STSSensorContains(TEXT("agv_position_lidar"),HandoverAGV->CargoPosition())) &&
         AGVReference::AxialHeadingErrorDegrees(HandoverAGV->GetActorRotation().Yaw,Orientation.Rotator().Yaw)<=STSProfile.AGVHeadingTolerance;
 }
 
@@ -164,9 +165,15 @@ bool APortWorkingCrane::CargoSupported() const
         const FVector P=CargoActor->GetActorLocation()+Orientation.RotateVector(FVector((I&1)?HalfWidth:-HalfWidth,(I&2)?HalfLength:-HalfLength,0));
         FHitResult Hit;
         if(!GetWorld()->LineTraceSingleByChannel(Hit,P,P-FVector(0,0,129.5f+STSProfile.SupportTolerance),ECC_Visibility,Query) || Hit.ImpactNormal.Z<.8f) return false;
-        if(bSTS && bExternalJobs && Stage==5 && Hit.GetActor()!=HandoverAGV) return false;
+        if(AGVAtDestination() && bExternalJobs && Stage==5 && Hit.GetActor()!=HandoverAGV) return false;
     }
     return true;
+}
+
+void APortWorkingCrane::UpdateShipLandingTarget(FVector Target)
+{
+    if(!bSTS || !bReverseTransfer || !bJobActive) return;
+    Slots[1-SourceSlot]=Target;
 }
 
 void APortWorkingCrane::SampleSTS(bool Force)
