@@ -2,7 +2,6 @@
 
 namespace
 {
-    constexpr double G=PortFriction::Gravity;
     double Bounded(double V,double Fallback,double Low,double High)
     { return FMath::IsFinite(V)?FMath::Clamp(V,Low,High):Fallback; }
 }
@@ -36,7 +35,7 @@ void FAGVDynamicsState::RefreshLoads(const FAGVDynamicsSettings& C,const FAGVDyn
     const double Empty=FMath::Max(1.,I.EmptyMassKg),Cargo=FMath::Max(0.,I.PayloadKg);
     TotalMassKg=Empty+Cargo;
     CombinedCoGM=(C.EmptyCoGM*Empty+(I.CargoCoGM+(I.CargoContactEnabled?CargoOffsetM:FVector::ZeroVector))*Cargo)/TotalMassKg;
-    const double Weight=TotalMassKg*G;
+    const double Weight=TotalMassKg*PortFriction::Gravity;
     // Equal axle spring load sharing, plus fore/aft and left/right moments.
     // Dynamic spring reactions feed wheel normal loads and hence tire forces.
     const double RollReaction=C.RollStiffnessNmPerRad*Roll+C.RollDampingNmsPerRad*RollRate;
@@ -64,7 +63,7 @@ void FAGVDynamicsState::RefreshLoads(const FAGVDynamicsSettings& C,const FAGVDyn
     OverturnThreshold=WheelLift || FMath::Abs(Roll)>FMath::DegreesToRadians(30.);
     const double LateralMargin=FMath::Max(0.,C.TrackM*.5-FMath::Abs(CombinedCoGM.Y));
     StabilityLimitMps=FMath::Abs(I.CurvaturePerM)>1.e-6?
-        FMath::Sqrt(C.StabilityUtilization*G*LateralMargin/
+        FMath::Sqrt(C.StabilityUtilization*PortFriction::Gravity*LateralMargin/
             (FMath::Max(.1,CombinedCoGM.Z)*FMath::Abs(I.CurvaturePerM))):7.;
 }
 
@@ -73,7 +72,7 @@ void FAGVDynamicsState::ConstrainStop()
     U=V=YawRate=Ax=Ay=0; RollRate=PitchRate=0;
     for(auto& W:Wheels) { W.Omega=0; W.FxN=W.FyN=W.TorqueNm=W.SlipRatio=W.SlipAngle=0; W.Sliding=false; }
     if(Braking) { LastBrakeValid=false; Braking=false; BrakingElapsed=BrakingDistanceM=0; }
-    IMUSpecificForceMps2=FVector(0,0,G);
+    IMUSpecificForceMps2=FVector(0,0,PortFriction::Gravity);
 }
 
 bool FAGVDynamicsState::Finite() const
@@ -127,8 +126,8 @@ void FAGVDynamicsState::Step(const FAGVDynamicsSettings& Settings,const FAGVDyna
             const double Denom=FMath::Max(.5,FMath::Abs(VX));
             const double PreviousSlip=(C.WheelRadiusM*W.Omega-VX)/Denom;
             const double Mu=I.KineticMu+(I.StaticMu-I.KineticMu)*FMath::Exp(-FMath::Max(0.,FMath::Abs(PreviousSlip)-.08)*8);
-            const double Rolling=Slowing?0:I.RollingResistance*TotalMassKg*G*FMath::Sign(Target);
-            const double LoadShare=W.NormalN/(TotalMassKg*G);
+            const double Rolling=Slowing?0:I.RollingResistance*TotalMassKg*PortFriction::Gravity*FMath::Sign(Target);
+            const double LoadShare=W.NormalN/(TotalMassKg*PortFriction::Gravity);
             double Torque=(TotalMassKg*DesiredAcceleration+Rolling)*C.WheelRadiusM*LoadShare;
             if(Slowing)
             {
@@ -165,7 +164,7 @@ void FAGVDynamicsState::Step(const FAGVDynamicsSettings& Settings,const FAGVDyna
             const double BodyFX=CS*FX-SN*FY,BodyFY=SN*FX+CS*FY;
             ForceX+=BodyFX; ForceY+=BodyFY; Moment+=RX*BodyFY-RY*BodyFX;
         }
-        const double Rolling=I.RollingResistance*TotalMassKg*G*FMath::Clamp(U/.05,-1.,1.);
+        const double Rolling=I.RollingResistance*TotalMassKg*PortFriction::Gravity*FMath::Clamp(U/.05,-1.,1.);
         ForceX+=I.WindForceBodyN.X-Rolling; ForceY+=I.WindForceBodyN.Y;
         Ax=ForceX/TotalMassKg; Ay=ForceY/TotalMassKg;
         // U/V integrate total system momentum; internal deck forces cancel.
@@ -173,7 +172,7 @@ void FAGVDynamicsState::Step(const FAGVDynamicsSettings& Settings,const FAGVDyna
         // Planar translation with yaw pseudo-forces; no cargo rotation or 3D fall.
         if(I.CargoContactEnabled && I.PayloadKg>0)
         {
-            const double Mass=I.PayloadKg,Normal=Mass*G;
+            const double Mass=I.PayloadKg,Normal=Mass*PortFriction::Gravity;
             const FVector Arm=I.CargoCoGM+CargoOffsetM-CombinedCoGM;
             const double Iz=TotalMassKg*(C.WheelbaseM*C.WheelbaseM+C.TrackM*C.TrackM)/12.;
             const double Alpha=Moment/Iz;
@@ -231,7 +230,7 @@ void FAGVDynamicsState::Step(const FAGVDynamicsSettings& Settings,const FAGVDyna
         double MeanOmega=0; for(const auto& W:Wheels) MeanOmega+=W.Omega/6.;
         WheelDistanceM+=MeanOmega*C.WheelRadiusM*Dt;
         EffectiveRadiusM=FMath::Abs(YawRate)>1.e-5?FMath::Abs(U/YawRate):0;
-        IMUSpecificForceMps2=FVector(Ax,Ay,G)-(CargoRelativeVelocityMps-RelativeV)*(I.CargoContactEnabled?CargoFraction/Dt:0);
+        IMUSpecificForceMps2=FVector(Ax,Ay,PortFriction::Gravity)-(CargoRelativeVelocityMps-RelativeV)*(I.CargoContactEnabled?CargoFraction/Dt:0);
         PeakSlip=FMath::Max(PeakSlip,MaxSlip);
         if(Braking) { BrakingElapsed+=Dt; BrakingDistanceM+=Distance; }
         if(FMath::Abs(Target)<.001 && FMath::Abs(U)<.005 && FMath::Abs(V)<.005 && FMath::Abs(YawRate)<.005 &&

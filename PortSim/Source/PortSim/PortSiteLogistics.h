@@ -27,6 +27,7 @@ struct FSiteYardSlot
 };
 struct FSiteShipCargo
 {
+    bool bExplicitPlacement=false;
     FTransform Transform;
     FName ContainerName;
     FPortShipPlacement ShipSlot;
@@ -49,6 +50,7 @@ struct FSiteShipCargo
 };
 struct FSiteTransfer
 {
+    int32 ExportIndex=INDEX_NONE;
     // Stage 10 is the second STS pickup of a paired 20 ft trip.
     static constexpr int32 ToCharge=11, ReturnToStandby=12, Charging=13;
     int32 Cargo=INDEX_NONE, Slot=INDEX_NONE, RMG=INDEX_NONE, STS=INDEX_NONE, Stage=0, Waypoint=0;
@@ -89,7 +91,8 @@ public:
     APortSiteLogistics();
     void SetSTSProfile(const FSTSOperatingProfile& Profile) { STSProfile=Profile; }
     bool CanSTSGantryMove(const APortWorkingCrane* Crane,float WorldY) const;
-    void AddShipCargo(FVector Position,int32 STS,int32 Wave=0,FName ContainerName=NAME_None);
+    void AddShipCargo(FVector Position,int32 STS,int32 Wave=0,FName ContainerName=NAME_None,bool bLoadFromYard=false,
+        bool bRetainAboard=false,FIntVector ImportedSlot=FIntVector(-1));
     int32 ConfiguredShips=3;
     int32 ConfiguredCargo[3]={200,200,200};
     void Initialize(const TArray<TObjectPtr<APortWorkingCrane>>& Cranes,TArray<FSiteYardSlot> Slots,
@@ -126,6 +129,7 @@ public:
     FString VehicleStatus() const;
     TArray<FVector> Snapshot() const;
     int32 InitialShipCount() const { return Manifest.Num()+CentralCount; }
+    int32 LoadedCount() const;
     bool UsesCargoAlignedHandover() const { return bCargoAlignedHandover; }
     int32 ReturnCorridorUse(int32 Corridor) const
     { return Corridor>=0 && Corridor<3?ReturnRouteCounts[Corridor]:0; }
@@ -205,6 +209,14 @@ private:
     bool ReplanYardGroup(const TSet<int32>& Affected,const TSet<int32>& UnavailableSupports,AActor* Cause=nullptr);
     void ReleaseDeferredYardLeases();
     bool JobHeldByFailure(int32 Vehicle) const;
+    // Export bookings retain their destination vessel/position separately from discharge jobs.
+    TArray<FSiteShipCargo> ExportCargo;
+    TArray<FSiteShipCargo> RetainedCargo;
+    friend class FExportYardPlacementTest;
+    bool PlaceExportCargo();
+    void ScheduleExport();
+    void AdvanceExport(int32 Lane,float Dt);
+    FVector TransferQuay(const FSiteTransfer& Job) const;
     TArray<TArray<int32>> SourceAbove;
     TArray<TArray<int32>> ManifestBySTS;
     FPortShipStowageAssumptions ShipStowageAssumptions;

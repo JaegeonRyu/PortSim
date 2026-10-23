@@ -45,3 +45,5 @@
 웹 주입·해제를 포함한 최종 터미널 회귀도 통과했다. 600개 중 120개(20%) 운송과 AGV 복귀, 9개 STS, 상부 지지 적재 58건, 20ft 두 자리 적재층 13개와 규격별 야드 분리를 확인했다. 마지막 적재 10,021.450149 시뮬레이션 초, 복귀 완료 10,214.1초다. 건조 기본 환경·선박 운동 OFF·기존 바람에 선택 AGV의 지역 젖음 시험을 한 번 주입한 실행이며 전체 600개 완료 또는 이전 버전 대비 성능 비교가 아니다. 두 20ft 화물 동시 운송은 이번 실행에서 성립하지 않았다.
 
 명령: `./PortSim/Scripts/TestSite.ps1 -Mode Normal -PlaybackRate 0 -FixedFPS 5 -TimeoutMinutes 45 -NoSea -CheckStowage -ResultSummaryPath ./PortSim/Saved/Tests/AGVEmergency_Normal120.json`과 `node Dashboard/tests/live-agv-emergency.mjs`를 함께 실행했다. 최종 로그는 `SiteTest_Normal_Depot_Reused_45408.log`, 결과 CSV는 `Site_E5F034534DCCED07F2FCF79545AA4DE7.csv`다.
+
+2026-10-24 `upstream/main`의 `01ad6c2` 병합 후 검증: AGV 경로 시작점 초기화와 수출입 공통 `TransferQuay`를 모두 유지했다. Unity 빌드에서 다른 시험 코드와 충돌하는 중력 상수 별칭을 제거하고 같은 기존 상수를 직접 참조했다. 실제 적하 통합 시험에서 발견한 도킹 허용 오차 내 STS 인계 위치의 주차장 복귀 연결도 보완했다. 최종 UE 5.6 빌드, 웹 31개·네이티브 41개 시험, 컨테이너 1개 양하·2개 적하·하단 우선 적재·AGV 복귀·초기화 통합 시험이 통과했다. 로그는 `Saved/Logs/UpstreamMerge_FinalUnits.log`, `Saved/Tests/VesselOperations/run_20261024_031846.log`다. 위 120개 운송 기록은 병합 전 결과이며 이번에는 수출입 통합 시험으로 병합 영향을 확인했다.
