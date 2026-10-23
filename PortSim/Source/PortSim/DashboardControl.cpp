@@ -39,14 +39,27 @@ bool APortSiteLogistics::ApplyDashboardCommand(const FJsonObject& C,FString& Err
         (FDateTime::UtcNow()-Sent).GetTotalSeconds()>10 || (Sent-FDateTime::UtcNow()).GetTotalSeconds()>2)
     { Error=TEXT("명령 유효 시간이 지났습니다."); return false; }
     if(!C.TryGetStringField(TEXT("actor_id"),ActorID) || !C.TryGetStringField(TEXT("action"),Action) ||
-        (Action!=TEXT("fail") && Action!=TEXT("repair")))
+        (Action!=TEXT("fail") && Action!=TEXT("fail_reboot") && Action!=TEXT("fail_sensor_repair") && Action!=TEXT("fail_gantry") && Action!=TEXT("repair")))
     { Error=TEXT("지원하지 않는 명령입니다."); return false; }
     if(!Fault.IsEmpty()) { Error=TEXT("전체 안전 정지 원인을 먼저 해결하세요."); return false; }
     for(const auto& Crane:Equipment) if(Crane->GetName()==ActorID)
     {
-        if(!Crane->Fault.IsEmpty() && !Crane->IsSensorUnavailable())
+        if(!Crane->Fault.IsEmpty() && !Crane->IsEquipmentUnavailable())
         { Error=TEXT("센서 수리로 안전 오류를 해제할 수 없습니다."); return false; }
-        Crane->SetSensorFailure(Action==TEXT("fail"));
+        if(Action==TEXT("repair")) Crane->RepairEquipment();
+        else if(Action==TEXT("fail_gantry")) Crane->SetGantryFailure(true);
+        else
+        {
+            if(Action==TEXT("fail_reboot") || Action==TEXT("fail_sensor_repair"))
+            {
+                Crane->bAutoSensorRecovery=true;
+                Crane->SensorRepairMethod=Action==TEXT("fail_reboot")?EPortSensorRepairMethod::Reboot:EPortSensorRepairMethod::Technician;
+                // Only the selected automation-camera fault leaves independent
+                // travel safety available. Generic required-sensor failure does not.
+                Crane->bAllowSensorFaultEvacuation=Action==TEXT("fail_reboot");
+            }
+            Crane->SetSensorFailure(true);
+        }
         // Also coordinate while paused, so the acknowledged assignment state
         // is visible without starting physical motion during a pause.
         ManageEquipmentFailures();
@@ -54,6 +67,7 @@ bool APortSiteLogistics::ApplyDashboardCommand(const FJsonObject& C,FString& Err
     }
     for(const auto& V:Vehicles) if(V->GetName()==ActorID)
     {
+        if(Action!=TEXT("fail") && Action!=TEXT("repair")) { Error=TEXT("AGV에는 해당 크레인 고장을 적용할 수 없습니다."); return false; }
         const bool Failed=Action==TEXT("fail"),Changed=V->bDriveFault!=Failed;
         V->SetDriveFailure(Failed);
         if(Changed) { if(Failed) ++EquipmentFaultEvents; RecordRecoveryEvent(Failed?TEXT("fault"):TEXT("repair"),V,V,V); }

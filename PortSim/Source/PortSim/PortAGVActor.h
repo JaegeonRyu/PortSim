@@ -3,10 +3,12 @@
 #include "CoreMinimal.h"
 #include "PortEquipmentActor.h"
 #include "WeatherFriction.h"
+#include "AGVDynamics.h"
 #include "PortAGVActor.generated.h"
 
 class UStaticMeshComponent;
 class UTextRenderComponent;
+class FJsonObject;
 
 USTRUCT(BlueprintType)
 struct FAGVSensorState
@@ -69,6 +71,12 @@ public:
     float TireGripCmPerSecondSquared() const;
     float LongitudinalGripCmPerSecondSquared() const;
     float WindResistanceNewtons() const;
+    FAGVDynamicsInput DynamicsInput() const;
+    void AdvanceDynamics(double TargetSpeedMps,double CurvaturePerM,double Seconds);
+    void ConstrainDynamicsStop();
+    TSharedRef<FJsonObject> DynamicsSnapshot() const;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="AGV|Physics") FAGVDynamicsSettings DynamicsSettings;
+    FAGVDynamicsState Dynamics;
     FPortSurfaceState Surface;
     FPortFrictionSettings Friction;
     FVector WindVelocity=FVector::ZeroVector;
@@ -91,6 +99,8 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV") FVector DeckCoGOffsetCm=FVector::ZeroVector;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV") FAGVSensorState Sensors;
 private:
+    void UpdateWheelVisuals();
+    UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> WheelMeshes;
     void RefreshBatteryLabel();
     int32 DisplayedBattery=-1;
     bool bDisplayedCharging=false;

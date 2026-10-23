@@ -848,6 +848,7 @@ void APortSiteLogistics::Dispatch(int32 Lane)
     Job.PausedSeconds=Manifest[Index].PreparedPausedSeconds;
     Equipment[YardCraneCount+STS]->SetHandoverVehicle(Vehicles[Lane]);
     PreparedCargo[STS]=INDEX_NONE; PreparedStarted[STS]=false; STSOwners[STS]=Lane;
+    Job.RouteStart=Vehicles[Lane]->GetActorLocation(); Job.bRouteStartValid=true;
     const FVector Quay=CargoQuay(Job.Cargo);
     if (LaneCount==9 && !Vehicles[Lane]->GetActorLocation().Equals(Quay,1.f))
     {
@@ -1163,10 +1164,15 @@ bool APortSiteLogistics::PlanRoadRoute(int32 Lane,bool Congested)
 {
     PortSimPerformance::FScope Profile(TEXT("road_planning"));
     auto& Job=Jobs[Lane]; auto* Vehicle=Vehicles[Lane].Get();
+    // Do not replace a valid route while the chassis is midway through a turn.
+    // A graph path from a point has no knowledge of its non-cardinal heading.
+    if(Congested && !Job.Route.IsEmpty() &&
+        FMath::Abs(Vehicle->GetActorRightVector().X)<.999f && FMath::Abs(Vehicle->GetActorRightVector().Y)<.999f) return false;
     if(Job.Stage!=3 && Job.Stage!=5 && Job.Stage!=6 && Job.Stage!=7 &&
         Job.Stage!=FSiteTransfer::ToCharge && Job.Stage!=FSiteTransfer::ReturnToStandby) return false;
     if((Job.Stage==3 || Job.Stage==5) && !Yard.IsValidIndex(Job.Slot)) return false;
     FAGVRoadNetwork Network;
+    Network.RestrictNarrowCrossing(TerminalLayout::AGVCentralInboundY,TerminalLayout::AGVCentralReturnY);
     auto P=[](float X,float Y) { return FVector(TerminalLayout::SiteCmX(X),Y,0); };
     const float QuayLane=Job.Stage==3?TerminalLayout::AGVQuayOutboundLaneX:
         TerminalLayout::AGVQuayInboundLaneX;
@@ -1606,6 +1612,18 @@ bool APortSiteLogistics::PlanRoadRoute(int32 Lane,bool Congested)
         CandidateYardEntryWaypoint=Candidate.Num()-1;
         SiteLogistics::AddUniqueRoutePoint(Candidate,Dock);
     }
+    // Rounded reroutes can extend past the road's end even when every raw
+    // graph edge was valid. Reject them before replacing a safe active route.
+    if(!AGVTrafficGeometry::RouteEnvelopeInside(Start,Candidate)) return false;
+    if(Congested)
+    {
+        // The old planner retained an unrounded 90-degree corner when there
+        // was not enough tangent before a yard gate. A real tire-steered AGV
+        // cannot make that shortcut. Keep its original drivable route instead.
+        if(!AGVTrafficGeometry::RoundedRouteHasNoSharpTurns(Start,Candidate)) return false;
+        if(!Candidate.IsEmpty() && FVector::DotProduct((Candidate[0]-Start).GetSafeNormal2D(),
+            Vehicle->PlannedMotionDirection(Candidate[0]))<FMath::Cos(FMath::DegreesToRadians(30.f))) return false;
+    }
     if(SiteLogistics::RouteIntersectsContainer(Candidate,Start,Yard,Job.Stage==5?Job.Slot:INDEX_NONE))
     {
         UE_LOG(LogTemp,Error,TEXT("AGV_ROUTE_REJECTED: V%d planned path intersects an occupied yard container"),ID);
@@ -1641,7 +1659,7 @@ bool APortSiteLogistics::PlanRoadRoute(int32 Lane,bool Congested)
         ++ReturnRouteCounts[SelectedReturnCorridor];
     }
     if(Job.Stage==3) Job.YardEntryWaypoint=CandidateYardEntryWaypoint;
-    Job.Route=MoveTemp(Candidate); Job.Waypoint=0;
+    Job.Route=MoveTemp(Candidate); Job.Waypoint=0; Job.RouteStart=Start; Job.bRouteStartValid=true;
     // A new route must not inherit the final bay reservation from the previous
     // delivery/return. Its complete corridor is admitted independently.
     RoadReservations.Remove(ID); RoadReservationEndWaypoint.Remove(ID); ReservationIndex.Remove(ID); RoadTargets.Remove(ID);
@@ -1675,7 +1693,7 @@ void APortSiteLogistics::PrepareRoute(int32 Lane,bool Return)
     auto& Job=Jobs[Lane];
     const FVector Quay=CargoQuay(Job.Cargo),Dock=YardHandover(Yard[Job.Slot]);
     const float BlockY=TerminalLayout::BlockY(Yard[Job.Slot].Block)*100.f;
-    Job.Route.Reset(); Job.Waypoint=0;
+    Job.Route.Reset(); Job.Waypoint=0; Job.RouteStart=Vehicles[Lane]->GetActorLocation(); Job.bRouteStartValid=true;
     if(!Return)
     {
         const float RoadX=TerminalLayout::SiteCmX(BlockY+2050>=Quay.Y?12500.f:16500.f);
@@ -1830,7 +1848,7 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
             // soon as the chassis passed it, shrinking acceptance to 25 cm and
             // trapping the AGV in a circle around the point.
             const FVector PreviousNode=Job.Route.IsValidIndex(Job.Waypoint-1)?
-                Job.Route[Job.Waypoint-1]:Vehicle->GetActorLocation();
+                Job.Route[Job.Waypoint-1]:(Job.bRouteStartValid?Job.RouteStart:Vehicle->GetActorLocation());
             const FVector IntoNode=(Target-PreviousNode).GetSafeNormal2D();
             const FVector Outgoing=Job.Route[Job.Waypoint+1]-Target;
             const FVector OutOfNode=Outgoing.GetSafeNormal2D();
@@ -1852,6 +1870,11 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
              Job.Stage==3?
                 FVector(1,0,0):FVector(0,1,0)):FVector::ZeroVector;
         Vehicle->SetFMSCommand(Target,Job.Waypoint,Job.Route.Num(),Docking,Acceptance,DockingAxis);
+        if(!Docking && Job.Route.IsValidIndex(Job.Waypoint+1) &&
+            (Job.Waypoint>0 || Job.bRouteStartValid) && AGVTrafficGeometry::PassedRoadGate(
+                Job.Waypoint>0?Job.Route[Job.Waypoint-1]:Job.RouteStart,Target,Job.Route[Job.Waypoint+1],
+                Vehicle->GetActorLocation(),Vehicle->PlannedMotionDirection(Target)))
+        { FinishedRoadSegments.Add(Vehicle->VehicleID); return true; }
         float ApproachLimit=Vehicle->SpeedLimitCmPerSecond();
         FVector From=Vehicle->GetActorLocation();
         float DistanceToCorner=0;
@@ -1859,7 +1882,7 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
         {
             const FVector Point=Job.Route[Next];
             DistanceToCorner+=FVector::Dist2D(From,Point);
-            const FVector Previous=Next>0?Job.Route[Next-1]:From;
+            const FVector Previous=Next>0?Job.Route[Next-1]:(Job.bRouteStartValid?Job.RouteStart:From);
             const FVector Incoming=(Point-Previous).GetSafeNormal2D();
             const FVector Outgoing=(Job.Route[Next+1]-Point).GetSafeNormal2D();
             if(!Incoming.IsNearlyZero() && !Outgoing.IsNearlyZero() &&
@@ -1870,7 +1893,7 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
                 // enter the complete arc before it could slow to 2.5 m/s.
                 const float Curve=Vehicle->CurveSpeedCmPerSecond();
                 ApproachLimit=FMath::Min(ApproachLimit,FMath::Sqrt(Curve*Curve+
-                    2*Vehicle->BrakingCmPerSecondSquared()*FMath::Max(0.f,DistanceToCorner-100.f)));
+                    2*Vehicle->BrakingCmPerSecondSquared()*FMath::Max(0.f,DistanceToCorner-100.f-Vehicle->Speed*.4f)));
                 break;
             }
             From=Point;
@@ -2022,7 +2045,7 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
             FMath::Clamp(Job.YardEntryWaypoint+1,0,Job.Route.Num()):Job.Route.Num();
         if(Job.Waypoint+1<End)
         {
-            const FVector Previous=Job.Waypoint>0?Job.Route[Job.Waypoint-1]:Vehicle->GetActorLocation();
+            const FVector Previous=Job.Waypoint>0?Job.Route[Job.Waypoint-1]:(Job.bRouteStartValid?Job.RouteStart:Vehicle->GetActorLocation());
             const FVector In=(Target-Previous).GetSafeNormal2D();
             const FVector Out=(Job.Route[Job.Waypoint+1]-Target).GetSafeNormal2D();
             RollingStraight=FVector::DotProduct(In,Out)>.995f;
@@ -2218,7 +2241,7 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
         if(!Docking && Approved)
         {
             const FVector Previous=Job.Route.IsValidIndex(Job.Waypoint-1)?
-                Job.Route[Job.Waypoint-1]:Vehicle->GetActorLocation();
+                Job.Route[Job.Waypoint-1]:(Job.bRouteStartValid?Job.RouteStart:Vehicle->GetActorLocation());
             FVector From=FMath::ClosestPointOnSegment(Vehicle->GetActorLocation(),Previous,Target);
             FVector Pursuit=Target;
             float Remaining=300.f;
@@ -2236,6 +2259,7 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
     const FTransform BeforeMove=Vehicle->GetActorTransform();
     const float BeforeSpeed=Vehicle->Speed;
     const FAGVSensorState BeforeSensors=Vehicle->Sensors;
+    const FAGVDynamicsState BeforeDynamics=Vehicle->Dynamics;
     bool Arrived=Vehicle->MoveToPosition(Target,Dt,!StraightThrough);
     for(const auto& Other:TrafficVehicles)
     {
@@ -2244,23 +2268,32 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
         Vehicle->SetActorTransform(BeforeMove,false,nullptr,ETeleportType::TeleportPhysics);
         Vehicle->Speed=BeforeSpeed;
         Vehicle->Sensors=BeforeSensors;
+        Vehicle->Dynamics=BeforeDynamics;
         Vehicle->SetFMSHold(true);
         RoadBlockers.Add(ID,Other->VehicleID);
         Arrived=false;
         break;
+    }
+    const FVector TravelFrom=BeforeMove.GetLocation(),TravelTo=Vehicle->GetActorLocation();
+    if(FMath::Abs(TravelTo.Y-TravelFrom.Y)<2 &&
+        FMath::Abs(TravelFrom.Y-TerminalLayout::CentralRoadY*100.f)<TerminalLayout::CentralRoadWidthM*50.f)
+    {
+        const double Low=FMath::Max(FMath::Min(TravelFrom.X,TravelTo.X),double(TerminalLayout::SiteCmX(14500)));
+        const double High=FMath::Min(FMath::Max(TravelFrom.X,TravelTo.X),double(TerminalLayout::SiteCmX(63500)));
+        if(High>Low) CentralRoadTravelCm[Vehicle->PayloadKg>0?0:1][TravelTo.X>TravelFrom.X?0:1]+=High-Low;
     }
     if(!Arrived && Jobs.IsValidIndex(FleetIndex))
     {
         const auto& Job=Jobs[FleetIndex];
         const bool Docking=Job.Waypoint==Job.Route.Num()-1 ||
             (Job.Stage==3 && !Job.bRMGReserved && Job.Waypoint==Job.YardEntryWaypoint);
-        if(!Docking && Job.Route.IsValidIndex(Job.Waypoint-1))
+        if(!Docking && (Job.Route.IsValidIndex(Job.Waypoint-1) || Job.bRouteStartValid))
         {
             // FMS road nodes are gates, not centimetre-sized parking spots. A
             // car-like chassis has passed an intermediate node when its centre
             // crosses the node plane while remaining within one turn radius of
             // the route. Final STS/RMG docking still requires exact position.
-            const FVector Incoming=(Target-Job.Route[Job.Waypoint-1]).GetSafeNormal2D();
+            const FVector Incoming=(Target-(Job.Waypoint>0?Job.Route[Job.Waypoint-1]:Job.RouteStart)).GetSafeNormal2D();
             const FVector Outgoing=Job.Route.IsValidIndex(Job.Waypoint+1)?
                 (Job.Route[Job.Waypoint+1]-Target).GetSafeNormal2D():Incoming;
             const bool Straight=FVector::DotProduct(Incoming,Outgoing)>.995f;
@@ -2653,7 +2686,7 @@ void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
     {
         // The central berth advances its reserved RMG in TickRMGTransfer.
         if (CentralReservation==INDEX_NONE || Crane!=CentralCrane(CentralReservation)) Crane->Advance(Dt,false);
-        if (!Crane->Fault.IsEmpty() && !Crane->IsSensorUnavailable()) { Stop(Crane->Fault); return; }
+        if (!Crane->Fault.IsEmpty() && !Crane->IsEquipmentUnavailable()) { Stop(Crane->Fault); return; }
     }
     ManageEquipmentFailures();
     if(!Fault.IsEmpty()) return;
@@ -2675,6 +2708,8 @@ void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
         const double Mass=DeckMass.FindRef(Vehicle.Get());
         Vehicle->SetPayload(Mass);
         Vehicle->DeckCoGOffsetCm=Mass>0?DeckMoment.FindRef(Vehicle.Get())/Mass:FVector::ZeroVector;
+        auto DynamicsConfig=Vehicle->DynamicsSettings; DynamicsConfig.Sanitize();
+        Vehicle->Dynamics.RefreshLoads(DynamicsConfig,Vehicle->DynamicsInput());
     }
     for (const auto& Vehicle:Vehicles) Moving+=Vehicle->Speed>1.f;
     PeakMovingVehicles=FMath::Max(PeakMovingVehicles,Moving);
@@ -2995,6 +3030,7 @@ void APortSiteLogistics::ResetLogistics()
     RoadReservations.Reset(); RoadReservationEndWaypoint.Reset(); RoadTargets.Reset(); FinishedRoadSegments.Reset(); PeakMovingVehicles=PrefetchedJobs=Dispatched=Delivered=0;
     PendingRoadRequests.Reset(); PendingRoadIndex.Reset();
     for(int32& Count:ReturnRouteCounts) Count=0;
+    for(auto& Load:CentralRoadTravelCm) for(double& Distance:Load) Distance=0;
     Fault.Empty(); bWasPaused=false;
     BeginReport();
     if(!STSProfile.bReady) Stop(TEXT("Site STS reference unavailable"));
@@ -3050,8 +3086,13 @@ bool APortSiteLogistics::Validate(FString& Error) const
             { Error=FString::Printf(TEXT("AGV %d localization exceeded transponder accuracy"),Vehicle->VehicleID); return false; }
             if(Vehicle->Sensors.bControlledStop && Vehicle->Speed>.1f)
             { Error=FString::Printf(TEXT("AGV %d moved through a LiDAR controlled stop"),Vehicle->VehicleID); return false; }
-            if(Vehicle->Sensors.LateralSlipCm>.001f)
-            { Error=FString::Printf(TEXT("AGV %d used forbidden lateral motion"),Vehicle->VehicleID); return false; }
+            if(!Vehicle->Dynamics.Finite() || !Vehicle->Dynamics.Fault.IsEmpty())
+            { Error=FString::Printf(TEXT("AGV %d tire/roll physics invalid: %s"),Vehicle->VehicleID,*Vehicle->Dynamics.Fault); return false; }
+            // Physical side slip is permitted; commanded crab motion is not.
+            if(AGVReference::LateralMotionEnabled)
+            { Error=TEXT("Commanded AGV crab motion must remain disabled"); return false; }
+            if(Vehicle->Dynamics.OverturnThreshold)
+            { Error=FString::Printf(TEXT("AGV %d wheel contact/roll stability threshold exceeded"),Vehicle->VehicleID); return false; }
             const bool SupportXOverlap=P.X-E.X<TerminalLayout::STSLandsideSupportWorldX+
                     TerminalLayout::STSSupportHalfWidthCm &&
                 P.X+E.X>TerminalLayout::STSLandsideSupportWorldX-

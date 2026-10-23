@@ -65,6 +65,8 @@ struct FSiteTransfer
     int32 ChargingBay=INDEX_NONE; // dedicated depot bay during ToCharge / Charging
     TWeakObjectPtr<APortContainerActor> Actor;
     TArray<FVector> Route;
+    FVector RouteStart=FVector::ZeroVector;
+    bool bRouteStartValid=false;
     bool bYardReleased=false, bRMGReserved=false, bParkingDeparture=false;
     double TrafficWaitSeconds=0, YardWaitSeconds=0, LastRerouteAt=-10;
     int32 Reroutes=0;
@@ -194,6 +196,7 @@ private:
     bool bFailureInjected=false,bFailureRepaired=false;
     bool bRecoveryRailGuard=false;
     void ManageEquipmentFailures();
+    void PlanFaultEvacuations();
     bool CraneAvailable(int32 Index) const;
     bool CanSTSService(int32 STS,int32 Cargo,const FVector* DestinationOverride=nullptr) const;
     void RebuildSTSStreams();
@@ -240,6 +243,7 @@ private:
     int32 CentralCount=0, Dispatched=0, LaneCount=8, YardCraneCount=46;
     int32 NextTripID=1;
     int32 ReturnRouteCounts[3]={0,0,0};
+    double CentralRoadTravelCm[2][2]={{0,0},{0,0}}; // loaded/empty, east/west: actual motion, not planned routes
     bool bReady=false, bWasPaused=false;
     bool bCargoAlignedHandover=true;
     bool bDepotParking=true; // command-line A/B baseline; normal runs use depot

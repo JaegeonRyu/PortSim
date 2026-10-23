@@ -13,6 +13,7 @@ const files = new Map([
   ['/app.mjs', ['app.mjs', 'text/javascript']],
   ['/metrics.mjs', ['metrics.mjs', 'text/javascript']],
   ['/friction-view.mjs', ['friction-view.mjs', 'text/javascript']],
+  ['/agv-physics-view.mjs', ['agv-physics-view.mjs', 'text/javascript']],
   ['/recovery-view.mjs', ['recovery-view.mjs', 'text/javascript']],
   ['/control-view.mjs', ['control-view.mjs', 'text/javascript']]
 ]);
@@ -56,6 +57,13 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/state') {
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       res.end(JSON.stringify(await readState())); return;
+    }
+    if (url.pathname === '/api/agv-experiments') {
+      res.setHeader('Content-Type','application/json; charset=utf-8');
+      let report=null;
+      try { report=JSON.parse(await readFile(path.join(repo,'PortSim/Saved/Tests/AGVDynamics_Report.json'),'utf8')); }
+      catch(error){ if(error.code!=='ENOENT') {res.writeHead(503).end(JSON.stringify({error:'시험 보고서를 읽을 수 없습니다.'}));return;} }
+      res.end(JSON.stringify({report}));return;
     }
     if (url.pathname === '/api/reference') {
       const [reference, settings] = await Promise.all([
