@@ -2417,7 +2417,7 @@ void APortSiteLogistics::RecoverTrafficCycle()
         while(Current>=100 && Jobs.IsValidIndex(Current-100) && !Chain.Contains(Current))
         {
             const int32 I=Current-100;
-            if((!Vehicles[I]->Sensors.bFMSHold && !Vehicles[I]->Sensors.bControlledStop) ||
+            if(Vehicles[I]->Emergency.Active || (!Vehicles[I]->Sensors.bFMSHold && !Vehicles[I]->Sensors.bControlledStop) ||
                 Vehicles[I]->Speed>1.f || Jobs[I].StationaryTime<10) break;
             Chain.Add(Current);
             const int32* Blocker=RoadBlockers.Find(Current);
@@ -2737,6 +2737,19 @@ void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
     for (int32 Lane:Order)
     {
         auto& Job=Jobs[Lane]; auto* Vehicle=Vehicles[Lane].Get();
+        if(Vehicle->Emergency.Active)
+        {
+            const bool WasFinished=Vehicle->Emergency.Finished;
+            Vehicle->AdvanceEmergencyScenario(Dt);
+            IndexTrafficVehicle(TrafficVehicles.IndexOfByKey(Vehicle));
+            if(!WasFinished && Vehicle->Emergency.Finished)
+                RecordRecoveryEvent(TEXT("agv_emergency_finished"),Vehicle,Vehicle,Vehicle,Job.Actor.Get());
+            if(Vehicle->Emergency.Finished && !Vehicle->Emergency.Stopped)
+            {Stop(FString::Printf(TEXT("AGV %d emergency test ended: %s; reset required"),Vehicle->VehicleID,*Vehicle->Emergency.Outcome));return;}
+            // Hold existing road/yard claims; no reroute, handover or synthetic
+            // zero-speed stop can replace the physical test integration.
+            continue;
+        }
         if(Vehicle->bDriveFault)
         {
             Vehicle->SetFMSHold(true);
@@ -3084,7 +3097,7 @@ bool APortSiteLogistics::Validate(FString& Error) const
             { Error=FString::Printf(TEXT("AGV %d exceeded 65 t payload limit"),Vehicle->VehicleID); return false; }
             if(Vehicle->Sensors.PositionErrorCm>AGVReference::PositionAccuracyCm+.01f)
             { Error=FString::Printf(TEXT("AGV %d localization exceeded transponder accuracy"),Vehicle->VehicleID); return false; }
-            if(Vehicle->Sensors.bControlledStop && Vehicle->Speed>.1f)
+            if(Vehicle->Sensors.bControlledStop && !Vehicle->Emergency.Active && Vehicle->Speed>.1f)
             { Error=FString::Printf(TEXT("AGV %d moved through a LiDAR controlled stop"),Vehicle->VehicleID); return false; }
             if(!Vehicle->Dynamics.Finite() || !Vehicle->Dynamics.Fault.IsEmpty())
             { Error=FString::Printf(TEXT("AGV %d tire/roll physics invalid: %s"),Vehicle->VehicleID,*Vehicle->Dynamics.Fault); return false; }
@@ -3313,10 +3326,14 @@ bool APortSiteLogistics::Validate(FString& Error) const
         if (Job.Actor.IsValid())
         {
             ++Physical;
+            FVector ExpectedDeck=Vehicles[Lane]->DeckPosition(Job.CargoDeckOffsetCm);
+            if(Vehicles[Lane]->HasValidEmergencyCoG(Job.Actor.Get(),STSProfile.ContainerCoG))
+                ExpectedDeck+=(Vehicles[Lane]->GetActorRightVector()*Vehicles[Lane]->Dynamics.CargoOffsetM.X-
+                    Vehicles[Lane]->GetActorForwardVector()*Vehicles[Lane]->Dynamics.CargoOffsetM.Y)*100;
             if (Job.Actor!=Manifest[Job.Cargo].Actor || Job.Actor->ContainerID!=Manifest[Job.Cargo].ContainerName)
             { Error=TEXT("Cargo identity changed during handover"); return false; }
             if ((Job.Stage==2 || Job.Stage==3 || Job.Stage==9 || Job.Stage==10) && (Job.Actor->LocationOwner!=ECargoOwner::AGV || Job.Actor->GetAttachParentActor()!=Vehicles[Lane] ||
-                !Job.Actor->GetActorLocation().Equals(Vehicles[Lane]->DeckPosition(Job.CargoDeckOffsetCm),1.f)))
+                !Job.Actor->GetActorLocation().Equals(ExpectedDeck,1.f)))
             { Error=TEXT("AGV cargo alignment/ownership mismatch"); return false; }
         }
         if(Job.ExtraCargo!=INDEX_NONE)

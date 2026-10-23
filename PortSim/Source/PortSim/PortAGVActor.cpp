@@ -1,4 +1,5 @@
 #include "PortAGVActor.h"
+#include "PortContainerActor.h"
 #include "PortEnvironmentComponent.h"
 #include "AGVReference.h"
 #include "TerminalLayout.h"
@@ -47,6 +48,10 @@ APortAGVActor::APortAGVActor()
     Box(TEXT("Steering_Encoder"),RootComponent,FVector(0,500,75),FVector(35,35,35));
     NameLabel=Label(TEXT("AGVLabel"),FVector(0,0,230));
     NameLabel->SetText(FText::FromString(TEXT("AGV")));
+    WorkerMarker=Box(TEXT("Emergency_Worker"),RootComponent,FVector(0,0,90),FVector(55,55,180));
+    WorkerMarker->SetVisibility(false);
+    WorkerLabel=Label(TEXT("Emergency_WorkerLabel"),FVector(0,0,200));
+    WorkerLabel->SetText(FText::FromString(TEXT("TEST WORKER"))); WorkerLabel->SetVisibility(false);
     Tags.Add(TEXT("PortSim.AGV"));
 }
 
@@ -62,6 +67,9 @@ void APortAGVActor::InitializeVehicle(int32 Number)
 
 void APortAGVActor::ResetVehicle(FVector Position)
 {
+    if(EmergencyCargo.IsValid())EmergencyCargo->CoGOffsetCm=OriginalEmergencyCoG;
+    Emergency=FAGVEmergencyState(); EmergencyCargo.Reset();
+    WorkerMarker->SetVisibility(false); WorkerLabel->SetVisibility(false);
     ActiveDeckOffsetCm=0;
     bDriveFault=false;
     DeckCoGOffsetCm=FVector::ZeroVector;

@@ -35,7 +35,7 @@ void FAGVDynamicsState::RefreshLoads(const FAGVDynamicsSettings& C,const FAGVDyn
 {
     const double Empty=FMath::Max(1.,I.EmptyMassKg),Cargo=FMath::Max(0.,I.PayloadKg);
     TotalMassKg=Empty+Cargo;
-    CombinedCoGM=(C.EmptyCoGM*Empty+I.CargoCoGM*Cargo)/TotalMassKg;
+    CombinedCoGM=(C.EmptyCoGM*Empty+(I.CargoCoGM+(I.CargoContactEnabled?CargoOffsetM:FVector::ZeroVector))*Cargo)/TotalMassKg;
     const double Weight=TotalMassKg*G;
     // Equal axle spring load sharing, plus fore/aft and left/right moments.
     // Dynamic spring reactions feed wheel normal loads and hence tire forces.
@@ -78,7 +78,8 @@ void FAGVDynamicsState::ConstrainStop()
 
 bool FAGVDynamicsState::Finite() const
 {
-    if(PositionM.ContainsNaN() || CombinedCoGM.ContainsNaN() || IMUSpecificForceMps2.ContainsNaN()) return false;
+    if(PositionM.ContainsNaN() || CombinedCoGM.ContainsNaN() || IMUSpecificForceMps2.ContainsNaN() ||
+        CargoOffsetM.ContainsNaN() || CargoRelativeVelocityMps.ContainsNaN() || CargoContactForceN.ContainsNaN()) return false;
     for(double D:{Heading,U,V,YawRate,Roll,RollRate,Pitch,PitchRate,Ax,Ay,TotalMassKg}) if(!FMath::IsFinite(D)) return false;
     for(const auto& W:Wheels) for(double D:{W.Omega,W.NormalN,W.FxN,W.FyN,W.SlipRatio}) if(!FMath::IsFinite(D)) return false;
     return true;
@@ -90,15 +91,20 @@ void FAGVDynamicsState::Step(const FAGVDynamicsSettings& Settings,const FAGVDyna
     FAGVDynamicsSettings C=Settings; C.Sanitize(); FAGVDynamicsInput I=Input;
     if(I.CargoCoGM.ContainsNaN() || I.WindForceBodyN.ContainsNaN()) { Fault=TEXT("Invalid AGV CoG/wind input"); return; }
     for(double D:{I.EmptyMassKg,I.PayloadKg,I.TargetSpeedMps,I.CurvaturePerM,I.AccelerationLimitMps2,
-        I.BrakeDemandMps2,I.StaticMu,I.KineticMu,I.RollingResistance,I.DrivenFraction})
+        I.BrakeDemandMps2,I.StaticMu,I.KineticMu,I.RollingResistance,I.DrivenFraction,
+        I.DeckStaticMu,I.DeckKineticMu,I.RestraintCapacityN,I.CargoShiftLimitM})
         if(!FMath::IsFinite(D)) { Fault=TEXT("Invalid AGV dynamics input"); return; }
     I.StaticMu=FMath::Clamp(I.StaticMu,0.,2.); I.KineticMu=FMath::Clamp(I.KineticMu,0.,I.StaticMu);
     I.DrivenFraction=FMath::Clamp(I.DrivenFraction,0.,1.); I.CurvaturePerM=FMath::Clamp(I.CurvaturePerM,-1./5.8,1./5.8);
     I.RollingResistance=FMath::Clamp(I.RollingResistance,0.,.1);
+    I.DeckStaticMu=FMath::Clamp(I.DeckStaticMu,0.,2.); I.DeckKineticMu=FMath::Clamp(I.DeckKineticMu,0.,I.DeckStaticMu);
     const int Steps=FMath::Max(1,FMath::CeilToInt(Seconds*240.)); const double Dt=Seconds/Steps;
     for(int Step=0;Step<Steps;++Step)
     {
         RefreshLoads(C,I);
+        const FVector OldCoG=CombinedCoGM;
+        const double CargoFraction=FMath::Clamp(I.PayloadKg/TotalMassKg,0.,.95);
+        const FVector RelativeV=I.CargoContactEnabled?CargoRelativeVelocityMps:FVector::ZeroVector;
         double Target=FMath::Clamp(I.TargetSpeedMps,-7.,7.);
         StabilityLimited=C.bStabilitySpeedControl && FMath::Abs(Target)>StabilityLimitMps;
         if(C.bStabilitySpeedControl) Target=FMath::Clamp(Target,-StabilityLimitMps,StabilityLimitMps);
@@ -116,8 +122,8 @@ void FAGVDynamicsState::Step(const FAGVDynamicsSettings& Settings,const FAGVDyna
             W.Steer=FMath::Atan2(X*I.CurvaturePerM,1-Y*I.CurvaturePerM);
             const double CS=FMath::Cos(W.Steer),SN=FMath::Sin(W.Steer);
             const double RX=X-CombinedCoGM.X,RY=Y-CombinedCoGM.Y;
-            const double VX=CS*(U-YawRate*RY)+SN*(V+YawRate*RX);
-            const double VY=-SN*(U-YawRate*RY)+CS*(V+YawRate*RX);
+            const double VX=CS*(U-CargoFraction*RelativeV.X-YawRate*RY)+SN*(V-CargoFraction*RelativeV.Y+YawRate*RX);
+            const double VY=-SN*(U-CargoFraction*RelativeV.X-YawRate*RY)+CS*(V-CargoFraction*RelativeV.Y+YawRate*RX);
             const double Denom=FMath::Max(.5,FMath::Abs(VX));
             const double PreviousSlip=(C.WheelRadiusM*W.Omega-VX)/Denom;
             const double Mu=I.KineticMu+(I.StaticMu-I.KineticMu)*FMath::Exp(-FMath::Max(0.,FMath::Abs(PreviousSlip)-.08)*8);
@@ -162,6 +168,41 @@ void FAGVDynamicsState::Step(const FAGVDynamicsSettings& Settings,const FAGVDyna
         const double Rolling=I.RollingResistance*TotalMassKg*G*FMath::Clamp(U/.05,-1.,1.);
         ForceX+=I.WindForceBodyN.X-Rolling; ForceY+=I.WindForceBodyN.Y;
         Ax=ForceX/TotalMassKg; Ay=ForceY/TotalMassKg;
+        // U/V integrate total system momentum; internal deck forces cancel.
+        // Sliding mass moves the chassis origin relative to the system CoG.
+        // Planar translation with yaw pseudo-forces; no cargo rotation or 3D fall.
+        if(I.CargoContactEnabled && I.PayloadKg>0)
+        {
+            const double Mass=I.PayloadKg,Normal=Mass*G;
+            const FVector Arm=I.CargoCoGM+CargoOffsetM-CombinedCoGM;
+            const double Iz=TotalMassKg*(C.WheelbaseM*C.WheelbaseM+C.TrackM*C.TrackM)/12.;
+            const double Alpha=Moment/Iz;
+            const FVector RequiredA(Ax-Alpha*Arm.Y-YawRate*YawRate*Arm.X,
+                Ay+Alpha*Arm.X-YawRate*YawRate*Arm.Y,0);
+            const FVector RequiredForce=RequiredA*Mass;
+            CargoInertialForceN=-RequiredForce; RestraintForceN=FVector::ZeroVector;
+            if(I.CargoSecured || (CargoRelativeVelocityMps.Size2D()<1.e-5 && RequiredForce.Size2D()<=I.DeckStaticMu*Normal))
+            {
+                CargoContactForceN=RequiredForce.GetClampedToMaxSize(I.DeckStaticMu*Normal);
+                if(I.CargoSecured) RestraintForceN=RequiredForce-CargoContactForceN;
+                RestraintOverload|=RestraintForceN.Size2D()>FMath::Max(0.,I.RestraintCapacityN);
+                CargoRelativeVelocityMps=FVector::ZeroVector; CargoSliding=false;
+            }
+            else
+            {
+                // The no-slip impulse at this substep either stops relative
+                // motion or saturates the kinetic Coulomb friction circle.
+                const FVector Needed=(RequiredA-CargoRelativeVelocityMps*((1-CargoFraction)/Dt))*Mass;
+                CargoContactForceN=Needed.GetClampedToMaxSize(I.DeckKineticMu*Normal);
+                FVector RelativeA=(CargoContactForceN/Mass-RequiredA)/(1-CargoFraction);
+                RelativeA+=FVector(2*YawRate*CargoRelativeVelocityMps.Y,-2*YawRate*CargoRelativeVelocityMps.X,0);
+                CargoRelativeVelocityMps+=RelativeA*Dt;
+                CargoOffsetM+=CargoRelativeVelocityMps*Dt;
+                CargoSliding=CargoRelativeVelocityMps.Size2D()>1.e-5;
+            }
+            PeakCargoShiftM=FMath::Max(PeakCargoShiftM,CargoOffsetM.Size2D());
+            CargoUnsafe|=PeakCargoShiftM>FMath::Max(.001,I.CargoShiftLimitM) || RestraintOverload;
+        }
         U+=(Ax+OldYaw*OldV)*Dt; V+=(Ay-OldYaw*OldU)*Dt;
         const double Iz=TotalMassKg*(C.WheelbaseM*C.WheelbaseM+C.TrackM*C.TrackM)/12.;
         YawRate+=Moment/Iz*Dt;
@@ -176,21 +217,25 @@ void FAGVDynamicsState::Step(const FAGVDynamicsSettings& Settings,const FAGVDyna
         const double MidHeading=Heading+(OldYaw+YawRate)*.25*Dt;
         const double Forward=(OldU+U)*.5*Dt,Side=(OldV+V)*.5*Dt;
         const double NewHeading=Heading+(OldYaw+YawRate)*.5*Dt;
-        auto RotatedCoG=[&](double H){return FVector(FMath::Cos(H)*CombinedCoGM.X-FMath::Sin(H)*CombinedCoGM.Y,
-            FMath::Sin(H)*CombinedCoGM.X+FMath::Cos(H)*CombinedCoGM.Y,0);};
+        if(I.CargoContactEnabled)RefreshLoads(C,I);
+        auto RotatedCoG=[](double H,FVector CoG){return FVector(FMath::Cos(H)*CoG.X-FMath::Sin(H)*CoG.Y,
+            FMath::Sin(H)*CoG.X+FMath::Cos(H)*CoG.Y,0);};
         // U/V describe the combined CoG. Return displacement of the geometric
         // chassis origin, avoiding spurious translation as eccentric mass yaws.
-        PositionM+=FVector(FMath::Cos(MidHeading)*Forward-FMath::Sin(MidHeading)*Side,
-            FMath::Sin(MidHeading)*Forward+FMath::Cos(MidHeading)*Side,0)+RotatedCoG(Heading)-RotatedCoG(NewHeading);
+        const FVector OriginStep=FVector(FMath::Cos(MidHeading)*Forward-FMath::Sin(MidHeading)*Side,
+            FMath::Sin(MidHeading)*Forward+FMath::Cos(MidHeading)*Side,0)+RotatedCoG(Heading,OldCoG)-RotatedCoG(NewHeading,CombinedCoGM);
+        PositionM+=OriginStep;
         Heading+=(OldYaw+YawRate)*.5*Dt;
-        const double Distance=FMath::Sqrt(Forward*Forward+Side*Side);
+        const double Distance=I.CargoContactEnabled?OriginStep.Size2D():FMath::Sqrt(Forward*Forward+Side*Side);
         GroundDistanceM+=Distance; SideSlipDistanceM+=FMath::Abs(Side);
         double MeanOmega=0; for(const auto& W:Wheels) MeanOmega+=W.Omega/6.;
         WheelDistanceM+=MeanOmega*C.WheelRadiusM*Dt;
         EffectiveRadiusM=FMath::Abs(YawRate)>1.e-5?FMath::Abs(U/YawRate):0;
-        IMUSpecificForceMps2=FVector(Ax,Ay,G); PeakSlip=FMath::Max(PeakSlip,MaxSlip);
+        IMUSpecificForceMps2=FVector(Ax,Ay,G)-(CargoRelativeVelocityMps-RelativeV)*(I.CargoContactEnabled?CargoFraction/Dt:0);
+        PeakSlip=FMath::Max(PeakSlip,MaxSlip);
         if(Braking) { BrakingElapsed+=Dt; BrakingDistanceM+=Distance; }
-        if(FMath::Abs(Target)<.001 && FMath::Abs(U)<.005 && FMath::Abs(V)<.005 && FMath::Abs(YawRate)<.005)
+        if(FMath::Abs(Target)<.001 && FMath::Abs(U)<.005 && FMath::Abs(V)<.005 && FMath::Abs(YawRate)<.005 &&
+            (!I.CargoContactEnabled || CargoRelativeVelocityMps.Size2D()<.005))
         {
             if(Braking) { LastBrakeValid=true; LastBrakingSeconds=BrakingElapsed; LastBrakingDistanceM=BrakingDistanceM; Braking=false; }
             U=V=YawRate=0; for(auto& W:Wheels) W.Omega=0;

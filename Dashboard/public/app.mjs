@@ -1,9 +1,12 @@
 import {compareOperation, vesselDuration, formatDuration} from './metrics.mjs';
 import {renderFrictionDetails} from './friction-view.mjs';
 import {renderAGVPhysics,renderAGVExperiments,renderAGVSensors} from './agv-physics-view.mjs';
-let agvBenchReport=null,agvBenchFetched=0;
+import {renderEmergencyReport} from './agv-emergency-view.mjs';
+let agvBenchReport=null,agvEmergencyReport=null,agvBenchFetched=0;
 import {renderRecoveryDetails, faultDialogTitle} from './recovery-view.mjs';
-import {controlPanel,impactFeed,impactOverlay,mapPosition} from './control-view.mjs';
+import {controlPanel,impactFeed} from './control-view.mjs';
+import {renderTerminalOverview} from './terminal-map.mjs';
+let terminalLayout=null,layoutFetched=0,mapMode='all';
 
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -14,6 +17,7 @@ const labels={charging:'충전 중',to_charge:'충전소 이동',charge_return:'
 const dispatchReasons={admitted:'AGV · 야드 확보 완료',agv_approaching:'배정 AGV 접근 중',agv_returning:'배정 AGV 복귀 중',vehicle_pending:'실행 가능한 화물 · 차량 배정 대기',yard_support_pending:'야드 아래층 적재 대기',rmg_approach_reserved:'목적 RMG 접근 예약 대기',rmg_turn_clearance:'RMG 인수·출차 공간 대기',yard_block_reserved:'야드 블록 사용 중',yard_slot_unavailable:'목적 슬롯 사용 불가',source_not_ready:'선박 상부 화물·이전 배치 또는 작업 종료 확인'};
 const stages=['안전 높이 이동','픽업 위치 접근','착좌 · 잠금','화물 인양','인계 위치 이동','하강 · 인계','스프레더 회수','안착 확인'];
 const paths={grid:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',crane:'M3 7h18M7 7V4h5l6 3M7 7v14M4 21h6M13 7v10m-3 0h6v4h-6zM18 7v14m-3 0h6',agv:'M3 9h18v8H3zM6 9V6h12v3M6 17v3m12-3v3M7 13h10',ship:'M3 13l9 4 9-4-3 7H6zM6 13V8h12v5M9 8V4h6v4M2 22l4-1 5 1 6-1 5 1',box:'M3 6h18v13H3zM7 6v13m5-13v13m5-13v13',sensor:'M12 11v2M8 8a6 6 0 0 0 0 8m8-8a6 6 0 0 1 0 8M4 4a11 11 0 0 0 0 16M20 4a11 11 0 0 1 0 16',chart:'M3 3v18h18M7 16l4-6 4 3 6-8',download:'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',search:'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14m5 12 6 6',clock:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18m0 4v6l4 2'};
+Object.assign(labels,{emergency_hold:'돌발시험 정지 유지',emergency_braking:'돌발시험 물리 급제동',emergency_detection:'돌발시험 감지·반응 중'});
 function icon(name){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name]||paths.grid}"/></svg>`;}
 document.querySelectorAll('[data-icon]').forEach(e=>e.innerHTML=icon(e.dataset.icon));
 let state=null, reference=null, settings=null, live=false, age=null, view='overview', filter='sts', query='', page=0, selected=null, tab='overview', sensor='S05', lastRendered='', busy=false, pointerHeld=false;
@@ -105,29 +109,7 @@ function renderChrome(){
  $('#footer-time').textContent=state?`기록 시각 ${new Date(state.generated_at).toLocaleString('ko-KR')}${mix?` · 20ft ${num(mix['20'],0)}개 / 40ft ${num(mix['40'],0)}개 / 45ft ${num(mix['45'],0)}개`:''}`:'시뮬레이션 데이터 대기';
 }
 
-function map(){
- const X=x=>55+(x+85)*.75,Y=y=>36+(y+525)*.29;
- const mk=(a,body)=>`<g class="map-item ${a.id===selected?'selected':''}" data-actor="${esc(a.id)}" tabindex="0" role="button" aria-label="${esc(a.name)} 선택"><title>${esc(a.name)} · ${esc(labels[a.state]||a.state)}</title>${body}</g>`;
- let shapes='';
- for(const a of actors().filter(a=>a.type==='yard')){
-  const [x,y]=a.position_m, top=Y(y)-3;
-  let blocks='';for(let r=0;r<3;r++)for(let c=0;c<13;c++)blocks+=`<rect x="${X(122)+c*24}" y="${top+r*2.3}" width="20" height="1.65" rx=".3" fill="${['#8eb7a8','#a6bdb0','#b6c8ae'][(r+c)%3]}"/>`;
-  shapes+=mk(a,`<rect class="map-selection" x="${X(109)}" y="${top-3}" width="337" height="12" rx="2" fill="#edf3ed"/>${blocks}`);
- }
- for(const a of actors().filter(a=>a.type==='vessel')){
-  const [,y]=a.position_m;
-  shapes+=mk(a,`<path class="map-selection" d="M${X(-63)} ${Y(y)-30}h30v59l-15 12-15-12z" fill="#477885" stroke="#6497a0"/><rect x="${X(-56)}" y="${Y(y)-25}" width="19" height="46" rx="2" fill="#9bc0bd"/><path d="M${X(-56)} ${Y(y)-15}h19m-19 9h19m-19 9h19m-19 9h19" stroke="#659c9e"/><text x="${X(-47)}" y="${Y(y)+2}" fill="#27535f" font-size="7" text-anchor="middle" transform="rotate(-90 ${X(-47)} ${Y(y)+2})">${esc(a.name)}</text>`);
- }
- shapes+=impactOverlay(state,impactFocus,X,Y,selected);
- for(const a of actors().filter(a=>['sts','rmg','agv'].includes(a.type))){
-  const [x,y]=mapPosition(a), px=X(x),py=Y(y);
-  if(a.type==='sts') shapes+=mk(a,`<rect x="${px-40}" y="${py-9}" width="78" height="19" fill="transparent"/><path class="map-selection" d="M${px-37} ${py}h76m-48-6v12m19-12v12" stroke="${a.id===selected?'#12a488':'#5c9b89'}" stroke-width="2.4"/><rect x="${px+2}" y="${py-3}" width="7" height="6" fill="#d9b263"/><text x="${px+44}" y="${py+2}" font-size="5.5" fill="#4c8776">${esc(a.name)}</text>`);
-  else if(a.type==='agv') shapes+=mk(a,`<rect class="map-selection" x="${px-4}" y="${py-3}" width="8" height="6" rx="1.5" fill="#638bb3" stroke="#f9fcfb"/>`);
-  else shapes+=mk(a,`<rect x="${px-12}" y="${py-5}" width="24" height="10" fill="transparent"/><path class="map-selection" d="M${px-10} ${py-3}v6m0-3h20m0-3v6" stroke="#c79f62" stroke-width="1.2"/>`);
- }
- for(const a of actors().filter(a=>['sts','rmg'].includes(a.type)&&a.head_position_m))shapes+=`<circle cx="${X(a.head_position_m[0])}" cy="${Y(a.head_position_m[1])}" r="1.8" fill="${a.fault?'#bd4545':'#1e6856'}" pointer-events="none"/>`;
- return `<section class="panel"><div class="panel-head"><div><h2>터미널 오버뷰 <span class="number">TOP VIEW</span></h2><p>장비를 클릭해 상세 정보를 확인하세요</p></div><div class="legend"><span><i class="type-dot"></i>STS</span><span><i class="type-dot" style="background:#779bbc"></i>AGV</span><span><i class="type-dot" style="background:#c69757"></i>RMG</span></div></div><div class="map-wrap"><svg class="terminal-map" viewBox="0 0 750 390" role="img" aria-label="실행 좌표 기반 항만 장비 지도"><defs><pattern id="map-grid" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".55" fill="#dce8e1"/></pattern></defs><rect width="750" height="390" fill="url(#map-grid)"/><rect x="42" y="25" width="87" height="337" rx="9" fill="#193e4c"/><rect x="129" y="25" width="586" height="337" rx="5" fill="#f1f5f0"/><path d="M${X(70)} 29v330M${X(110)} 29v330M${X(390)} 29v330M${X(650)} 29v330" stroke="#e1e9e2" stroke-width="11"/><path d="M${X(70)} 29v330M${X(390)} 29v330" stroke="#fcfdfb" stroke-width=".7" stroke-dasharray="6 4"/>${shapes}<text x="52" y="18" class="map-text">QUAYSIDE</text><text x="300" y="18" class="map-text">CONTAINER YARD</text><text x="635" y="18" class="map-text">LANDSIDE</text><rect x="646" y="120" width="43" height="65" rx="3" fill="#d4e1d8"/><rect x="646" y="220" width="43" height="34" rx="3" fill="#d4e1d8"/><text x="667" y="156" fill="#80998b" font-size="6" text-anchor="middle">OPS</text><path d="M701 333v-19m-4 5 4-5 4 5" stroke="#8aa197"/><text x="698" y="343" fill="#8aa197" font-size="7">Y−</text>${!state?'<text x="388" y="203" text-anchor="middle" fill="#6f9181" font-size="12">시뮬레이터를 실행하면 장비가 표시됩니다</text>':''}</svg></div><div class="map-caption"><span>배치 좌표: 엔진 데이터 · 장비 기호는 확대 표시</span><span>컨테이너 상세는 목록에서 조회</span></div><div class="flow">${[['ship','선박'],['crane','STS'],['agv','AGV'],['crane','RMG'],['grid','야드']].map(([ic,t],i)=>`${i?'<span class="arrow">→</span>':''}<span class="step"><span class="step-icon">${icon(ic)}</span><b>${t}</b></span>`).join('')}</div></section>`;
-}
+function map(){return renderTerminalOverview(state,terminalLayout,{selected,focus:impactFocus,mode:mapMode});}
 
 function stowagePlans(){
  const vessels=state?.vessels||[];
@@ -330,7 +312,7 @@ function renderContent(){
  heading();
  if(view==='sensors')$('#view-content').innerHTML=sensorsPage();
  else if(view==='performance')$('#view-content').innerHTML=performancePage();
- else if(view==='agv-physics')$('#view-content').innerHTML=renderAGVExperiments(agvBenchReport);
+ else if(view==='agv-physics')$('#view-content').innerHTML=renderEmergencyReport(agvEmergencyReport)+renderAGVExperiments(agvBenchReport);
  else $('#view-content').innerHTML=`<div class="${view==='equipment'?'full-equipment':''}"><div class="monitor-grid"><div>${view==='overview'?map()+impactFeed(state,impactFocus,live)+stowagePlans():''}${equipmentTable()}</div>${inspector()}</div></div>`;
 }
 function choose(id){selected=id;renderContent();}
@@ -339,8 +321,15 @@ async function poll(){
  try{
   const response=await fetch('/api/state');if(!response.ok)throw Error();const payload=await response.json();
   state=payload.state;live=payload.live;age=payload.age_seconds;
+  if(state?.run_id&&terminalLayout?.run_id!==state.run_id&&Date.now()-layoutFetched>3000){
+   layoutFetched=Date.now();
+   try{const r=await fetch('/api/terminal-layout');if(r.ok){const data=await r.json();if(data.layout?.run_id===state.run_id)terminalLayout=data.layout;}}catch{}
+  }
   if(view==='agv-physics' && Date.now()-agvBenchFetched>10000){
-   try{const b=await fetch('/api/agv-experiments');if(b.ok){agvBenchReport=(await b.json()).report;agvBenchFetched=Date.now();renderContent();}}
+   try{const [b,e]=await Promise.all([fetch('/api/agv-experiments'),fetch('/api/agv-emergencies')]);
+    if(b.ok)agvBenchReport=(await b.json()).report;
+    if(e.ok)agvEmergencyReport=(await e.json()).report;
+    if(b.ok&&e.ok)agvBenchFetched=Date.now();renderContent();}
    catch{}
   }
   observeControls();
@@ -370,6 +359,7 @@ document.addEventListener('click',e=>{
  if(b.dataset.tab){tab=b.dataset.tab;renderContent();}
  if(b.dataset.command)sendEquipmentCommand(b.dataset.command);
  if(b.dataset.impact){impactFocus=null;renderContent();}
+ if(b.dataset.mapView){mapMode=b.dataset.mapView;renderContent();}
  if(b.dataset.page){page+=Number(b.dataset.page);renderContent();}
  if(b.dataset.sensor){sensor=b.dataset.sensor;renderContent();}
  if(b.dataset.openSensor){sensor=b.dataset.openSensor;view='sensors';renderContent();}

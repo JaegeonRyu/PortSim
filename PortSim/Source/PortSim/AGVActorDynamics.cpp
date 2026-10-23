@@ -10,6 +10,16 @@ FAGVDynamicsInput APortAGVActor::DynamicsInput() const
     I.CargoCoGM=FVector(DeckCoGOffsetCm.Y,-DeckCoGOffsetCm.X,DeckCoGOffsetCm.Z)*.01;
     I.StaticMu=Friction.Tire.Static(Surface); I.KineticMu=Friction.Tire.Kinetic(Surface);
     I.RollingResistance=Friction.TireRollingResistance; I.DrivenFraction=Friction.DrivenWeightFraction;
+    if(Emergency.Active)
+    {
+        FPortSurfaceState TestSurface=Surface; TestSurface.Wetness=EmergencySettings.Wetness; TestSurface.Ice=EmergencySettings.Ice;
+        I.StaticMu=Friction.Tire.Static(TestSurface); I.KineticMu=Friction.Tire.Kinetic(TestSurface);
+        I.DeckStaticMu=Friction.Steel.Static(TestSurface); I.DeckKineticMu=Friction.Steel.Kinetic(TestSurface);
+        I.CargoContactEnabled=true; I.CargoSecured=Emergency.CargoSecured;
+        // DeckCoG is rebuilt from actual attached, displaced cargo each frame.
+        // The solver adds its relative offset once, never twice.
+        I.CargoCoGM-=Dynamics.CargoOffsetM;
+    }
     I.AccelerationLimitMps2=AccelerationCmPerSecondSquared()*.01;
     I.BrakeDemandMps2=BrakingCmPerSecondSquared()*.01;
     const FVector Velocity=GetActorRightVector()*Dynamics.U*100-GetActorForwardVector()*Dynamics.V*100;
@@ -22,6 +32,7 @@ FAGVDynamicsInput APortAGVActor::DynamicsInput() const
 
 void APortAGVActor::ConstrainDynamicsStop()
 {
+    if(Emergency.Active && !Emergency.Finished)Emergency.Invalidate();
     Speed=0; Dynamics.ConstrainStop(); Sensors.LateralSlipCm=0;
 }
 
@@ -36,7 +47,16 @@ void APortAGVActor::AdvanceDynamics(double TargetSpeedMps,double CurvaturePerM,d
     Dynamics.PositionM=FVector::ZeroVector; Dynamics.Heading=0;
     const double WheelBefore=Dynamics.WheelDistanceM,SlipBefore=Dynamics.SideSlipDistanceM;
     auto Input=DynamicsInput(); Input.TargetSpeedMps=TargetSpeedMps; Input.CurvaturePerM=CurvaturePerM;
-    Dynamics.Step(DynamicsSettings,Input,Seconds);
+    if(Emergency.Active)
+    {
+        const FVector Delta=(EmergencyWorkerPosition-Previous)*.01;
+        const double Along=FVector::DotProduct(Delta,EmergencyDirection);
+        const double Side=FVector::CrossProduct(EmergencyDirection,Delta).Z;
+        const double Gap=Along-AGVReference::PhysicalHalfLengthCm*.01-EmergencySettings.WorkerRadiusM;
+        const double Range=Sensors.LiDARDetectionRangeCm>=0?Sensors.LiDARDetectionRangeCm*.01:100;
+        Emergency.Step(EmergencySettings,DynamicsSettings,Input,Dynamics,Gap,Side,Range,Seconds);
+    }
+    else Dynamics.Step(DynamicsSettings,Input,Seconds);
     SetActorLocationAndRotation(Previous+(Forward*Dynamics.PositionM.X+Left*Dynamics.PositionM.Y)*100,
         GetActorRotation()+FRotator(0,FMath::RadiansToDegrees(Dynamics.Heading),0));
     Speed=FMath::Sqrt(Dynamics.U*Dynamics.U+Dynamics.V*Dynamics.V)*100;

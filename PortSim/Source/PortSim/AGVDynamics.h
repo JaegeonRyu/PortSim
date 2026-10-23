@@ -36,6 +36,9 @@ struct FAGVDynamicsInput
     double TargetSpeedMps=0,CurvaturePerM=0,AccelerationLimitMps2=1.5,BrakeDemandMps2=1.5;
     double StaticMu=.8,KineticMu=.65,RollingResistance=.012,DrivenFraction=.5;
     FVector WindForceBodyN=FVector::ZeroVector;
+    // Optional planar deck contact. Disabled for ordinary rigidly attached loads.
+    bool CargoContactEnabled=false,CargoSecured=true;
+    double DeckStaticMu=.4,DeckKineticMu=.3,RestraintCapacityN=300000,CargoShiftLimitM=.3;
 };
 
 struct FAGVWheelDynamics
@@ -57,11 +60,14 @@ struct PORTSIM_API FAGVDynamicsState
     double MaxSlip=0,PeakSlip=0,PeakLTR=0,StabilityLimitMps=7;
     bool WheelLift=false,OverturnThreshold=false,Braking=false,LastBrakeValid=false,StabilityLimited=false;
     FString Fault;
+    FVector CargoOffsetM=FVector::ZeroVector,CargoRelativeVelocityMps=FVector::ZeroVector;
+    FVector CargoContactForceN=FVector::ZeroVector,CargoInertialForceN=FVector::ZeroVector,RestraintForceN=FVector::ZeroVector;
+    double PeakCargoShiftM=0;
+    bool CargoSliding=false,CargoUnsafe=false,RestraintOverload=false;
     void Reset(double ForwardSpeedMps=0,const FAGVDynamicsSettings& Settings=FAGVDynamicsSettings());
     void Step(const FAGVDynamicsSettings& Settings,const FAGVDynamicsInput& Input,double Seconds);
     void RefreshLoads(const FAGVDynamicsSettings& Settings,const FAGVDynamicsInput& Input);
-    // FMS reservations / legacy LiDAR still impose nonphysical stop constraints.
-    // Do NOT report those as measured tire braking tests (phase 3 is separate).
+    // Reservation/collision guards remain constraints, not measured tire braking.
     void ConstrainStop();
     bool Finite() const;
 };

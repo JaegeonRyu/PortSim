@@ -1,4 +1,5 @@
 #include "TerminalLayout.h"
+#include "DashboardLayout.h"
 #include "QuayCrane.h"
 #include "PortSiteLogistics.h"
 #include "Async/Async.h"
@@ -148,6 +149,12 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
     O->SetNumberField(TEXT("paused_seconds"),PausedSeconds);
     O->SetNumberField(TEXT("last_job_seconds"),LastJobSeconds);
     O->SetStringField(TEXT("cargo"),GetNameSafe(CargoActor));
+    TArray<TSharedPtr<FJsonValue>> MapParts;
+    auto MapPart=[&](const UStaticMeshComponent* Part){if(Part)MapParts.Add(MakeShared<FJsonValueObject>(DashboardLayout::Footprint(Part)));};
+    for(const UStaticMeshComponent* Part:Legs)MapPart(Part);
+    for(const UStaticMeshComponent* Part:Beams)MapPart(Part);
+    for(const UStaticMeshComponent* Part:CrossBeams)MapPart(Part);
+    MapPart(Trolley);O->SetArrayField(TEXT("map_parts"),MapParts);
     O->SetStringField(TEXT("agv"),GetNameSafe(HandoverAGV));
     O->SetNumberField(TEXT("payload_kg"),bCarrying && IsValid(CargoActor)?CargoActor->MassKg:0);
     Vector(O,TEXT("head_position_m"),HeadPosition(),.01f);
@@ -375,7 +382,9 @@ void APortSiteLogistics::ExportDashboard(bool Paused,bool Force)
         for(const auto& Crane:Equipment) Crane->DeferRopeVisuals(true);
     }
     const FString Directory=FPaths::ProjectSavedDir()/TEXT("Dashboard");
-    DashboardWrite=Async(EAsyncExecution::ThreadPool,[Snapshot=MoveTemp(Snapshot),Directory]() mutable
+    const FString Run=FPaths::GetCleanFilename(ReportBase),LayoutFile=Directory/(TEXT("layout-")+Run+TEXT(".json"));
+    auto Layout=IFileManager::Get().FileExists(*LayoutFile)?TUniquePtr<FJsonObject>():DashboardLayout::Capture(GetWorld(),Run);
+    DashboardWrite=Async(EAsyncExecution::ThreadPool,[Snapshot=MoveTemp(Snapshot),Layout=MoveTemp(Layout),LayoutFile,Directory]() mutable
     {
         // The entire JSON graph belongs to this task. No UObject access or shared
         // non-thread-safe JSON references survive on the game thread.
@@ -383,6 +392,14 @@ void APortSiteLogistics::ExportDashboard(bool Paused,bool Force)
         FString Json;
         if (!FJsonSerializer::Serialize(Root,TJsonWriterFactory<TCHAR,TCondensedJsonPrintPolicy<TCHAR>>::Create(&Json))) return;
         IFileManager::Get().MakeDirectory(*Directory,true);
+        if(Layout)
+        {
+            FString LayoutJson;const TSharedRef<FJsonObject> Data=MakeShareable(Layout.Release());
+            const FString Temp=LayoutFile+TEXT(".tmp");
+            if(FJsonSerializer::Serialize(Data,TJsonWriterFactory<TCHAR,TCondensedJsonPrintPolicy<TCHAR>>::Create(&LayoutJson)) &&
+                FFileHelper::SaveStringToFile(LayoutJson,*Temp,FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+                IFileManager::Get().Move(*LayoutFile,*Temp,true,true);
+        }
         const FString Temporary=Directory/(TEXT("state-")+FGuid::NewGuid().ToString()+TEXT(".tmp"));
         const FString Final=Directory/TEXT("state.json");
         if (!FFileHelper::SaveStringToFile(Json,*Temporary,FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM) ||
@@ -590,6 +607,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
         else if(auto* V=Cast<APortAGVActor>(A))
         {
             O->SetStringField(TEXT("type"),TEXT("agv"));
+            O->SetObjectField(TEXT("emergency_test"),V->EmergencySnapshot());
             O->SetStringField(TEXT("name"),FString::Printf(TEXT("AGV-%03d"),V->VehicleID));
             O->SetNumberField(TEXT("vehicle_id"),V->VehicleID);
             O->SetNumberField(TEXT("battery_percent"),V->BatteryPercent);
@@ -707,6 +725,8 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             O->SetStringField(TEXT("fault"),V->bDriveFault?TEXT("주행 고장 · 위치와 화물을 유지하며 수리 대기"):TEXT(""));
             O->SetStringField(TEXT("fault_scope"),V->bDriveFault?TEXT("equipment"):TEXT(""));
             if(V->bDriveFault) O->SetStringField(TEXT("state"),TEXT("fault"));
+            if(V->Emergency.Active)O->SetStringField(TEXT("state"),V->Emergency.Finished?TEXT("emergency_hold"):
+                V->Emergency.BrakeCommand?TEXT("emergency_braking"):TEXT("emergency_detection"));
         }
         else if(auto* C=Cast<APortContainerActor>(A))
         {

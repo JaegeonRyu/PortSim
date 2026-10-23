@@ -30,7 +30,12 @@ TSharedRef<FJsonObject> APortAGVActor::DynamicsSnapshot() const
     O->SetBoolField(TEXT("last_brake_valid"),D.LastBrakeValid);
     O->SetNumberField(TEXT("last_braking_seconds"),D.LastBrakingSeconds);
     O->SetNumberField(TEXT("last_braking_distance_m"),D.LastBrakingDistanceM);
-    O->SetBoolField(TEXT("legacy_stop_constraint"),Sensors.bFMSHold || Sensors.bControlledStop);
+    O->SetBoolField(TEXT("physical_emergency_braking"),Emergency.Active && Emergency.BrakeCommand);
+    O->SetBoolField(TEXT("legacy_stop_constraint"),!Emergency.Active && (Sensors.bFMSHold || Sensors.bControlledStop));
+    Vector(TEXT("cargo_shift_m"),D.CargoOffsetM);Vector(TEXT("cargo_relative_velocity_mps"),D.CargoRelativeVelocityMps);
+    Vector(TEXT("cargo_inertia_n"),D.CargoInertialForceN);Vector(TEXT("deck_contact_force_n"),D.CargoContactForceN);
+    Vector(TEXT("restraint_force_n"),D.RestraintForceN);
+    O->SetBoolField(TEXT("cargo_sliding"),D.CargoSliding);O->SetBoolField(TEXT("cargo_unsafe"),D.CargoUnsafe);
     O->SetStringField(TEXT("fault"),D.Fault);
     auto Settings=MakeShared<FJsonObject>();
     Settings->SetNumberField(TEXT("wheel_radius_m"),C.WheelRadiusM); Settings->SetNumberField(TEXT("wheel_inertia_kg_m2"),C.WheelInertiaKgM2);
