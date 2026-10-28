@@ -31,3 +31,21 @@ recovery threshold for visibility and friction.
 
 Automation: PortSim.Environment.OperatingHold covers rain, fog, snow, waves, wind, hysteresis,
 interrupted recovery, residual ice, and continued environment evolution while waiting.
+
+## Air temperature
+
+Range: -25 to 40 degrees Celsius. Default: fixed 18 degrees Celsius.
+Environment settings provide a reference-temperature slider and a daily-cycle toggle.
+With the cycle enabled, the reference is the daily mean, with an assumed +/-4 degree
+variation, maximum at 14:00 and minimum at 02:00; the initial model hour is 08:00.
+Both the selected setting and the generated temperature are clamped to the range.
+The cycle consumes simulation time, freezes on manual pause/emergency stop and continues
+through weather holds. Fixed mode freezes the cycle clock and returns the selected value.
+
+Saved settings: temperature_celsius, daily_temperature_cycle.
+CLI overrides: -PortSimTemperature=-5 -PortSimDailyTemperature or -PortSimFixedTemperature.
+Dashboard environment: temperature_celsius (current), temperature_setting_celsius (reference),
+daily_temperature_cycle and temperature_hour. Missing legacy telemetry displays a dash.
+
+This is an air-temperature model. Existing imposed snow/ice scenarios and surface melt
+rates remain independent; there is no pavement-temperature or heat-balance calculation.

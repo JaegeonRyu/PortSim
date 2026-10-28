@@ -421,6 +421,10 @@ void UPortEnvironmentComponent::BeginPlay()
     Super::BeginPlay();
     int32 Seed=static_cast<int32>(FGuid::NewGuid().A);
     FParse::Value(FCommandLine::Get(),TEXT("PortSimEnvironmentSeed="),Seed);
+    float InitialTemperature=TemperatureSettingCelsius;
+    if(FParse::Value(FCommandLine::Get(),TEXT("PortSimTemperature="),InitialTemperature)) SetTemperatureCelsius(InitialTemperature);
+    if(FParse::Param(FCommandLine::Get(),TEXT("PortSimDailyTemperature"))) SetDailyTemperatureCycleEnabled(true);
+    if(FParse::Param(FCommandLine::Get(),TEXT("PortSimFixedTemperature"))) SetDailyTemperatureCycleEnabled(false);
     Wind.Initialize(Seed);
     Sea.Initialize(Seed);
     float FogVisibility=Fog.VisibilityMeters;
@@ -492,6 +496,8 @@ UPhysicalMaterial* UPortEnvironmentComponent::GetContactMaterial()
 
 void UPortEnvironmentComponent::AdvanceEnvironment(float SimulationSeconds)
 {
+    if(FMath::IsFinite(SimulationSeconds) && SimulationSeconds>0 && bDailyTemperatureCycle)
+        TemperatureElapsedSeconds=FMath::Fmod(TemperatureElapsedSeconds+double(SimulationSeconds),86400.);
     SynchronizeSurfaceInputs();
     Accumulation.Advance(FrictionSettings.SurfaceDynamics,Rain.bRainEnabled?Rain.RainfallMmPerHour:0,
         bSnowEnabled?GetSnowfallMmPerHour():0,bIceEnabled?FMath::Clamp(IceIntensity,0.f,1.f):0,SimulationSeconds);

@@ -60,6 +60,8 @@ void AQuayCrane::LoadRunSettings()
         if(Environment && !FParse::Param(FCommandLine::Get(),TEXT("unattended")))
         {
             bool Enabled=false; double Value=0;
+            if(Object->TryGetNumberField(TEXT("temperature_celsius"),Value)) Environment->SetTemperatureCelsius(Value);
+            if(Object->TryGetBoolField(TEXT("daily_temperature_cycle"),Enabled)) Environment->SetDailyTemperatureCycleEnabled(Enabled);
             if(Object->TryGetBoolField(TEXT("wind_enabled"),Enabled)) Environment->SetWindEnabled(Enabled);
             if(Object->TryGetNumberField(TEXT("wind_speed_mps"),Value)) Environment->SetWindSpeedMetersPerSecond(Value);
             if(Object->TryGetBoolField(TEXT("sea_enabled"),Enabled)) Environment->SetSeaMotionEnabled(Enabled);
@@ -106,6 +108,9 @@ void AQuayCrane::LoadRunSettings()
     if(Environment)
     {
         float Value=0;
+        if(FParse::Value(FCommandLine::Get(),TEXT("PortSimTemperature="),Value)) Environment->SetTemperatureCelsius(Value);
+        if(FParse::Param(FCommandLine::Get(),TEXT("PortSimDailyTemperature"))) Environment->SetDailyTemperatureCycleEnabled(true);
+        if(FParse::Param(FCommandLine::Get(),TEXT("PortSimFixedTemperature"))) Environment->SetDailyTemperatureCycleEnabled(false);
         if(FParse::Value(FCommandLine::Get(),TEXT("PortSimWindSpeed="),Value)) Environment->SetWindSpeedMetersPerSecond(Value);
         if(FParse::Value(FCommandLine::Get(),TEXT("PortSimSeaIntensity="),Value)) Environment->SetSeaIntensity(Value);
         if(FParse::Value(FCommandLine::Get(),TEXT("PortSimFogVisibility="),Value)) Environment->SetFogVisibilityMeters(Value);
@@ -141,6 +146,8 @@ bool AQuayCrane::SaveRunSettings()
     SaveVesselInputs(*Object);
     if(Environment)
     {
+        Object->SetNumberField(TEXT("temperature_celsius"),Environment->GetTemperatureSettingCelsius());
+        Object->SetBoolField(TEXT("daily_temperature_cycle"),Environment->IsDailyTemperatureCycleEnabled());
         Object->SetBoolField(TEXT("wind_enabled"),Environment->IsWindEnabled());
         Object->SetNumberField(TEXT("wind_speed_mps"),Environment->GetWindSettingMetersPerSecond());
         Object->SetBoolField(TEXT("sea_enabled"),Environment->IsSeaMotionEnabled());

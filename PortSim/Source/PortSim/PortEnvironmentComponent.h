@@ -219,6 +219,19 @@ class PORTSIM_API UPortEnvironmentComponent : public UActorComponent
     GENERATED_BODY()
 public:
     UPortEnvironmentComponent();
+    static constexpr float MinimumTemperatureCelsius=-25.f;
+    static constexpr float MaximumTemperatureCelsius=40.f;
+    UFUNCTION(BlueprintPure,Category="Environment|Temperature") float GetTemperatureCelsius() const;
+    UFUNCTION(BlueprintCallable,Category="Environment|Temperature") void SetTemperatureCelsius(float Celsius);
+    UFUNCTION(BlueprintPure,Category="Environment|Temperature") float GetTemperatureSettingCelsius() const { return TemperatureSettingCelsius; }
+    UFUNCTION(BlueprintCallable,Category="Environment|Temperature") void SetDailyTemperatureCycleEnabled(bool Enabled) { bDailyTemperatureCycle=Enabled; }
+    UFUNCTION(BlueprintPure,Category="Environment|Temperature") bool IsDailyTemperatureCycleEnabled() const { return bDailyTemperatureCycle; }
+    UFUNCTION(BlueprintPure,Category="Environment|Temperature") float GetTemperatureHour() const;
+    UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Environment|Temperature",meta=(ClampMin="-25",ClampMax="40")) float TemperatureSettingCelsius=18.f;
+    UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Environment|Temperature") bool bDailyTemperatureCycle=false;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Environment|Temperature",meta=(ClampMin="0",ClampMax="20")) float DailyTemperatureAmplitudeCelsius=4.f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Environment|Temperature",meta=(ClampMin="0",ClampMax="24")) float TemperatureStartHour=8.f;
+
     UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Environment|Operations") FPortWeatherOperatingLimits OperatingLimits;
     UFUNCTION(BlueprintCallable, Category="Environment|Surface") void SetSurfaceConditions(float Wetness,float Snow,float Ice);
     UFUNCTION(BlueprintPure, Category="Environment|Surface") FPortSurfaceState GetSurfaceConditions() const;
@@ -308,6 +321,7 @@ private:
     bool bSurfaceInitialized=false;
     void SynchronizeSurfaceInputs();
     void PublishSurface();
+    double TemperatureElapsedSeconds=0;
     FPortWindState Wind;
     FPortSeaState Sea;
     FPortFogState Fog;

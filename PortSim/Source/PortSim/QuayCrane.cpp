@@ -973,6 +973,9 @@ void APortSimHUD::DrawHUD()
                 AddHitBox(FVector2D(LabelX-6.f*Scale,RowY+21.f*Scale),FVector2D(Width+12.f*Scale,28.f*Scale),SliderName,true,50);
                 Y+=52.f*Scale;
             };
+            EnvironmentSlider(FString::Printf(TEXT("기온 %.1f °C · 기준 %.1f °C · 일변화"),Environment->GetTemperatureCelsius(),Environment->GetTemperatureSettingCelsius()),
+                (Environment->GetTemperatureSettingCelsius()-UPortEnvironmentComponent::MinimumTemperatureCelsius)/(UPortEnvironmentComponent::MaximumTemperatureCelsius-UPortEnvironmentComponent::MinimumTemperatureCelsius),
+                Environment->IsDailyTemperatureCycleEnabled(),TEXT("TemperatureSlider"),TEXT("ToggleDailyTemperature"));
             EnvironmentSlider(FString::Printf(TEXT("바람 설정 %.1f m/s  [Ctrl+0]"),Environment->GetWindSettingMetersPerSecond()),
                 Environment->GetWindIntensity(),Environment->IsWindEnabled(),TEXT("WindIntensitySlider"),TEXT("ToggleWindSetting"));
             EnvironmentSlider(FString::Printf(TEXT("파도·너울 Hs %.2f m  [Ctrl+1]"),Environment->GetSignificantWaveHeightMeters()),
@@ -1089,6 +1092,7 @@ void APortSimHUD::UpdateSlider(float MouseX)
         else if(DragSlider==13) Environment->SetFogIntensity(Ratio);
         else if(DragSlider==14) Environment->SetSnowIntensity(Ratio);
         else if(DragSlider==15) Environment->SetIceIntensity(Ratio);
+        else if(DragSlider==16) Environment->SetTemperatureCelsius(FMath::Lerp(UPortEnvironmentComponent::MinimumTemperatureCelsius,UPortEnvironmentComponent::MaximumTemperatureCelsius,Ratio));
     }
 }
 void APortSimHUD::NotifyHitBoxClick(FName BoxName)
@@ -1105,6 +1109,7 @@ void APortSimHUD::NotifyHitBoxClick(FName BoxName)
         { DragSlider=-2; LoadVesselInput(I,Kind); return; }
     if(auto* Environment=C->GetEnvironment())
     {
+        if(BoxName==TEXT("ToggleDailyTemperature")) { Environment->SetDailyTemperatureCycleEnabled(!Environment->IsDailyTemperatureCycleEnabled()); C->SaveRunSettings(); return; }
         if(BoxName==TEXT("ToggleWindSetting")) { Environment->ToggleWind(); C->SaveRunSettings(); return; }
         if(BoxName==TEXT("ToggleSeaSetting")) { Environment->ToggleSeaMotion(); C->SaveRunSettings(); return; }
         if(BoxName==TEXT("ToggleRainSetting")) { Environment->ToggleRain(); C->SaveRunSettings(); return; }
@@ -1134,6 +1139,7 @@ void APortSimHUD::NotifyHitBoxClick(FName BoxName)
         else if(BoxName==TEXT("FogIntensitySlider")) DragSlider=13;
         else if(BoxName==TEXT("SnowIntensitySlider")) DragSlider=14;
         else if(BoxName==TEXT("IceIntensitySlider")) DragSlider=15;
+        else if(BoxName==TEXT("TemperatureSlider")) DragSlider=16;
         float X=0,Y=0;
         if(DragSlider!=-2 && PC->GetMousePosition(X,Y)) { UpdateSlider(X); C->SaveRunSettings(); }
     }

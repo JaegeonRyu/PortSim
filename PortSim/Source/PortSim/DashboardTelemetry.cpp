@@ -437,6 +437,50 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
         Root->SetNumberField(TEXT("elapsed_seconds"),Controller->AutoElapsed);
         Root->SetNumberField(TEXT("playback_rate"),Controller->SimulationSpeed);
         Root->SetBoolField(TEXT("running"),Controller->bAutoRunning);
+        if(const auto* E=Controller->GetEnvironment())
+        {
+            auto Env=Object();
+            Env->SetNumberField(TEXT("temperature_celsius"),E->GetTemperatureCelsius());
+            Env->SetNumberField(TEXT("temperature_setting_celsius"),E->GetTemperatureSettingCelsius());
+            Env->SetBoolField(TEXT("daily_temperature_cycle"),E->IsDailyTemperatureCycleEnabled());
+            Env->SetNumberField(TEXT("temperature_hour"),E->GetTemperatureHour());
+            const auto& W=E->GetWindState(); const auto& Sea=E->GetSeaState();
+            Env->SetBoolField(TEXT("wind_enabled"),E->IsWindEnabled());
+            Env->SetNumberField(TEXT("wind_setting_mps"),E->GetWindSettingMetersPerSecond());
+            Env->SetNumberField(TEXT("mean_wind_mps"),E->GetWindSpeedMetersPerSecond());
+            Env->SetNumberField(TEXT("wind_speed_mps"),E->GetEffectiveWindSpeedMetersPerSecond());
+            Env->SetNumberField(TEXT("wind_from_deg"),E->GetEffectiveWindDirectionDegrees());
+            Env->SetStringField(TEXT("wind_direction"),E->GetWindDirectionName());
+            Env->SetBoolField(TEXT("gust_active"),E->IsWindEnabled() && W.bGustActive);
+            Env->SetNumberField(TEXT("gust_increment_mps"),E->IsWindEnabled()?W.GustSpeedMetersPerSecond:0);
+            Env->SetBoolField(TEXT("fog_enabled"),E->IsFogEnabled());
+            Env->SetNumberField(TEXT("fog_visibility_m"),E->GetFogVisibilityMeters());
+            Env->SetBoolField(TEXT("rain_enabled"),E->IsRainEnabled());
+            Env->SetNumberField(TEXT("rainfall_mm_per_hour"),E->IsRainEnabled()?E->GetRainfallMmPerHour():0);
+            Env->SetBoolField(TEXT("snow_enabled"),E->IsSnowEnabled());
+            Env->SetNumberField(TEXT("snowfall_mm_per_hour"),E->IsSnowEnabled()?E->GetSnowfallMmPerHour():0);
+            Env->SetBoolField(TEXT("ice_enabled"),E->IsIceEnabled());
+            Env->SetBoolField(TEXT("sea_enabled"),E->IsSeaMotionEnabled());
+            Env->SetNumberField(TEXT("significant_wave_height_m"),E->GetSignificantWaveHeightMeters());
+            Env->SetNumberField(TEXT("wave_height_m"),Sea.WaveHeightMeters);
+            Env->SetNumberField(TEXT("wave_period_s"),Sea.WavePeriodSeconds);
+            Env->SetNumberField(TEXT("wave_from_deg"),Sea.WaveDirectionDegrees);
+            Env->SetNumberField(TEXT("swell_height_m"),Sea.SwellHeightMeters);
+            Env->SetNumberField(TEXT("swell_period_s"),Sea.SwellPeriodSeconds);
+            Env->SetNumberField(TEXT("swell_from_deg"),Sea.SwellDirectionDegrees);
+            const auto Motion=E->GetVesselMotion(0);
+            Env->SetNumberField(TEXT("heave_m"),Motion.HeaveMeters);
+            Env->SetNumberField(TEXT("roll_deg"),Motion.RollDegrees);
+            Env->SetNumberField(TEXT("pitch_deg"),Motion.PitchDegrees);
+            Env->SetObjectField(TEXT("surface"),SurfaceData(E->GetSurfaceConditions(),E->GetFrictionSettings()));
+            Env->SetBoolField(TEXT("weather_hold"),Controller->WeatherHold.Active);
+            Env->SetStringField(TEXT("hold_reason"),Controller->WeatherHold.Reason);
+            Env->SetNumberField(TEXT("recovery_elapsed_s"),Controller->WeatherHold.RecoveryElapsed);
+            Env->SetNumberField(TEXT("recovery_required_s"),E->OperatingLimits.RecoverySeconds);
+            Env->SetBoolField(TEXT("manual_paused"),Controller->bAutoPaused);
+            Env->SetBoolField(TEXT("emergency_stop"),Controller->bEmergencyStop);
+            Root->SetObjectField(TEXT("environment"),Env);
+        }
     }
     Root->SetBoolField(TEXT("paused"),Paused);
     Root->SetBoolField(TEXT("unified"),LaneCount==9);
