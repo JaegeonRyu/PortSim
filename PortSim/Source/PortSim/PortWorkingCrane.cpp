@@ -138,6 +138,8 @@ FVector APortWorkingCrane::HeadPosition() const { return Home+Orientation.Rotate
 void APortWorkingCrane::ResetOperation()
 {
     if (!bConfigured) return;
+    for(double& Seconds:CompletedStageSeconds) Seconds=0;
+    CompletedAGVWaitSeconds=0;
     FaultType=EPortCraneFault::None; RecoveryStatus.Empty(); bRailSafetyHold=false;
     bGantryFault=bAppliedGantryFault=bFaultEvacuating=bFaultEvacuationComplete=false;
     SensorRepairElapsed=0; SensorRepairPhase.Empty();
@@ -362,6 +364,8 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
     if(bJobActive) { JobSeconds+=Dt; if(bGlobalPaused || !bEnabled || !Fault.IsEmpty()) PausedSeconds+=Dt; }
     SetOperationPaused(bGlobalPaused || !bEnabled || !Fault.IsEmpty());
     if (bPaused || !bJobActive) return;
+    if(Stage>=0 && Stage<8) JobStageSeconds[Stage]+=Dt;
+    if(IsWaitingForAGV()) JobAGVWaitSeconds+=Dt;
     AdvanceTelescope(Dt);
     {
         SampleSTS();
@@ -459,6 +463,15 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
         }
         ++CompletedJobs;
         LastJobSeconds=JobSeconds; LastPausedSeconds=PausedSeconds;
+        for(int32 I=0;I<8;++I)
+        { LastJobStageSeconds[I]=JobStageSeconds[I]; CompletedStageSeconds[I]+=JobStageSeconds[I]; }
+        CompletedAGVWaitSeconds+=JobAGVWaitSeconds;
+        UE_LOG(LogTemp,Display,TEXT("CRANE_CYCLE: kind=%s id=%d cargo=%s elapsed=%.2f agv_wait=%.2f stages=%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f"),
+            bSTS?TEXT("STS"):TEXT("RMG"),CraneID,*GetNameSafe(CargoActor),JobSeconds,JobAGVWaitSeconds,
+            JobStageSeconds[0],JobStageSeconds[1],JobStageSeconds[2],JobStageSeconds[3],
+            JobStageSeconds[4],JobStageSeconds[5],JobStageSeconds[6],JobStageSeconds[7]);
+        for(double& Seconds:JobStageSeconds) Seconds=0;
+        JobAGVWaitSeconds=0;
         if (bExternalJobs) { bJobActive=false; CargoActor=nullptr; Stage=0; StageTime=SettleTime=0; return; }
         SourceSlot=1-SourceSlot; Stage=0; StageTime=SettleTime=0;
         {Pickup=FSTSPickupController();for(double& Progress:LockProgress)Progress=0;}

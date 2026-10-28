@@ -72,7 +72,7 @@ export function renderTerminalOverview(state,layout,{selected=null,focus=null,mo
    if(xy(a.head_position_m))h+=`<circle cx="${a.head_position_m[0]}" cy="${a.head_position_m[1]}" r="2.1" fill="${a.fault?'#b83c46':'#116a59'}" pointer-events="none"/>`;
   }
   const e=a.emergency_test;
-  if(e?.active&&xy(e.worker_position_m))h+=`<g class="map-test-worker" pointer-events="none"><circle cx="${e.worker_position_m[0]}" cy="${e.worker_position_m[1]}" r="3.5"/><text x="${e.worker_position_m[0]+6}" y="${e.worker_position_m[1]-5}">시험 작업자</text></g>`;
+  if(e?.active&&xy(e.worker_position_m))h+=`<g class="map-test-worker map-item" data-actor="${esc(a.id)}" role="button" tabindex="0" aria-label="${esc(a.name)} 작업자 진입 상황"><title>${esc(a.name)} · ${e.stopped?'안전 정지 · 작업자 제거 대기':e.brake_command?'급제동 중':'감지·반응 중'}</title><circle cx="${e.worker_position_m[0]}" cy="${e.worker_position_m[1]}" r="7" fill="transparent"/><circle cx="${e.worker_position_m[0]}" cy="${e.worker_position_m[1]}" r="3.5"/><text x="${e.worker_position_m[0]+6}" y="${e.worker_position_m[1]-5}">작업자 · ${esc(a.name)}</text></g>`;
  }
  const {minX,minY,width,height}=viewport,scale=mode==='depot'?25:100;
  h+=`<g class="map-scale" transform="translate(${minX+width-140} ${minY+height-25})" pointer-events="none"><path d="M0 -5v5h${scale}v-5"/><text x="${scale/2}" y="-9" text-anchor="middle">${scale}m</text></g>`;

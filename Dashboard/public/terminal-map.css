@@ -25,6 +25,11 @@
 .map-scale{stroke:#4a6964;fill:#4a6964;stroke-width:1}
 .map-scale text{stroke:none;font:10px Arial,sans-serif}
 .map-test-worker{fill:#b83c46;font:9px 'Malgun Gothic',sans-serif}
+.worker-controls label{display:grid;gap:8px;margin:14px 0;color:#45625c;font-size:12px}
+.worker-controls input{width:100%;padding:10px;border:1px solid #c9d7d2;border-radius:5px;background:white;color:#18383d}
+.worker-impact-list{display:grid;gap:8px;padding:16px;background:#fff8ed;border:1px solid #ecd4ac;border-radius:7px;margin-bottom:16px;font-size:12px}
+.worker-impact-row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;text-align:left;padding:10px;background:white;border:1px solid #eadfcf;border-radius:5px;color:#554c3f;cursor:pointer}
+.worker-impact-row small{margin-left:auto}.worker-impact-detail{margin:12px 16px;line-height:1.8}
 .map-plan-key{display:flex;flex-wrap:wrap;gap:14px;padding:11px 18px;border-top:1px solid var(--line);font-size:10px;color:#617b74}
 .map-plan-key span{display:flex;align-items:center;gap:5px}
 .map-plan-key i{width:11px;height:7px;border:1px solid #bccdc5;border-radius:1px}
@@ -34,3 +39,7 @@
 @media(min-width:1650px){.terminal-world-map{height:780px}}
 @media(max-width:800px){.terminal-world-map{height:600px}}
 @media(max-width:520px){.terminal-world-map{height:520px}.terminal-map-wrap{padding:4px}}
+:root .scenario-grid{display:grid;grid-template-columns:minmax(300px,390px) minmax(0,1fr);gap:24px;align-items:start}
+.scenario-controls{display:grid;gap:24px}.scenario-inputs{display:grid;grid-template-columns:1fr 1fr;gap:12px}.scenario-inputs label{font-size:12px}.scenario-inputs input{width:100%;padding:10px;border:1px solid #ccd9d7;border-radius:6px;margin-top:5px;background:#fff;color:#19363f}.scenario-watch{display:block;padding:18px 0}.scenario-watch select{margin-left:12px;max-width:240px}.live-trace{margin:0 0 15px}.live-trace figcaption{font-size:13px}.live-trace figcaption span{float:right;color:#758b91;font-size:11px}.live-trace svg{display:block;width:100%;max-height:140px;background:#f7faf9;border-radius:8px}.live-trace text{font-size:10px;fill:#758b91}[data-scenario-map]{margin-top:24px}[data-live-environment]{display:grid;grid-template-columns:1fr 1fr;gap:0 24px}[data-live-environment]>.detail-subhead{grid-column:1/-1}
+@media(max-width:1050px){:root .scenario-grid{grid-template-columns:1fr}[data-live-environment]{grid-template-columns:1fr}.scenario-inputs{grid-template-columns:1fr 1fr}}
+.scenario-controls [data-live-environment]{display:block}.scenario-controls>section:first-child{order:2}

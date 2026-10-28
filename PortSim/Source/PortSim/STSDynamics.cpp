@@ -6,6 +6,11 @@ bool FSTSDynamicsConfig::Load(TSharedPtr<FJsonObject> Root,FString& Error)
     const TSharedPtr<FJsonObject>* Config=nullptr;
     if(!Root || !Root->TryGetObjectField(TEXT("dynamics"),Config)) { Error=TEXT("Missing dynamics assumptions"); return false; }
     auto O=*Config;
+    TravelResponseRatio=0;
+    if(O->HasField(TEXT("travel_response_ratio")) &&
+        (!O->TryGetNumberField(TEXT("travel_response_ratio"),TravelResponseRatio) ||
+        !FMath::IsFinite(TravelResponseRatio) || TravelResponseRatio<0 || TravelResponseRatio>1))
+    { Error=TEXT("Invalid travel_response_ratio (expected 0..1)"); return false; }
     auto N=[&](const TCHAR* Key,double& V,bool Zero=false)
     { if(!O->TryGetNumberField(Key,V) || !FMath::IsFinite(V) || V<0 || (!Zero && V==0)) {Error=FString(TEXT("Invalid dynamics field: "))+Key;return false;} return true; };
     if(!O->TryGetBoolField(TEXT("anti_sway"),AntiSway) || !O->TryGetBoolField(TEXT("anti_skew"),AntiSkew) ||

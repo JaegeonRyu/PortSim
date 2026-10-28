@@ -3,25 +3,36 @@ const n=(v,d=3)=>Number.isFinite(v)?v.toLocaleString('ko-KR',{maximumFractionDig
 const row=(k,v)=>`<div class="kv-row"><span>${k}</span><b>${v}</b></div>`;
 export const emergencyOutcome=v=>({idle:'시험 없음',worker_entered:'작업자 진입 · 감지 대기',detected_reaction_pending:'LiDAR 감지 · 반응 지연',physical_braking:'타이어 물리 급제동 중',stopped_clear:'작업자 앞 안전 정지',worker_contact:'작업자 접촉',cargo_shift_limit:'화물 이동 한계 초과',restraint_overload:'고정장치 용량 초과',wheel_contact_limit:'바퀴 접촉·롤 한계 초과',timeout:'제한 시간 초과',dynamics_invalid:'물리 계산 오류',external_constraint_invalidated:'외부 강제 정지로 시험 무효'}[v]||v||'시험 없음');
 
+export function workerIntrusionControls(a,state,disabled,distance=20){
+ if(a?.type!=='agv')return '';
+ const supported=state?.worker_intrusion_supported,e=a.emergency_test;
+ const canStart=supported&&!disabled&&e&&!e.active&&!a.fault&&a.speed_mps>=1&&!a.fms_hold&&!a.controlled_stop;
+ const clearable=!disabled&&e?.active&&e.stopped&&!e.collision&&!e.invalidated&&(e.peak_cargo_shift_m??1)<=.001;
+ const value=Number.isFinite(distance)&&distance>=5&&distance<=80?distance:20;
+ return `<section class="fault-controls worker-controls"><h3>작업자 돌발 진입</h3><p>현재 날씨·화물 그대로 · 빈 AGV도 가능</p><label>차량 선단에서 진입 거리 (m)<input data-worker-distance type="number" min="5" max="80" step="1" value="${value}" ${disabled||e?.active?'disabled':''}></label><div class="control-actions"><button class="button danger" data-command="worker_enter" ${canStart?'':'disabled'}>작업자 진입 발생</button><button class="button" data-command="clear_worker" ${clearable?'':'disabled'}>작업자 제거 · 운송 재개</button></div><div class="note">${supported?'선택 AGV 앞 차로에 작업자가 즉시 진입해 머뭅니다. 1m/s 이상 직선 주행 중 실행하며 엔진이 진입 거리 + 10m의 예약 도로를 확인합니다. 안전 정지 후 제거하면 운송이 재개됩니다. 가까운 거리·결빙 등으로 안전 한계를 넘으면 초기화가 필요합니다.':'새 엔진 빌드로 실행하면 작업자 진입 제어를 사용할 수 있습니다.'}</div>${e?.scenario_kind==='worker_intrusion'?emergencyDetails(a):''}</section>`;
+}
+
 export function emergencyControls(a,disabled){
  if(a.type!=='agv')return '';
+ if(a.emergency_test?.active&&a.emergency_test.scenario_kind==='worker_intrusion')return '';
  const e=a.emergency_test,active=!!e?.active,canStart=!!e&&!disabled&&!active&&!a.fault&&a.stage===3&&a.speed_mps>=1&&!a.fms_hold&&!a.controlled_stop;
  const clearable=!disabled&&active&&e.stopped&&!e.collision&&(e.peak_cargo_shift_m??1)<=.001;
- return `<section class="fault-controls"><h3>AGV 돌발상황 통합 시험</h3><p>젖은 노면 + 편심 40ft + 작업자 진입</p><div class="control-actions"><button class="button" data-command="test_wet_worker" ${canStart?'':'disabled'}>고정 화물 시험</button><button class="button danger" data-command="test_wet_unsecured" ${canStart?'':'disabled'}>미고정 화물 시험</button><button class="button" data-command="clear_worker" ${clearable?'':'disabled'}>안전 정지 시험 해제</button></div><div class="note">40ft 한 개를 싣고 1m/s 이상으로 야드에 이동 중인 직선 구간에서 실행합니다. 엔진이 예약 도로 길이를 추가 확인합니다. 선택 차량의 노면·화물 CoG만 에디터 Emergency Test 설정으로 바뀝니다(기본 젖음 100%, CoG 좌측 0.8m·위 0.5m 편차). 시험 중 경로 예약은 유지됩니다. 안전 정지 후 해제하면 원래 CoG·환경으로 복귀합니다. 충돌·화물 이동·한계 초과 시험은 시뮬레이션 초기화가 필요합니다.</div>${emergencyDetails(a)}</section>`;
+ return `<section class="fault-controls"><h3>AGV 돌발상황 통합 시험</h3><p>젖은 노면 + 편심 40ft + 작업자 진입</p><div class="control-actions"><button class="button" data-command="test_wet_worker" ${canStart?'':'disabled'}>고정 화물 시험</button><button class="button danger" data-command="test_wet_unsecured" ${canStart?'':'disabled'}>미고정 화물 시험</button><button class="button" data-command="clear_worker" ${clearable?'':'disabled'}>안전 정지 시험 해제</button></div><div class="note">40ft 한 개를 싣고 1m/s 이상으로 야드에 이동 중인 직선 구간에서 실행합니다. 엔진이 예약 도로 길이를 추가 확인합니다. 선택 차량의 노면·화물 CoG만 에디터 Emergency Test 설정으로 바뀝니다(기본 젖음 100%, CoG 좌측 0.8m·위 0.5m 편차). 시험 중 경로 예약은 유지됩니다. 안전 정지 후 해제하면 원래 CoG·환경으로 복귀합니다. 충돌·화물 이동·한계 초과 시험은 시뮬레이션 초기화가 필요합니다.</div>${e?.scenario_kind==='worker_intrusion'?'':emergencyDetails(a)}</section>`;
 }
 
 export function emergencyDetails(a){
  const e=a.emergency_test;if(!e||e.outcome==='idle')return '';
  const p=a.agv_physics||{},vec=v=>Array.isArray(v)?v.map(x=>n(x)).join(' / '):'—';
  return `<div class="detail-subhead">돌발상황 · ${esc(emergencyOutcome(e.outcome))}</div>`+
-  row('시험 상태',e.active?'시험 유지 · 운송 보류':'완료 기록')+row('화물 고정',e.cargo_secured?'고정 · 반력 계산':'미고정 · 데크 마찰 접촉')+
+  row('상황 / 상태',`${e.scenario_kind==='worker_intrusion'?'현재 조건 작업자 진입':'젖음·편심 통합 시험'} · ${e.active?'유지 · 운송 보류':'완료 기록'}`)+row('화물 고정',e.cargo_secured?'고정 · 반력 계산':'미고정 · 데크 마찰 접촉')+
+  row('발생 시 진입 거리',`${n(e.initial_distance_m)} m`)+
   row('경과 / 감지 / 제동 시작',`${n(e.elapsed_s)} / ${e.detected_at_s>=0?n(e.detected_at_s):'—'} / ${e.brake_at_s>=0?n(e.brake_at_s):'—'} s`)+
   row(e.stopped?'완료 제동거리':'현재 제동 이동거리',`${n(e.braking_distance_m)} m`)+row('최소 작업자 이격',`${n(e.minimum_clearance_m)} m`)+
   row('최대 슬립 / |LTR|',`${n(e.peak_slip*100,1)}% / ${n(e.peak_ltr)}`)+
   row('최대 관성력 / 고정장치 반력',`${n(e.peak_inertia_n/1000)} / ${n(e.peak_restraint_n/1000)} kN`)+
   row('화물 이동 XYZ / 최대 이동',`${vec(p.cargo_shift_m)} / ${n(e.peak_cargo_shift_m)} m`)+
   row('화물 상태',p.cargo_unsafe?'이동·고정 한계 초과':p.cargo_sliding?'데크 위 미끄러짐':'접촉 유지')+
-  row('지역 시험 노면 젖음 / 결빙',`${n(e.wetness_override*100,0)}% / ${n(e.ice_override*100,0)}%`);
+  row(e.uses_test_overrides===false?'현재 노면 젖음 / 결빙':'지역 시험 노면 젖음 / 결빙',`${n(e.wetness_override*100,0)}% / ${n(e.ice_override*100,0)}%`);
 }
 
 export function renderEmergencyReport(report){

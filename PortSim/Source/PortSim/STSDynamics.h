@@ -31,6 +31,9 @@ struct FSTSDynamicsParameters
 {
     bool AntiSway=true,AntiSkew=true;
     double Damping=0,PositionGain=0,VelocityGain=0,SwayGain=0,SkewKp=0,SkewKd=0,SkewMaxTorque=0;
+    // Optional pole-placement travel loop; 0 retains the legacy controller.
+    // Dimensionless response frequency relative to sqrt(g / measured rope length).
+    double TravelResponseRatio=0;
     double DrumRadius=0,GearRatio=0,Efficiency=0,Parts=0,MotorCount=0,MotorMaxTorque=0,MotorMaxRPM=0,MotorInertia=0;
     double RopeEA=0,RopeLimit=0,SkewLimit=0;
     FVector Wind=FVector::ZeroVector;
@@ -43,6 +46,23 @@ struct FSTSDynamicsParameters
         const double SwayFeedback=SwayGain*LengthM*AngularRate+
             FMath::Square(SwayGain)*LengthM*(AngularDisplacement-EquilibriumAngle);
         return PositionGain*PositionGainScale*ErrorM-VelocityGain*VelocityMps+(AntiSway?SwayFeedback:0);
+    }
+    double TravelAcceleration(double ErrorM,double VelocityMps,double LengthM,double LengthRateMps,
+        double AngularRate,double AngularDisplacement,double EquilibriumAngle) const
+    {
+        if(TravelResponseRatio<=0 || !AntiSway)
+            return HorizontalAcceleration(ErrorM,VelocityMps,LengthM,AngularRate,AngularDisplacement,EquilibriumAngle);
+        const double L=FMath::Max(.1,LengthM), W2=9.80665/L, W=FMath::Sqrt(W2);
+        const double A=TravelResponseRatio*W, B=1.5*W, Z=.85;
+        const double D=Damping+2*LengthRateMps/L;
+        // Match the four-state trolley/pendulum characteristic polynomial to
+        // (s²+2ζAs+A²)(s²+2ζBs+B²). Unlike increasing position gain alone,
+        // this damps both drive error and suspended motion at each rope length.
+        const double Kp=A*A*B*B/W2;
+        const double Kv=(2*Z*A*B*(A+B)-Kp*D)/W2;
+        const double Kq=L*(2*Z*(A+B)-Kv-D);
+        const double Kt=L*(A*A+B*B+4*Z*Z*A*B-Kp-Kv*D-W2);
+        return Kp*ErrorM-Kv*VelocityMps+Kq*AngularRate+Kt*(AngularDisplacement-EquilibriumAngle);
     }
 };
 

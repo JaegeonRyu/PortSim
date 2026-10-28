@@ -41,12 +41,12 @@ bool APortSiteLogistics::ApplyDashboardCommand(const FJsonObject& C,FString& Err
     { Error=TEXT("명령 유효 시간이 지났습니다."); return false; }
     if(!C.TryGetStringField(TEXT("actor_id"),ActorID) || !C.TryGetStringField(TEXT("action"),Action) ||
         (Action!=TEXT("fail") && Action!=TEXT("fail_reboot") && Action!=TEXT("fail_sensor_repair") && Action!=TEXT("fail_gantry") && Action!=TEXT("repair") &&
-         Action!=TEXT("test_wet_worker") && Action!=TEXT("test_wet_unsecured") && Action!=TEXT("clear_worker")))
+         Action!=TEXT("test_wet_worker") && Action!=TEXT("test_wet_unsecured") && Action!=TEXT("worker_enter") && Action!=TEXT("clear_worker")))
     { Error=TEXT("지원하지 않는 명령입니다."); return false; }
     if(!Fault.IsEmpty()) { Error=TEXT("전체 안전 정지 원인을 먼저 해결하세요."); return false; }
     for(const auto& Crane:Equipment) if(Crane->GetName()==ActorID)
     {
-        if(Action.StartsWith(TEXT("test_")) || Action==TEXT("clear_worker")){Error=TEXT("AGV 전용 돌발상황 명령입니다.");return false;}
+        if(Action.StartsWith(TEXT("test_")) || Action==TEXT("worker_enter") || Action==TEXT("clear_worker")){Error=TEXT("AGV 전용 돌발상황 명령입니다.");return false;}
         if(!Crane->Fault.IsEmpty() && !Crane->IsEquipmentUnavailable())
         { Error=TEXT("센서 수리로 안전 오류를 해제할 수 없습니다."); return false; }
         if(Action==TEXT("repair")) Crane->RepairEquipment();
@@ -70,13 +70,22 @@ bool APortSiteLogistics::ApplyDashboardCommand(const FJsonObject& C,FString& Err
     }
     for(const auto& V:Vehicles) if(V->GetName()==ActorID)
     {
-        if(Action==TEXT("clear_worker"))return V->ClearEmergencyScenario(Error);
-        if(Action==TEXT("test_wet_worker") || Action==TEXT("test_wet_unsecured"))
+        if(Action==TEXT("clear_worker"))
         {
+            if(!V->ClearEmergencyScenario(Error))return false;
+            RecordRecoveryEvent(TEXT("worker_removed"),V,V,V); return true;
+        }
+        if(Action==TEXT("worker_enter") || Action==TEXT("test_wet_worker") || Action==TEXT("test_wet_unsecured"))
+        {
+            const bool Intrusion=Action==TEXT("worker_enter");
+            double Distance=V->EmergencySettings.WorkerDistanceM;
+            if(Intrusion && (!C.TryGetNumberField(TEXT("worker_distance_m"),Distance) || !FMath::IsFinite(Distance) || Distance<5 || Distance>80))
+            {Error=TEXT("작업자 진입 거리는 5~80m로 입력하세요.");return false;}
             const int32 Lane=Vehicles.IndexOfByKey(V);
             const int32* Approved=RoadReservationEndWaypoint.Find(V->VehicleID);
-            if(!Jobs.IsValidIndex(Lane) || Jobs[Lane].Stage!=3 || !Approved || Jobs[Lane].bEquipmentWaiting || Jobs[Lane].bRMGReserved)
-            {Error=TEXT("도로 예약을 확보하고 야드로 운반 중인 40ft AGV에서 시작하세요.");return false;}
+            if(!Jobs.IsValidIndex(Lane) || !Approved || Jobs[Lane].bEquipmentWaiting ||
+                (!Intrusion && (Jobs[Lane].Stage!=3 || Jobs[Lane].bRMGReserved)))
+            {Error=TEXT("도로 예약을 확보하고 이동 중인 AGV에서 시작하세요. 젖음·편심 시험은 야드로 운반 중인 40ft AGV가 필요합니다.");return false;}
             const auto& J=Jobs[Lane];const FVector Direction=V->PlannedMotionDirection(J.Route.IsValidIndex(J.Waypoint)?J.Route[J.Waypoint]:V->GetActorLocation());
             double ClearStraight=0;FVector From=V->GetActorLocation();
             for(int32 N=J.Waypoint;N<=*Approved && J.Route.IsValidIndex(N);++N)
@@ -85,10 +94,10 @@ bool APortSiteLogistics::ApplyDashboardCommand(const FJsonObject& C,FString& Err
                 if(FVector::DotProduct(Segment.GetSafeNormal2D(),Direction)<.999)break;
                 ClearStraight+=Segment.Size2D()*.01;From=J.Route[N];
             }
-            if(ClearStraight<V->EmergencySettings.WorkerDistanceM+10)
+            if(ClearStraight<Distance+10)
             {Error=TEXT("작업자와 제동 시험을 놓을 예약된 직선 도로가 부족합니다. 더 긴 직선 구간에서 실행하세요.");return false;}
-            const bool Started=V->StartEmergencyScenario(Action==TEXT("test_wet_worker"),Error);
-            if(Started)RecordRecoveryEvent(TEXT("agv_emergency_started"),V,V,V,J.Actor.Get());
+            const bool Started=Intrusion?V->StartWorkerIntrusion(Distance,Error):V->StartEmergencyScenario(Action==TEXT("test_wet_worker"),Error);
+            if(Started)RecordRecoveryEvent(Intrusion?TEXT("worker_entered"):TEXT("agv_emergency_started"),V,V,V,J.Actor.Get());
             return Started;
         }
         if(V->Emergency.Active){Error=TEXT("돌발상황 시험을 먼저 종료하세요.");return false;}
