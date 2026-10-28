@@ -233,6 +233,7 @@ bool FPortEnvironmentUISettingsTest::RunTest(const FString& Parameters)
     TestFalse(TEXT("Sea UI OFF"),Component->IsSeaMotionEnabled());
     TestTrue(TEXT("Rain UI ON"),Component->IsRainEnabled());
     TestTrue(TEXT("Fog UI ON"),Component->IsFogEnabled());
+    Component->SetTemperatureCelsius(-5);
     Component->SetSnowIntensity(.75f); Component->SetSnowEnabled(true);
     Component->SetIceIntensity(.4f); Component->SetIceEnabled(true);
     TestTrue(TEXT("Snow UI supplies snowfall rate"),FMath::IsNearlyEqual(Component->GetSnowfallMmPerHour(),75.f));

@@ -496,11 +496,24 @@ UPhysicalMaterial* UPortEnvironmentComponent::GetContactMaterial()
 
 void UPortEnvironmentComponent::AdvanceEnvironment(float SimulationSeconds)
 {
-    if(FMath::IsFinite(SimulationSeconds) && SimulationSeconds>0 && bDailyTemperatureCycle)
-        TemperatureElapsedSeconds=FMath::Fmod(TemperatureElapsedSeconds+double(SimulationSeconds),86400.);
+    if(!FMath::IsFinite(SimulationSeconds) || SimulationSeconds<=0) return;
     SynchronizeSurfaceInputs();
-    Accumulation.Advance(FrictionSettings.SurfaceDynamics,Rain.bRainEnabled?Rain.RainfallMmPerHour:0,
-        bSnowEnabled?GetSnowfallMmPerHour():0,bIceEnabled?FMath::Clamp(IceIntensity,0.f,1.f):0,SimulationSeconds);
+    const double OldWater=Accumulation.WaterMm,OldSnow=Accumulation.SnowMm;
+    // At most one-second thermal slices bound daily-cycle integration error across
+    // render/playback frames, including crossings of the freezing point.
+    // Fixed temperature uses the exact reservoir solution in one step.
+    for(double Remaining=SimulationSeconds;Remaining>1.e-9;)
+    {
+        const double Step=bDailyTemperatureCycle?FMath::Min(Remaining,1.):Remaining;
+        if(bDailyTemperatureCycle) TemperatureElapsedSeconds=FMath::Fmod(TemperatureElapsedSeconds+Step*.5,86400.);
+        const float AirTemperature=GetTemperatureCelsius();
+        Accumulation.Advance(FrictionSettings.SurfaceDynamics,Rain.bRainEnabled?Rain.RainfallMmPerHour:0,
+            bSnowEnabled?GetSnowfallMmPerHour():0,bIceEnabled?FMath::Clamp(IceIntensity,0.f,1.f):0,Step,AirTemperature);
+        if(bDailyTemperatureCycle) TemperatureElapsedSeconds=FMath::Fmod(TemperatureElapsedSeconds+Step*.5,86400.);
+        Remaining-=Step;
+    }
+    Accumulation.WaterRate=(Accumulation.WaterMm-OldWater)*3600./SimulationSeconds;
+    Accumulation.SnowRate=(Accumulation.SnowMm-OldSnow)*3600./SimulationSeconds;
     PublishSurface();
     Wind.Advance(SimulationSeconds);
     Sea.Advance(SimulationSeconds);

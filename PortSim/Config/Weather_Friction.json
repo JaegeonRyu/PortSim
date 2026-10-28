@@ -17,6 +17,7 @@
     "full_snow_depth_mm": 10,
     "max_snow_depth_mm": 500,
     "maximum_snowfall_mm_per_hour": 100,
+    "melt_reference_temperature_celsius": 5,
     "snow_melt_mm_per_hour": 20,
     "snow_water_ratio": 0.1,
     "ice_build_seconds": 120,

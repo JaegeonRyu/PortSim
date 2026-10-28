@@ -73,6 +73,7 @@ bool FPortFrictionSettings::Load(const FString& Path)
         Number(*Dynamics,TEXT("full_snow_depth_mm"),D.FullSnowDepthMm);
         Number(*Dynamics,TEXT("max_snow_depth_mm"),D.MaxSnowDepthMm);
         Number(*Dynamics,TEXT("maximum_snowfall_mm_per_hour"),D.MaximumSnowfallMmPerHour);
+        Number(*Dynamics,TEXT("melt_reference_temperature_celsius"),D.MeltReferenceTemperatureCelsius);
         Number(*Dynamics,TEXT("snow_melt_mm_per_hour"),D.SnowMeltMmPerHour);
         Number(*Dynamics,TEXT("snow_water_ratio"),D.SnowWaterRatio);
         Number(*Dynamics,TEXT("ice_build_seconds"),D.IceBuildSeconds);
@@ -105,6 +106,7 @@ void FPortSurfaceDynamics::Sanitize()
     FullSnowDepthMm=Bounded(FullSnowDepthMm,.1f,1000,10);
     MaxSnowDepthMm=Bounded(MaxSnowDepthMm,FullSnowDepthMm,10000,FMath::Max(500.f,FullSnowDepthMm));
     MaximumSnowfallMmPerHour=Bounded(MaximumSnowfallMmPerHour,1,1000,100);
+    MeltReferenceTemperatureCelsius=Bounded(MeltReferenceTemperatureCelsius,.1f,40,5);
     SnowMeltMmPerHour=Bounded(SnowMeltMmPerHour,0,1000,20);
     SnowWaterRatio=Bounded(SnowWaterRatio,.01f,1,.1f);
     IceBuildSeconds=Bounded(IceBuildSeconds,1,864000,120);
@@ -126,22 +128,31 @@ FPortSurfaceState FPortSurfaceAccumulation::Sample(const FPortSurfaceDynamics& S
     S.WaterChangeMmPerHour=WaterRate; S.SnowChangeMmPerHour=SnowRate;
     return S;
 }
-void FPortSurfaceAccumulation::Advance(const FPortSurfaceDynamics& Settings,double Rain,double Snowfall,double Icing,double Seconds)
+void FPortSurfaceAccumulation::Advance(const FPortSurfaceDynamics& Settings,double Rain,double Snowfall,double Icing,double Seconds,double TemperatureCelsius)
 {
     if(!FMath::IsFinite(Seconds) || Seconds<=0) return;
     auto D=Settings; D.Sanitize();
     Rain=FMath::IsFinite(Rain)?FMath::Clamp(Rain,0.,1000.):0;
     Snowfall=FMath::IsFinite(Snowfall)?FMath::Clamp(Snowfall,0.,1000.):0;
     Icing=FMath::IsFinite(Icing)?FMath::Clamp(Icing,0.,1.):0;
+    if(!FMath::IsFinite(TemperatureCelsius)) return;
+    const double Temperature=FMath::Clamp(TemperatureCelsius,-25.,40.);
+    const double MeltScale=FMath::Max(0.,Temperature)/D.MeltReferenceTemperatureCelsius;
+    // Icing is an imposed cold-weather scenario. Warm air overrides its target;
+    // switching it off in freezing conditions does not erase existing ice.
+    if(Temperature>0) Icing=0;
     const double OldWater=WaterMm,OldSnow=SnowMm;
-    // At most two events: snow finishes melting, ice reaches its imposed target.
+    // Events: snow reservoir is exhausted, ice reaches its current target.
     // Split there so fast playback and small steps produce the same water balance.
     for(double Remaining=Seconds;Remaining>1.e-9;)
     {
-        const double Melt=Snowfall<=0 && SnowMm>0?D.SnowMeltMmPerHour/3600.:0;
-        const double SnowVelocity=Snowfall/3600.-Melt;
-        const double IceVelocity=Ice<Icing?1./D.IceBuildSeconds:(Ice>Icing?-1./D.IceMeltSeconds:0);
-        const double SnowEvent=Melt>0?SnowMm/Melt:Remaining;
+        const double SnowInput=Snowfall/3600.;
+        const double MeltCapacity=D.SnowMeltMmPerHour/3600.*MeltScale;
+        const double Melt=SnowMm>0?MeltCapacity:FMath::Min(SnowInput,MeltCapacity);
+        const double SnowVelocity=SnowInput-Melt;
+        const double IceVelocity=Temperature<=0 && Ice<Icing?1./D.IceBuildSeconds:
+            (Temperature>0 && Ice>0?-MeltScale/D.IceMeltSeconds:0);
+        const double SnowEvent=SnowVelocity<0?SnowMm/(-SnowVelocity):Remaining;
         const double IceEvent=IceVelocity!=0?FMath::Abs((Icing-Ice)/IceVelocity):Remaining;
         const double Step=FMath::Min3(Remaining,SnowEvent,IceEvent);
         if(Step<=1.e-9)
@@ -157,8 +168,8 @@ void FPortSurfaceAccumulation::Advance(const FPortSurfaceDynamics& Settings,doub
         WaterMm=FMath::Clamp(WaterMm*Decay+(WaterInput/Drain)*(1.-Decay),0.,double(D.MaxWaterFilmMm));
         SnowMm=FMath::Clamp(SnowMm+SnowVelocity*Step,0.,double(D.MaxSnowDepthMm));
         Ice=FMath::Clamp(Ice+IceVelocity*Step,0.,1.);
-        if(Step==SnowEvent && Melt>0) SnowMm=0;
-        if(Step==IceEvent) Ice=Icing;
+        if(Step==SnowEvent && SnowVelocity<0) SnowMm=0;
+        if(Step==IceEvent && IceVelocity!=0) Ice=Icing;
         Remaining-=Step;
     }
     WaterRate=(WaterMm-OldWater)*3600./Seconds;

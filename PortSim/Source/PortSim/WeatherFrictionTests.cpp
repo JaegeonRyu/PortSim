@@ -97,6 +97,7 @@ bool FWeatherFrictionTest::RunTest(const FString& Parameters)
     Environment->AdvanceEnvironment(7200); Sync();
     TestTrue(TEXT("Evaporation and drainage eventually restore dry grip"),Vehicle->Surface.Wetness==0 && FMath::IsNearlyEqual(Vehicle->Friction.Tire.Static(Vehicle->Surface),.8f,.0001f));
     TestTrue(TEXT("Continuous weather uses one shared material object"),Environment->GetContactMaterial()==DryMaterial);
+    Environment->SetTemperatureCelsius(-5);
     Environment->SetSnowEnabled(true); Environment->SetSnowfallMmPerHour(100); Environment->AdvanceEnvironment(360); Sync();
     TestEqual(TEXT("Snow selection supplies full coverage without manual surface values"),Vehicle->Surface.Snow,1.f);
     TestTrue(TEXT("Snow selection applies configured tire coefficient"),
@@ -106,6 +107,7 @@ bool FWeatherFrictionTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Ice dominates wet/snow surface and increases braking distance"),Vehicle->Surface.Ice==1 &&
         FMath::IsNearlyEqual(Vehicle->Friction.Tire.Static(Vehicle->Surface),.08f) && Vehicle->BrakingCmPerSecondSquared()<DryBrake);
     Environment->SetIceEnabled(false); Environment->SetSnowEnabled(false); Environment->SetFogEnabled(false);
+    Environment->SetTemperatureCelsius(5);
     Environment->SetSurfaceConditions(.75f,0,.25f); Environment->SetRainEnabled(false); Sync();
     TestTrue(TEXT("Manual values initialize real stored water and ice"),FMath::IsNearlyEqual(Vehicle->Surface.WaterFilmMm,.375f,.0001f) && Vehicle->Surface.Ice==.25f);
     Environment->AdvanceEnvironment(60); Sync();

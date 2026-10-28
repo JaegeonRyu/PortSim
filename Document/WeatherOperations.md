@@ -47,5 +47,14 @@ CLI overrides: -PortSimTemperature=-5 -PortSimDailyTemperature or -PortSimFixedT
 Dashboard environment: temperature_celsius (current), temperature_setting_celsius (reference),
 daily_temperature_cycle and temperature_hour. Missing legacy telemetry displays a dash.
 
-This is an air-temperature model. Existing imposed snow/ice scenarios and surface melt
-rates remain independent; there is no pavement-temperature or heat-balance calculation.
+Air temperature drives a simplified degree-day melt model; no pavement-temperature or
+heat-balance calculation. At or below 0 C, snow and ice do not melt. Above 0 C the multiplier
+is temperature / melt_reference_temperature_celsius (default 5 C). At 5 C, snow melts at
+20 mm/h and full ice cover melts in 1800 seconds; at 10 C the rates double.
+Melting continues during snowfall, with remaining snow bounded at zero. Meltwater enters
+the existing water-film/drainage model. Warm air overrides the imposed icing target;
+below freezing the icing switch can build ice, but switching it off preserves residual ice.
+Daily-cycle thermal integration uses slices of at most one simulation second and midpoint
+air temperature to resolve freezing-point crossings. Fixed-temperature reservoir integration
+retains the exact event-based solution. Water/snow change telemetry covers the whole frame.
+Automation: PortSim.Environment.TemperatureMelt.

@@ -17,7 +17,7 @@ struct PORTSIM_API FPortSurfaceState
     void Sanitize();
 };
 
-// Empirical operating assumptions. No temperature/energy balance is implied.
+// Air-temperature degree-day assumptions; no pavement heat/energy balance.
 USTRUCT(BlueprintType)
 struct PORTSIM_API FPortSurfaceDynamics
 {
@@ -29,6 +29,8 @@ struct PORTSIM_API FPortSurfaceDynamics
     UPROPERTY(EditAnywhere,BlueprintReadWrite) float FullSnowDepthMm=10;
     UPROPERTY(EditAnywhere,BlueprintReadWrite) float MaxSnowDepthMm=500;
     UPROPERTY(EditAnywhere,BlueprintReadWrite) float MaximumSnowfallMmPerHour=100;
+    // Melt rates below apply at this positive air temperature.
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float MeltReferenceTemperatureCelsius=5;
     UPROPERTY(EditAnywhere,BlueprintReadWrite) float SnowMeltMmPerHour=20;
     UPROPERTY(EditAnywhere,BlueprintReadWrite) float SnowWaterRatio=.1f;
     UPROPERTY(EditAnywhere,BlueprintReadWrite) float IceBuildSeconds=120;
@@ -42,7 +44,7 @@ struct PORTSIM_API FPortSurfaceAccumulation
     double WaterMm=0,SnowMm=0,Ice=0,WaterRate=0,SnowRate=0;
     void Initialize(const FPortSurfaceState& Initial,const FPortSurfaceDynamics& Settings);
     void Advance(const FPortSurfaceDynamics& Settings,double RainMmPerHour,double SnowfallMmPerHour,
-        double IcingTarget,double Seconds);
+        double IcingTarget,double Seconds,double TemperatureCelsius=18);
     FPortSurfaceState Sample(const FPortSurfaceDynamics& Settings) const;
 };
 
