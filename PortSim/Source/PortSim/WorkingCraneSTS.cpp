@@ -3,6 +3,7 @@
 #include "CraneTravelBraking.h"
 #include "PortContainerActor.h"
 #include "PortAGVActor.h"
+#include "PortSiteLogistics.h"
 #include "AGVReference.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
@@ -64,6 +65,7 @@ void APortWorkingCrane::UpdateMovingShipSource(APortContainerActor* Cargo,FVecto
 
 void APortWorkingCrane::ClearSTSState()
 {
+    bReverseTransfer=false;
     AxisVelocity=PlantAcceleration=FVector::ZeroVector;
     Pickup=FSTSPickupController();
     for(int32 I=0;I<4;++I){LockProgress[I]=0;PhysicalSeating[I]=false;}
@@ -157,10 +159,10 @@ bool APortWorkingCrane::AGVAligned() const
     // speed or heading interlocks below.
     const bool bDockingFix=HandoverAGV->Sensors.bFMSConnected &&
         HandoverAGV->Sensors.bDockingNode && HandoverAGV->Sensors.bTransponderLocked;
-    const bool bPositionConfirmed=(bSTS?Stage<5:Stage<2) || bDockingFix ||
+    const bool bPositionConfirmed=(AGVAtDestination()?Stage<5:Stage<2) || bDockingFix ||
         STSSensorContains(TEXT("agv_position_lidar"),HandoverAGV->CargoPosition());
     return HandoverAGV->Speed<=0.1f &&
-        HandoverAGV->CargoPosition().Equals(Slots[bSTS?1-SourceSlot:SourceSlot],STSProfile.AGVTolerance) &&
+        HandoverAGV->CargoPosition().Equals(Slots[AGVAtDestination()?1-SourceSlot:SourceSlot],STSProfile.AGVTolerance) &&
         bPositionConfirmed &&
         AGVReference::AxialHeadingErrorDegrees(HandoverAGV->GetActorRotation().Yaw,Orientation.Rotator().Yaw)<=STSProfile.AGVHeadingTolerance;
 }
@@ -183,9 +185,15 @@ bool APortWorkingCrane::CargoSupported() const
         const FVector P=CargoActor->GetActorLocation()+Orientation.RotateVector(FVector((I&1)?HalfWidth:-HalfWidth,(I&2)?HalfLength:-HalfLength,0));
         FHitResult Hit;
         if(!GetWorld()->LineTraceSingleByChannel(Hit,P,P-FVector(0,0,129.5f+STSProfile.SupportTolerance),ECC_Visibility,Query) || Hit.ImpactNormal.Z<.8f) return false;
-        if(bSTS && bExternalJobs && Stage==5 && Hit.GetActor()!=HandoverAGV) return false;
+        if(AGVAtDestination() && bExternalJobs && Stage==5 && Hit.GetActor()!=HandoverAGV) return false;
     }
     return true;
+}
+
+void APortWorkingCrane::UpdateShipLandingTarget(FVector Target)
+{
+    if(!bSTS || !bReverseTransfer || !bJobActive) return;
+    Slots[1-SourceSlot]=Target;
 }
 
 void APortWorkingCrane::SampleSTS(bool Force)
@@ -256,8 +264,17 @@ void APortWorkingCrane::SampleSTS(bool Force)
     }
 }
 
+double APortWorkingCrane::RailAccelerationLimit(double RequestedCmps2) const
+{
+    // Wheel/rail adhesion limits horizontal travel, not hoist cable tension.
+    const double Available=100*PortFriction::Gravity*FMath::Max(0.,
+        double(Friction.Utilization*Friction.Rail.Static(Surface)-Friction.RailRollingResistance));
+    return FMath::Min(RequestedCmps2,Available);
+}
+
 bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
 {
+    bRailSafetyHold=false;
     PortSimPerformance::FScope Timing(TEXT("crane_dynamics"));
     if(!STSProfile.ContainsTarget(Target)) { Stop(TEXT("Automatic target outside STS envelope")); return false; }
     const double ControlPayload=bCarrying?(Pickup.EstimateValid?Pickup.EstimatedMass:STSProfile.ContainerMassKg):0;
@@ -276,7 +293,9 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
     C.WindProjectedAreasM2=WindProjectedAreasM2();
     Hoist=FMath::Min(Hoist,float(C.MotorMaxRPM*2*PI/60*C.DrumRadius/(C.Parts*C.GearRatio)*100));
     const FVector Limits(STSProfile.TrolleySpeed,STSProfile.GantrySpeed,Hoist);
-    const FVector Accelerations(STSProfile.TrolleyAcceleration,STSProfile.GantryAcceleration,STSProfile.HoistAcceleration);
+    const FVector Accelerations(RailAccelerationLimit(STSProfile.TrolleyAcceleration),RailAccelerationLimit(STSProfile.GantryAcceleration),STSProfile.HoistAcceleration);
+    if(Accelerations.X<=0 || Accelerations.Y<=0)
+    { Stop(TEXT("Insufficient wheel/rail adhesion for automatic travel")); return false; }
     // True mass/CoG below belong only to the actuator/suspension plant. Position feedback comes from sensors.
     const double Payload=bCarrying?CargoActor->MassKg:0, Mass=STSProfile.SpreaderMassKg+Payload;
     const FVector MeasuredPosition=Local(Observation.SpreaderPosition);
@@ -294,8 +313,8 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
     double SensorSwayAngle=PI*.5;
     for(const auto& Mount:STSProfile.Dynamics.Mounts) if(Mount.Key==TEXT("sway_sensor") && Mount.Maximum>0)
         SensorSwayAngle=FMath::Min(SensorSwayAngle,FMath::DegreesToRadians(Mount.Maximum));
-    const double BrakingStroke=FMath::Max(FMath::Square(double(Limits.X))/(2*Accelerations.X),
-        FMath::Square(double(Limits.Y))/(2*Accelerations.Y));
+    const double BrakingStroke=FMath::Max(FMath::Square(double(Limits.X))/(2*FMath::Max(.001,Accelerations.X)),
+        FMath::Square(double(Limits.Y))/(2*FMath::Max(.001,Accelerations.Y)));
     const double SwingStroke=(.5*STSProfile.Pickup.AcquisitionRadius+BrakingStroke)*.01;
     const FVector CoG=bCarrying?CargoActor->CoGOffsetCm*.01*(Payload/Mass):FVector::ZeroVector;
     // Equal slices avoid a nanosecond remainder from float tick durations.
@@ -397,7 +416,11 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
                         -double(Limits[I]),double(Limits[I]));
                 }
                 else AxisVelocity[I]=FMath::FInterpConstantTo(AxisVelocity[I],FMath::Clamp(Desired,-double(Limits[I]),double(Limits[I])),Step,Acceleration);
-                Head[I]+=AxisVelocity[I]*Step;
+                const double Next=Head[I]+AxisVelocity[I]*Step;
+                const auto* Site=IsValid(CargoActor)?Cast<APortSiteLogistics>(CargoActor->GetOwner()):nullptr;
+                if(I==1 && bSTS && Site && !Site->CanSTSGantryMove(this,(Home+Orientation.RotateVector(FVector(0,Next,0))).Y))
+                { AxisVelocity[I]=0; TravelAcceleration.Y=0; bRailSafetyHold=true; }
+                else Head[I]=Next;
             }
         }
         const double PredictionTime=Age+Substep*Step;

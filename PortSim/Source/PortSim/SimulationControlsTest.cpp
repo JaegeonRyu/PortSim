@@ -25,8 +25,10 @@ void AQuayCrane::TickControlsTest(float Dt)
         if(bAutoRunning || AutoElapsed!=0 || SiteLogistics->InitialYard!=0 || SiteLogistics->ReceivingCapacity!=TerminalLayout::ReceivingSlotCount())
         { Fail(TEXT("Must start stopped with an empty size-segregated yard")); return; }
         SetPendingShips(1); SetPendingCargo(0,TerminalLayout::ReceivingSlotCount()); SetPendingShips(3);
-        if(PendingCargoTotal()!=TerminalLayout::ReceivingSlotCount() || PendingCargo[1]!=1 || PendingCargo[2]!=1)
-        { Fail(TEXT("Ship increase must reserve a minimum of one box per ship")); return; }
+        // New ships retain their manual/file counts. Check capacity and positive
+        // allocation, rather than requiring the old reset-to-exactly-one policy.
+        if(PendingCargoTotal()!=TerminalLayout::ReceivingSlotCount() || PendingCargo[1]<1 || PendingCargo[2]<1)
+        { Fail(TEXT("Ship increase must preserve capacity and at least one box per ship")); return; }
         SetPendingCargo(1,TerminalLayout::ReceivingSlotCount());
         if(PendingCargoTotal()>TerminalLayout::ReceivingSlotCount()) { Fail(TEXT("Aggregate overflow")); return; }
         SetPendingCargo(0,0); SetPendingCargo(1,2); SetPendingCargo(2,3);
@@ -37,15 +39,20 @@ void AQuayCrane::TickControlsTest(float Dt)
         AutoElapsed=0;
         if(!Environment) { Fail(TEXT("Missing environment controls")); return; }
         for(const FName Toggle:{FName(TEXT("ToggleWindSetting")),FName(TEXT("ToggleSeaSetting")),
-            FName(TEXT("ToggleRainSetting")),FName(TEXT("ToggleFogSetting"))})
+            FName(TEXT("ToggleRainSetting")),FName(TEXT("ToggleFogSetting")),
+            FName(TEXT("ToggleSnowSetting")),FName(TEXT("ToggleIceSetting"))})
         {
             const bool Before=Toggle==TEXT("ToggleWindSetting")?Environment->IsWindEnabled():
                 Toggle==TEXT("ToggleSeaSetting")?Environment->IsSeaMotionEnabled():
-                Toggle==TEXT("ToggleRainSetting")?Environment->IsRainEnabled():Environment->IsFogEnabled();
+                Toggle==TEXT("ToggleRainSetting")?Environment->IsRainEnabled():
+                Toggle==TEXT("ToggleFogSetting")?Environment->IsFogEnabled():
+                Toggle==TEXT("ToggleSnowSetting")?Environment->IsSnowEnabled():Environment->IsIceEnabled();
             HUD->NotifyHitBoxClick(Toggle);
             const bool After=Toggle==TEXT("ToggleWindSetting")?Environment->IsWindEnabled():
                 Toggle==TEXT("ToggleSeaSetting")?Environment->IsSeaMotionEnabled():
-                Toggle==TEXT("ToggleRainSetting")?Environment->IsRainEnabled():Environment->IsFogEnabled();
+                Toggle==TEXT("ToggleRainSetting")?Environment->IsRainEnabled():
+                Toggle==TEXT("ToggleFogSetting")?Environment->IsFogEnabled():
+                Toggle==TEXT("ToggleSnowSetting")?Environment->IsSnowEnabled():Environment->IsIceEnabled();
             if(Before==After) { Fail(TEXT("Environment UI toggle did not change state")); return; }
             HUD->NotifyHitBoxClick(Toggle);
         }
@@ -76,6 +83,9 @@ void AQuayCrane::TickControlsTest(float Dt)
         HUD->NotifyHitBoxClick(TEXT("StopSimulation"));
         if(bAutoRunning || bAutoPaused || AutoElapsed!=0 || Deliveries!=0 || !SiteLogistics->Validate(Error))
         { Fail(TEXT("Stop did not restore valid empty initial yard: ")+Error); return; }
+        if(SiteLogistics->Surface.WaterFilmMm!=Environment->GetSurfaceConditions().WaterFilmMm ||
+            (Environment->IsRainEnabled() && SiteLogistics->Surface.WaterFilmMm<=0))
+        { Fail(TEXT("Reset equipment lost the accumulated live surface")); return; }
         ControlsTestStage=4; ControlsTestFrames=0; break;
     case 4:
         if(AutoElapsed!=0 || bAutoRunning || SiteLogistics->InTransit()!=0) { Fail(TEXT("Stopped run restarted")); return; }

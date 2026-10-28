@@ -48,7 +48,7 @@ namespace
                 *Values[N]=FCString::Atoi(*Value);
                 if((N!=1 && *Values[N]<1) || *Values[N]>(N==0?999:99)) return Fail();
             }
-            const FString Slot=FString::Printf(TEXT("%d/%d/%d"),Entry.Bay,Entry.Row,Entry.Tier);
+            const FString Slot=Entry.Operation+FString::Printf(TEXT("/%d/%d/%d"),Entry.Bay,Entry.Row,Entry.Tier);
             if(Slots.Contains(Slot)) return Fail();
             Ids.Add(Entry.ContainerId); Slots.Add(Slot); Result.Rows.Add(MoveTemp(Entry));
         }
@@ -63,11 +63,13 @@ namespace
             R.GridSlot=FIntVector(DeckCodes?(R.Bay-1)/2:R.Bay-1,R.Row-1,DeckCodes?(R.Tier-82)/2:R.Tier-1);
             const FIntVector G=R.GridSlot;
             if(G.X<0 || G.X>=TerminalLayout::VesselBays || G.Y<0 || G.Y>=TerminalLayout::VesselRows ||
-                G.Z<0 || G.Z>=TerminalLayout::VesselTiers || GridSlots.Contains(G))
+                G.Z<0 || G.Z>=TerminalLayout::VesselTiers)
             { Error=TEXT("선박 배치 범위 초과 또는 위치 중복: 10 Bay × 10 Row × 2 Tier"); return false; }
             GridSlots.Add(G);
         }
-        for(const auto& G:GridSlots) if(G.Z>0 && !GridSlots.Contains(G-FIntVector(0,0,1)))
+        TSet<FIntVector> AboardSlots;
+        for(const auto& R:Result.Rows) if(R.Operation!=TEXT("LOAD")) AboardSlots.Add(R.GridSlot);
+        for(const auto& G:AboardSlots) if(Kind && G.Z>0 && !AboardSlots.Contains(G-FIntVector(0,0,1)))
         { Error=TEXT("상단 컨테이너 아래에 지지하는 하단 컨테이너가 없습니다."); return false; }
         Result.FileName=FPaths::GetCleanFilename(Name);
         return true;
@@ -89,8 +91,8 @@ const FPortVesselInput* AQuayCrane::GetVesselInput(int32 Vessel) const
 
 const FPortVesselInput* AQuayCrane::GetPendingVesselInput(int32 Vessel) const
 {
-    return Vessel>=0 && Vessel<3 && PendingFileMode[Vessel] && SelectedVesselInput[Vessel]>=0?
-        &VesselInputs[Vessel][SelectedVesselInput[Vessel]]:nullptr;
+    return Vessel>=0 && Vessel<3 && PendingFileMode[Vessel] && !VesselInputs[Vessel][1].FileName.IsEmpty()?
+        &VesselInputs[Vessel][1]:nullptr;
 }
 
 void AQuayCrane::SetVesselInputMode(int32 Vessel,bool FileMode)
@@ -106,19 +108,25 @@ void AQuayCrane::SetVesselInputMode(int32 Vessel,bool FileMode)
 
 bool AQuayCrane::ApplyPendingVesselInputs()
 {
+    int32 TotalCargo=PendingCargoTotal();
     for(int32 V=0;V<PendingShips;++V)
     {
         const auto* Input=GetPendingVesselInput(V);
         if(PendingFileMode[V] && !Input)
-        { VesselInputError=FString::Printf(TEXT("선박 %d: 파일을 선택하거나 직접 설정으로 전환하세요."),V+1); return false; }
+        { VesselInputError=FString::Printf(TEXT("선박 %d: 선내 적재도 CSV를 선택하세요."),V+1); return false; }
         if(Input && !ValidateVesselInput(V,*Input,VesselInputError)) return false;
+        if(Input && !ValidateVesselOperations(*Input,VesselInputs[V][0],VesselInputError)) return false;
+        if(Input) for(const auto& Row:VesselInputs[V][0].Rows) TotalCargo+=Row.Operation==TEXT("LOAD");
     }
+    if(TotalCargo>TerminalLayout::ReceivingSlotCount())
+    { VesselInputError=TEXT("선박 화물과 적하 대기 화물의 합계가 야드 수용량을 초과합니다."); return false; }
     // Snapshot all pending data before rebuilding; file selection never changes live cargo.
     for(int32 V=0;V<3;++V)
     {
         const auto* Input=GetPendingVesselInput(V);
         ConfiguredFileMode[V]=Input!=nullptr;
         ConfiguredVesselInputs[V]=Input?*Input:FPortVesselInput();
+        ConfiguredVesselOperations[V]=Input?VesselInputs[V][0]:FPortVesselInput();
         if(Input) PendingCargo[V]=Input->Rows.Num();
     }
     VesselInputError.Empty();
@@ -209,7 +217,7 @@ void APortSimHUD::LoadVesselInput(int32 Vessel,int32 Kind)
     C->VesselInputs[Vessel][Kind]=MoveTemp(Parsed);
     C->SelectedVesselInput[Vessel]=Kind;
     C->PendingFileMode[Vessel]=true;
-    C->PendingCargo[Vessel]=C->VesselInputs[Vessel][Kind].Rows.Num();
+    C->PendingCargo[Vessel]=C->GetPendingVesselInput(Vessel)?C->GetPendingVesselInput(Vessel)->Rows.Num():0;
     C->VesselInputError.Empty();
     C->SaveRunSettings();
     VesselImportStatus=FString::Printf(TEXT("선박 %d · %d개 선택됨 · 리셋을 누르면 적용%s"),Vessel+1,

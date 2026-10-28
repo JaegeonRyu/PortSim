@@ -66,6 +66,11 @@ void AQuayCrane::LoadRunSettings()
             if(Object->TryGetNumberField(TEXT("sea_intensity"),Value)) Environment->SetSeaIntensity(Value);
             if(Object->TryGetBoolField(TEXT("rain_enabled"),Enabled)) Environment->SetRainEnabled(Enabled);
             if(Object->TryGetNumberField(TEXT("rainfall_mm_per_hour"),Value)) Environment->SetRainfallMmPerHour(Value);
+            if(Object->TryGetBoolField(TEXT("snow_enabled"),Enabled)) Environment->SetSnowEnabled(Enabled);
+            if(Object->TryGetNumberField(TEXT("snow_intensity"),Value)) Environment->SetSnowIntensity(Value);
+            if(Object->TryGetNumberField(TEXT("snowfall_mm_per_hour"),Value)) Environment->SetSnowfallMmPerHour(Value);
+            if(Object->TryGetBoolField(TEXT("ice_enabled"),Enabled)) Environment->SetIceEnabled(Enabled);
+            if(Object->TryGetNumberField(TEXT("ice_intensity"),Value)) Environment->SetIceIntensity(Value);
             if(Object->TryGetBoolField(TEXT("fog_enabled"),Enabled)) Environment->SetFogEnabled(Enabled);
             if(Object->TryGetNumberField(TEXT("fog_visibility_m"),Value)) Environment->SetFogVisibilityMeters(Value);
         }
@@ -105,6 +110,9 @@ void AQuayCrane::LoadRunSettings()
         if(FParse::Value(FCommandLine::Get(),TEXT("PortSimSeaIntensity="),Value)) Environment->SetSeaIntensity(Value);
         if(FParse::Value(FCommandLine::Get(),TEXT("PortSimFogVisibility="),Value)) Environment->SetFogVisibilityMeters(Value);
         if(FParse::Value(FCommandLine::Get(),TEXT("PortSimRainRate="),Value)) Environment->SetRainfallMmPerHour(Value);
+        if(FParse::Value(FCommandLine::Get(),TEXT("PortSimSnowIntensity="),Value)) Environment->SetSnowIntensity(Value);
+        if(FParse::Value(FCommandLine::Get(),TEXT("PortSimSnowRate="),Value)) Environment->SetSnowfallMmPerHour(Value);
+        if(FParse::Value(FCommandLine::Get(),TEXT("PortSimIceIntensity="),Value)) Environment->SetIceIntensity(Value);
         if(FParse::Param(FCommandLine::Get(),TEXT("PortSimWind"))) Environment->SetWindEnabled(true);
         if(FParse::Param(FCommandLine::Get(),TEXT("PortSimNoWind"))) Environment->SetWindEnabled(false);
         if(FParse::Param(FCommandLine::Get(),TEXT("PortSimSea"))) Environment->SetSeaMotionEnabled(true);
@@ -113,6 +121,10 @@ void AQuayCrane::LoadRunSettings()
         if(FParse::Param(FCommandLine::Get(),TEXT("PortSimNoFog"))) Environment->SetFogEnabled(false);
         if(FParse::Param(FCommandLine::Get(),TEXT("PortSimRain"))) Environment->SetRainEnabled(true);
         if(FParse::Param(FCommandLine::Get(),TEXT("PortSimNoRain"))) Environment->SetRainEnabled(false);
+        if(FParse::Param(FCommandLine::Get(),TEXT("PortSimSnowWeather"))) Environment->SetSnowEnabled(true);
+        if(FParse::Param(FCommandLine::Get(),TEXT("PortSimNoSnow"))) Environment->SetSnowEnabled(false);
+        if(FParse::Param(FCommandLine::Get(),TEXT("PortSimIcing"))) Environment->SetIceEnabled(true);
+        if(FParse::Param(FCommandLine::Get(),TEXT("PortSimNoIce"))) Environment->SetIceEnabled(false);
     }
     ConfiguredShips=PendingShips;
     for(int32 I=0;I<3;++I) ConfiguredCargo[I]=PendingCargo[I];
@@ -135,6 +147,11 @@ bool AQuayCrane::SaveRunSettings()
         Object->SetNumberField(TEXT("sea_intensity"),Environment->GetSeaIntensity());
         Object->SetBoolField(TEXT("rain_enabled"),Environment->IsRainEnabled());
         Object->SetNumberField(TEXT("rainfall_mm_per_hour"),Environment->GetRainfallMmPerHour());
+        Object->SetBoolField(TEXT("snow_enabled"),Environment->IsSnowEnabled());
+        Object->SetNumberField(TEXT("snow_intensity"),Environment->GetSnowIntensity());
+        Object->SetNumberField(TEXT("snowfall_mm_per_hour"),Environment->GetSnowfallMmPerHour());
+        Object->SetBoolField(TEXT("ice_enabled"),Environment->IsIceEnabled());
+        Object->SetNumberField(TEXT("ice_intensity"),Environment->GetIceIntensity());
         Object->SetBoolField(TEXT("fog_enabled"),Environment->IsFogEnabled());
         Object->SetNumberField(TEXT("fog_visibility_m"),Environment->GetFogVisibilityMeters());
     }
@@ -160,7 +177,20 @@ void AQuayCrane::StopSimulation()
     }
     ResetSimulation(); bAutoRunning=false; bAutoPaused=false;
     AutoElapsed=0; Status=TEXT("리셋 완료 — 설정 적용됨. 실행 버튼으로 시작하세요.");
-    if(SiteLogistics) SiteLogistics->ExportDashboard(true,true);
+    if(SiteLogistics)
+    {
+        // Recreated equipment must inherit the retained weather and surface
+        // before the forced reset snapshot; the next actor tick is too late.
+        if(Environment)
+        {
+            SiteLogistics->SetWindVelocity(Environment->GetEffectiveWindVelocity());
+            SiteLogistics->SetFogVisibilityMeters(Environment->IsFogEnabled()?Environment->GetFogVisibilityMeters():MAX_flt);
+            SiteLogistics->SetRainState(Environment->GetRainState());
+            auto* Material=Environment->GetContactMaterial();
+            SiteLogistics->SetSurfaceConditions(Environment->GetSurfaceConditions(),Environment->GetFrictionSettings(),Material);
+        }
+        SiteLogistics->ExportDashboard(true,true);
+    }
 }
 FString AQuayCrane::ElapsedText() const
 {

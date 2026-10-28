@@ -1,4 +1,5 @@
 #include "TerminalLayout.h"
+#include "DashboardLayout.h"
 #include "QuayCrane.h"
 #include "PortSiteLogistics.h"
 #include "Async/Async.h"
@@ -25,6 +26,29 @@ namespace Dashboard
 {
     using FObject=TSharedRef<FJsonObject>;
     FObject Object() { return MakeShared<FJsonObject>(); }
+    FObject CopyRecord(const TSharedPtr<FJsonObject>& Source)
+    {
+        FString Json; FJsonSerializer::Serialize(Source.ToSharedRef(),TJsonWriterFactory<>::Create(&Json));
+        TSharedPtr<FJsonObject> Copy; FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json),Copy);
+        return Copy.ToSharedRef();
+    }
+    FObject SurfaceData(const FPortSurfaceState& State,const FPortFrictionSettings& Settings)
+    {
+        auto F=Object();
+        F->SetStringField(TEXT("source"),TEXT("engineering_assumptions"));
+        F->SetNumberField(TEXT("wetness"),State.Wetness); F->SetNumberField(TEXT("snow"),State.Snow); F->SetNumberField(TEXT("ice"),State.Ice);
+        F->SetNumberField(TEXT("dryness"),1-State.Wetness);
+        F->SetNumberField(TEXT("water_film_mm"),State.WaterFilmMm);
+        F->SetNumberField(TEXT("snow_depth_mm"),State.SnowDepthMm);
+        F->SetNumberField(TEXT("water_change_mm_per_hour"),State.WaterChangeMmPerHour);
+        F->SetNumberField(TEXT("snow_change_mm_per_hour"),State.SnowChangeMmPerHour);
+        F->SetBoolField(TEXT("drying"),State.WaterChangeMmPerHour<0);
+        F->SetNumberField(TEXT("tire_static_mu"),Settings.Tire.Static(State)); F->SetNumberField(TEXT("tire_kinetic_mu"),Settings.Tire.Kinetic(State));
+        F->SetNumberField(TEXT("rail_static_mu"),Settings.Rail.Static(State)); F->SetNumberField(TEXT("rail_kinetic_mu"),Settings.Rail.Kinetic(State));
+        F->SetNumberField(TEXT("steel_static_mu"),Settings.Steel.Static(State)); F->SetNumberField(TEXT("steel_kinetic_mu"),Settings.Steel.Kinetic(State));
+        F->SetNumberField(TEXT("utilization"),Settings.Utilization);
+        return F;
+    }
     TSharedPtr<FJsonValue> Value(FObject O) { return MakeShared<FJsonValueObject>(O); }
     void Vector(FObject O,const TCHAR* Key,FVector V,float Scale=1.f)
     {
@@ -86,11 +110,37 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
 {
     using namespace Dashboard;
     auto O=Object();
-    O->SetStringField(TEXT("state"),!Fault.IsEmpty()?TEXT("fault"):(bPaused?TEXT("paused"):(bJobActive?TEXT("working"):TEXT("idle"))));
+    O->SetStringField(TEXT("state"),!Fault.IsEmpty()?TEXT("fault"):(bFaultEvacuating?TEXT("working"):(bPaused?TEXT("paused"):(bJobActive?TEXT("working"):TEXT("idle")))));
     O->SetStringField(TEXT("fault"),Fault);
+    O->SetStringField(TEXT("fault_scope"),Fault.IsEmpty()?TEXT(""):IsEquipmentUnavailable()?TEXT("equipment"):TEXT("terminal"));
+    O->SetStringField(TEXT("recovery_status"),RecoveryStatus);
+    O->SetBoolField(TEXT("sensor_failure"),bSensorFault);
+    O->SetBoolField(TEXT("gantry_failure"),bGantryFault);
+    O->SetBoolField(TEXT("auto_sensor_recovery"),bAutoSensorRecovery);
+    O->SetStringField(TEXT("sensor_repair_method"),SensorRepairMethod==EPortSensorRepairMethod::Reboot?TEXT("reboot"):TEXT("technician"));
+    O->SetStringField(TEXT("sensor_repair_phase"),SensorRepairPhase);
+    O->SetNumberField(TEXT("sensor_repair_remaining_seconds"),SensorRepairRemaining());
+    O->SetNumberField(TEXT("sensor_reboot_seconds"),SensorRebootSeconds);
+    O->SetNumberField(TEXT("sensor_technician_seconds"),SensorTechnicianRepairSeconds);
+    O->SetNumberField(TEXT("sensor_self_check_seconds"),SensorSelfCheckSeconds);
+    O->SetBoolField(TEXT("fault_evacuating"),bFaultEvacuating);
+    O->SetBoolField(TEXT("fault_evacuation_allowed"),bAllowSensorFaultEvacuation && bIndependentTravelSafetyHealthy);
+    O->SetNumberField(TEXT("fault_evacuation_target_y_m"),FaultEvacuationTargetY*.01);
+    O->SetBoolField(TEXT("retained_load"),RetainsLoad());
+    O->SetBoolField(TEXT("rail_safety_hold"),bRailSafetyHold);
+    Vector(O,TEXT("gantry_position_m"),Home+Orientation.RotateVector(FVector(0,Head.Y,0)),.01f);
     O->SetNumberField(TEXT("stage"),Stage);
     O->SetBoolField(TEXT("busy"),bJobActive);
     O->SetBoolField(TEXT("carrying"),bCarrying);
+    auto Grip=SurfaceData(Surface,Friction);
+    Grip->SetNumberField(TEXT("trolley_acceleration_limit_mps2"),RailAccelerationLimit(STSProfile.TrolleyAcceleration)*.01);
+    Grip->SetNumberField(TEXT("gantry_acceleration_limit_mps2"),RailAccelerationLimit(STSProfile.GantryAcceleration)*.01);
+    Grip->SetNumberField(TEXT("seating_demand_n"),SeatingFrictionDemandN);
+    Grip->SetNumberField(TEXT("seating_capacity_n"),SeatingFrictionCapacityN);
+    Grip->SetBoolField(TEXT("seating_grip_ok"),bSeatingFrictionOK);
+    Grip->SetBoolField(TEXT("seating_active"),bJobActive && Stage==2 && !bCarrying);
+    Grip->SetBoolField(TEXT("mechanically_locked"),bCarrying);
+    O->SetObjectField(TEXT("friction"),Grip);
     O->SetBoolField(TEXT("destination_ready"),bDestinationReady);
     O->SetNumberField(TEXT("completed"),CompletedJobs);
     O->SetNumberField(TEXT("job_seconds"),JobSeconds);
@@ -99,6 +149,12 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
     O->SetNumberField(TEXT("paused_seconds"),PausedSeconds);
     O->SetNumberField(TEXT("last_job_seconds"),LastJobSeconds);
     O->SetStringField(TEXT("cargo"),GetNameSafe(CargoActor));
+    TArray<TSharedPtr<FJsonValue>> MapParts;
+    auto MapPart=[&](const UStaticMeshComponent* Part){if(Part)MapParts.Add(MakeShared<FJsonValueObject>(DashboardLayout::Footprint(Part)));};
+    for(const UStaticMeshComponent* Part:Legs)MapPart(Part);
+    for(const UStaticMeshComponent* Part:Beams)MapPart(Part);
+    for(const UStaticMeshComponent* Part:CrossBeams)MapPart(Part);
+    MapPart(Trolley);O->SetArrayField(TEXT("map_parts"),MapParts);
     O->SetStringField(TEXT("agv"),GetNameSafe(HandoverAGV));
     O->SetNumberField(TEXT("payload_kg"),bCarrying && IsValid(CargoActor)?CargoActor->MassKg:0);
     Vector(O,TEXT("head_position_m"),HeadPosition(),.01f);
@@ -328,7 +384,9 @@ void APortSiteLogistics::ExportDashboard(bool Paused,bool Force)
         for(const auto& Crane:Equipment) Crane->DeferRopeVisuals(true);
     }
     const FString Directory=FPaths::ProjectSavedDir()/TEXT("Dashboard");
-    DashboardWrite=Async(EAsyncExecution::ThreadPool,[Snapshot=MoveTemp(Snapshot),Directory]() mutable
+    const FString Run=FPaths::GetCleanFilename(ReportBase),LayoutFile=Directory/(TEXT("layout-")+Run+TEXT(".json"));
+    auto Layout=IFileManager::Get().FileExists(*LayoutFile)?TUniquePtr<FJsonObject>():DashboardLayout::Capture(GetWorld(),Run);
+    DashboardWrite=Async(EAsyncExecution::ThreadPool,[Snapshot=MoveTemp(Snapshot),Layout=MoveTemp(Layout),LayoutFile,Directory]() mutable
     {
         // The entire JSON graph belongs to this task. No UObject access or shared
         // non-thread-safe JSON references survive on the game thread.
@@ -336,6 +394,14 @@ void APortSiteLogistics::ExportDashboard(bool Paused,bool Force)
         FString Json;
         if (!FJsonSerializer::Serialize(Root,TJsonWriterFactory<TCHAR,TCondensedJsonPrintPolicy<TCHAR>>::Create(&Json))) return;
         IFileManager::Get().MakeDirectory(*Directory,true);
+        if(Layout)
+        {
+            FString LayoutJson;const TSharedRef<FJsonObject> Data=MakeShareable(Layout.Release());
+            const FString Temp=LayoutFile+TEXT(".tmp");
+            if(FJsonSerializer::Serialize(Data,TJsonWriterFactory<TCHAR,TCondensedJsonPrintPolicy<TCHAR>>::Create(&LayoutJson)) &&
+                FFileHelper::SaveStringToFile(LayoutJson,*Temp,FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+                IFileManager::Get().Move(*LayoutFile,*Temp,true,true);
+        }
         const FString Temporary=Directory/(TEXT("state-")+FGuid::NewGuid().ToString()+TEXT(".tmp"));
         const FString Final=Directory/TEXT("state.json");
         if (!FFileHelper::SaveStringToFile(Json,*Temporary,FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM) ||
@@ -357,6 +423,14 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     Root->SetNumberField(TEXT("schema_version"),1);
     Root->SetStringField(TEXT("generated_at"),FDateTime::UtcNow().ToIso8601());
     Root->SetStringField(TEXT("run_id"),FPaths::GetCleanFilename(ReportBase));
+    Root->SetStringField(TEXT("control_session"),DashboardControlSession);
+    TArray<TSharedPtr<FJsonValue>> Results,Events;
+    // The writer owns its entire JSON graph on another thread. Copy records,
+    // including position arrays, before the game thread can prune its rings.
+    for(const auto& R:DashboardCommandResults) Results.Add(Value(CopyRecord(R)));
+    for(const auto& E:RecoveryEvents) Events.Add(Value(CopyRecord(E)));
+    Root->SetArrayField(TEXT("command_results"),Results);
+    Root->SetArrayField(TEXT("recovery_events"),Events);
     Root->SetNumberField(TEXT("simulation_seconds"),SimulationTime);
     if(const auto* Controller=Cast<AQuayCrane>(GetOwner()))
     {
@@ -368,9 +442,17 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     Root->SetBoolField(TEXT("unified"),LaneCount==9);
     Root->SetStringField(TEXT("agv_parking_layout"),bDepotParking?TEXT("depot"):TEXT("legacy_distributed"));
     Root->SetStringField(TEXT("agv_apron_layout"),bReuseFreedApron?TEXT("reused_transport_lanes"):TEXT("previous_routes"));
+    Root->SetStringField(TEXT("agv_road_priority"),bPickupRoadPriority?TEXT("pickup_with_aging"):TEXT("fifo"));
     Root->SetStringField(TEXT("handover_policy"),UsesCargoAlignedHandover()?TEXT("cargo_aligned_quay"):TEXT("fixed_quay"));
     Root->SetStringField(TEXT("fault"),Fault);
+    int32 FailedVehicles=0; for(const auto& V:Vehicles) if(V->bDriveFault) ++FailedVehicles;
+    Root->SetNumberField(TEXT("isolated_equipment"),IsolatedEquipment.Num()+FailedVehicles);
+    Root->SetNumberField(TEXT("equipment_fault_events"),EquipmentFaultEvents);
+    Root->SetNumberField(TEXT("sts_reassignments"),STSReassignments);
+    Root->SetNumberField(TEXT("yard_reassignments"),YardReassignments);
     Root->SetNumberField(TEXT("delivered"),Delivered);
+    Root->SetNumberField(TEXT("loaded"),LoadedCount());
+    Root->SetNumberField(TEXT("load_total"),ExportCargo.Num());
     Root->SetNumberField(TEXT("initial_ship"),InitialShipCount());
     auto SizeMix=Object(); int32 Sizes[3]={0,0,0};
     for(const auto& C:ShipContainers) ++Sizes[C->LengthFt==20?0:C->LengthFt==40?1:2];
@@ -393,7 +475,17 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     Root->SetNumberField(TEXT("fog_visibility_m"),FogVisibilityMeters<MAX_flt?FogVisibilityMeters:-1.f);
     Root->SetBoolField(TEXT("rain_enabled"),RainState.bRainEnabled);
     Root->SetNumberField(TEXT("rainfall_mm_per_hour"),RainState.bRainEnabled?RainState.RainfallMmPerHour:0.f);
-    Root->SetNumberField(TEXT("wet_traction_scale"),RainState.WetTractionScale());
+    Root->SetObjectField(TEXT("surface_conditions"),SurfaceData(Surface,Friction));
+    auto CentralRoad=Object();
+    CentralRoad->SetNumberField(TEXT("center_y_m"),TerminalLayout::CentralRoadY);
+    CentralRoad->SetNumberField(TEXT("width_m"),TerminalLayout::CentralRoadWidthM);
+    CentralRoad->SetNumberField(TEXT("inbound_y_m"),TerminalLayout::AGVCentralInboundY*.01);
+    CentralRoad->SetNumberField(TEXT("return_y_m"),TerminalLayout::AGVCentralReturnY*.01);
+    CentralRoad->SetNumberField(TEXT("loaded_east_m"),CentralRoadTravelCm[0][0]*.01);
+    CentralRoad->SetNumberField(TEXT("loaded_west_m"),CentralRoadTravelCm[0][1]*.01);
+    CentralRoad->SetNumberField(TEXT("empty_east_m"),CentralRoadTravelCm[1][0]*.01);
+    CentralRoad->SetNumberField(TEXT("empty_west_m"),CentralRoadTravelCm[1][1]*.01);
+    Root->SetObjectField(TEXT("central_road"),CentralRoad);
     TArray<TSharedPtr<FJsonValue>> ReturnCorridors;
     static const TCHAR* ReturnNames[]={TEXT("south"),TEXT("central"),TEXT("north")};
     for(int32 Corridor=0;Corridor<TerminalLayout::AGVReturnCorridorCount;++Corridor)
@@ -441,6 +533,10 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             O->SetNumberField(TEXT("yard_subslot"),Yard[Slot].LengthFt==20?Yard[Slot].Subslot+1:0);
             O->SetNumberField(TEXT("yard_pads_per_cell"),TerminalLayout::YardPads(Yard[Slot].LengthFt));
             O->SetNumberField(TEXT("planned_rmg"),Yard[Slot].Crane+1);
+            O->SetNumberField(TEXT("original_sts"),Manifest[ManifestIndex].OriginalSTS+1);
+            O->SetNumberField(TEXT("assigned_sts"),Manifest[ManifestIndex].STS+1);
+            O->SetNumberField(TEXT("reassignments"),Manifest[ManifestIndex].Reassignments);
+            O->SetStringField(TEXT("recovery_hold"),Manifest[ManifestIndex].RecoveryHold);
             int32 Tier=1;
             for(int32 Lower=Yard[Slot].Below;Lower!=INDEX_NONE;Lower=Yard[Lower].Below) ++Tier;
             O->SetNumberField(TEXT("planned_yard_tier"),Tier);
@@ -486,7 +582,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
                 {
                     const auto& C=Manifest[I]; if(C.STS!=S) continue;
                     if(C.Actor.Get()==Crane->CargoActor) Active=I;
-                    if((C.State!=0 && PreparedCargo[S]!=I) || !SourceAccessible(I)) continue;
+                    if((C.State!=0 && PreparedCargo[S]!=I) || !SourceAccessible(I) || !CanSTSService(S,I)) continue;
                     const FString Reason=YardAdmissionReason(I);
                     Ready+=Reason.IsEmpty(); Support+=Reason==TEXT("yard_support_pending");
                     RMG+=Reason==TEXT("rmg_approach_reserved") || Reason==TEXT("rmg_turn_clearance");
@@ -494,7 +590,8 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
                 }
                 FString Reason=TEXT("source_not_ready");
                 const int32 Vehicle=STSOwners[S]!=INDEX_NONE?STSOwners[S]:NextVehicles[S];
-                if(STSOwners[S]!=INDEX_NONE) Reason=Crane->IsWaitingForAGV()?TEXT("agv_approaching"):TEXT("admitted");
+                if(Crane->IsEquipmentUnavailable()) Reason=Crane->RetainsLoad()?TEXT("retained_load_repair"):TEXT("equipment_isolated");
+                else if(STSOwners[S]!=INDEX_NONE) Reason=Crane->IsWaitingForAGV()?TEXT("agv_approaching"):TEXT("admitted");
                 else if(Ready>0) Reason=NextVehicles[S]!=INDEX_NONE?TEXT("agv_returning"):TEXT("vehicle_pending");
                 else if(Oldest!=INDEX_NONE) Reason=YardAdmissionReason(Oldest);
                 O->SetStringField(TEXT("dispatch_wait_reason"),Reason);
@@ -514,7 +611,9 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
         else if(auto* V=Cast<APortAGVActor>(A))
         {
             O->SetStringField(TEXT("type"),TEXT("agv"));
+            O->SetObjectField(TEXT("emergency_test"),V->EmergencySnapshot());
             O->SetStringField(TEXT("name"),FString::Printf(TEXT("AGV-%03d"),V->VehicleID));
+            O->SetNumberField(TEXT("vehicle_id"),V->VehicleID);
             O->SetNumberField(TEXT("battery_percent"),V->BatteryPercent);
             O->SetBoolField(TEXT("charging"),V->bCharging);
             O->SetBoolField(TEXT("needs_charge"),V->bNeedsCharge);
@@ -523,9 +622,22 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             O->SetNumberField(TEXT("speed_mps"),V->Speed*.01);
             O->SetNumberField(TEXT("speed_limit_mps"),V->SpeedLimitCmPerSecond()*.01);
             O->SetNumberField(TEXT("acceleration_mps2"),V->AccelerationCmPerSecondSquared()*.01);
+            auto Grip=SurfaceData(V->Surface,V->Friction);
+            Grip->SetNumberField(TEXT("grip_acceleration_mps2"),V->TireGripCmPerSecondSquared()*.01);
+            Grip->SetNumberField(TEXT("braking_mps2"),V->BrakingCmPerSecondSquared()*.01);
+            Grip->SetNumberField(TEXT("curve_speed_mps"),V->CurveSpeedCmPerSecond()*.01);
+            Grip->SetNumberField(TEXT("wind_reserve_n"),V->WindResistanceNewtons());
+            Grip->SetNumberField(TEXT("normal_force_n"),(V->Friction.AGVEmptyMassKg+V->PayloadKg)*PortFriction::Gravity);
+            Grip->SetNumberField(TEXT("stopping_distance_m"),V->BrakingCmPerSecondSquared()>0?
+                V->Speed*V->Speed/(2*V->BrakingCmPerSecondSquared())*.01:0);
+            Grip->SetBoolField(TEXT("traction_available"),V->TireGripCmPerSecondSquared()>0);
+            O->SetObjectField(TEXT("friction"),Grip);
             O->SetNumberField(TEXT("completed"),V->CompletedJobs);
+            O->SetNumberField(TEXT("road_priority_bonus_seconds"),RoadPriorityBonus(V->VehicleID));
+            const double* RoadSince=RoadWaitSince.Find(V->VehicleID);
+            O->SetNumberField(TEXT("road_request_wait_seconds"),RoadSince?FMath::Max(0.,TrafficClock-*RoadSince):0.);
             O->SetStringField(TEXT("state"),V->Speed>0?TEXT("working"):TEXT("idle"));
-            O->SetNumberField(TEXT("payload_kg"),0);
+            O->SetNumberField(TEXT("payload_kg"),V->PayloadKg);
             O->SetNumberField(TEXT("reference_payload_max_kg"),AGVReference::MaximumPayloadKg);
             Vector(O,TEXT("reference_vehicle_dimensions_m"),FVector(AGVReference::VehicleLengthCm,
                 AGVReference::VehicleWidthCm,AGVReference::VehicleHeightCm),.01f);
@@ -533,7 +645,8 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             O->SetNumberField(TEXT("reference_curve_speed_max_mps"),AGVReference::ReferenceCurveSpeedCmPerSecond*.01f);
             O->SetNumberField(TEXT("source_crab_speed_not_applied_mps"),AGVReference::SourceCrabSpeedNotAppliedCmPerSecond*.01f);
             O->SetBoolField(TEXT("lateral_motion_enabled"),AGVReference::LateralMotionEnabled);
-            O->SetStringField(TEXT("motion_model"),TEXT("longitudinal_forward_reverse_steering"));
+            O->SetStringField(TEXT("motion_model"),TEXT("six_contact_planar_tire_roll_pitch"));
+            O->SetObjectField(TEXT("agv_physics"),V->DynamicsSnapshot());
             Vector(O,TEXT("estimated_position_m"),V->Sensors.EstimatedPosition,.01f);
             Vector(O,TEXT("transponder_position_m"),V->Sensors.LastAbsolutePosition,.01f);
             O->SetNumberField(TEXT("position_error_mm"),V->Sensors.PositionErrorCm*10.f);
@@ -578,6 +691,11 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             {
                 const auto& J=Jobs[Lane];
                 O->SetNumberField(TEXT("stage"),J.Stage);
+                O->SetBoolField(TEXT("equipment_waiting"),J.bEquipmentWaiting);
+                O->SetBoolField(TEXT("yard_admission_suspended"),J.bYardAdmissionSuspended);
+                O->SetBoolField(TEXT("recovery_route_pending"),J.bRecoveryRoutePending);
+                if(Equipment.IsValidIndex(J.RMG)) O->SetStringField(TEXT("rmg"),Equipment[J.RMG]->GetName());
+                if(J.Actor.IsValid()) O->SetStringField(TEXT("cargo_actor"),J.Actor->GetName());
                 O->SetNumberField(TEXT("traffic_wait_seconds"),J.TrafficWaitSeconds);
                 O->SetNumberField(TEXT("yard_wait_seconds"),J.YardWaitSeconds);
                 O->SetNumberField(TEXT("return_sts"),J.ReturnSTS==INDEX_NONE?0:J.ReturnSTS+1);
@@ -607,6 +725,12 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
                 O->SetArrayField(TEXT("route"),Route);
                 O->SetNumberField(TEXT("route_remaining_m"),Remaining);
             }
+            O->SetBoolField(TEXT("drive_failure"),V->bDriveFault);
+            O->SetStringField(TEXT("fault"),V->bDriveFault?TEXT("주행 고장 · 위치와 화물을 유지하며 수리 대기"):TEXT(""));
+            O->SetStringField(TEXT("fault_scope"),V->bDriveFault?TEXT("equipment"):TEXT(""));
+            if(V->bDriveFault) O->SetStringField(TEXT("state"),TEXT("fault"));
+            if(V->Emergency.Active)O->SetStringField(TEXT("state"),V->Emergency.Finished?TEXT("emergency_hold"):
+                V->Emergency.BrakeCommand?TEXT("emergency_braking"):TEXT("emergency_detection"));
         }
         else if(auto* C=Cast<APortContainerActor>(A))
         {
@@ -722,3 +846,18 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     // All local aliases (Actors, Vessels, Profile) die before the worker is launched.
     return Snapshot;
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+#include "Misc/AutomationTest.h"
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDashboardSnapshotOwnershipTest,"PortSim.Recovery.DashboardSnapshotOwnership",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FDashboardSnapshotOwnershipTest::RunTest(const FString& Parameters)
+{
+    auto Source=Dashboard::Object(),Event=Dashboard::Object(); Event->SetStringField(TEXT("status"),TEXT("captured"));
+    Source->SetArrayField(TEXT("events"),{Dashboard::Value(Event)});
+    const auto Snapshot=Dashboard::CopyRecord(Source);
+    Event->SetStringField(TEXT("status"),TEXT("changed_on_game_thread")); Source->Values.Empty();
+    TestEqual(TEXT("Worker snapshot retains independent nested event data after game-thread ring changes"),
+        Snapshot->GetArrayField(TEXT("events"))[0]->AsObject()->GetStringField(TEXT("status")),FString(TEXT("captured")));
+    return true;
+}
+#endif

@@ -33,6 +33,33 @@ void AQuayCrane::TickSiteOperations(float Dt)
     if (FirstWave) SiteLogistics->DispatchLimit=WaveShipmentCount;
     else if (CarLike) SiteLogistics->DispatchLimit=1;
     SiteLogistics->Advance(Dt,bAutoPaused || bEmergencyStop || (bUnifiedTerminal && !bAutoRunning));
+    if(FParse::Param(FCommandLine::Get(),TEXT("PortSimOperationsTest")))
+    {
+        SiteTestTime+=Dt;
+        FString Error;
+        if(!SiteLogistics->Validate(Error) || SiteTestTime>12000)
+        {
+            UE_LOG(LogTemp,Error,TEXT("PORTSIM_OPERATIONS_FAIL: %s"),*Error);
+            FPlatformMisc::RequestExitWithStatus(false,1);
+        }
+        else if(SiteLogistics->Delivered==SiteLogistics->InitialShipCount() && SiteLogistics->IsIdle())
+        {
+            const int32 Loaded=SiteLogistics->LoadedCount();
+            SiteLogistics->ExportDashboard(false,true);
+            SiteLogistics->ResetLogistics();
+            if(!SiteLogistics->Validate(Error) || SiteLogistics->LoadedCount()!=0)
+            {
+                UE_LOG(LogTemp,Error,TEXT("PORTSIM_OPERATIONS_FAIL: reset %s"),*Error);
+                FPlatformMisc::RequestExitWithStatus(false,1);
+            }
+            else
+            {
+                UE_LOG(LogTemp,Display,TEXT("PORTSIM_OPERATIONS_PASS: discharged=%d loaded=%d reset_verified=1"),SiteLogistics->InitialShipCount(),Loaded);
+                FPlatformMisc::RequestExitWithStatus(false,0);
+            }
+        }
+        return;
+    }
     if (FirstWave || CarLike)
     {
         SiteTestTime+=Dt;
@@ -95,8 +122,10 @@ void AQuayCrane::TickSiteTest(float Dt)
     int32 SizeCounts[3]={0,0,0};
     for(const auto& Container:SiteLogistics->ShipContainers)
     {
+        const auto* Carrier=Cast<APortAGVActor>(Container->GetAttachParentActor());
+        const bool TestCoG=Carrier && Carrier->HasValidEmergencyCoG(Container,STSProfile.ContainerCoG);
         if(!FMath::IsNearlyEqual(Container->MassKg,Container->TareMassKg+Container->CargoMassKg,1.f) ||
-            !Container->CoGOffsetCm.Equals(STSProfile.ContainerCoG))
+            (!Container->CoGOffsetCm.Equals(STSProfile.ContainerCoG) && !TestCoG))
         { Finish(false,TEXT("Site container gross mass/CoG specification mismatch")); return; }
         SizeCounts[Container->LengthFt==20?0:Container->LengthFt==40?1:2]++;
     }

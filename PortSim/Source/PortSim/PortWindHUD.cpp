@@ -47,7 +47,7 @@ void APortSimHUD::DrawWindCompass(const UPortEnvironmentComponent& Environment,f
 
 void APortSimHUD::DrawSeaState(const UPortEnvironmentComponent& Environment,float Scale)
 {
-    const float Width=150.f*Scale,Height=82.f*Scale,Margin=24.f*Scale;
+    const float Width=150.f*Scale,Height=158.f*Scale,Margin=24.f*Scale;
     const float X=Canvas->SizeX-Margin-Width,Y=Canvas->SizeY-Margin-150.f*Scale-Height-8.f*Scale;
     const bool Enabled=Environment.IsSeaMotionEnabled();
     const FLinearColor Ink=Enabled?FLinearColor(.25f,.75f,1.f):FLinearColor(.48f,.53f,.57f);
@@ -63,4 +63,11 @@ void APortSimHUD::DrawSeaState(const UPortEnvironmentComponent& Environment,floa
         Environment.GetWavePeriodSeconds(),Environment.GetSwellPeriodSeconds()),24,Ink);
     Text(FString::Printf(TEXT("heave %+.2fm | roll %+.2f deg"),Motion.HeaveMeters,Motion.RollDegrees),43,Ink);
     Text(Enabled?TEXT("[Ctrl+1] OFF"):TEXT("[Ctrl+1] ON"),62,FLinearColor(.7f,.77f,.82f));
+    const auto Surface=Environment.GetSurfaceConditions();
+    Text(FString::Printf(TEXT("WET %.0f%% SNOW %.0f%% ICE %.0f%%"),Surface.Wetness*100,Surface.Snow*100,Surface.Ice*100),81,Ink);
+    Text(FString::Printf(TEXT("TIRE mu %.2f | RAIL %.2f"),Environment.GetFrictionSettings().Tire.Static(Surface),
+        Environment.GetFrictionSettings().Rail.Static(Surface)),100,Ink);
+    Text(FString::Printf(TEXT("WATER %.2fmm SNOW %.1fmm"),Surface.WaterFilmMm,Surface.SnowDepthMm),119,Ink);
+    Text(FString::Printf(TEXT("DRY %.0f%% | %s"),(1-Surface.Wetness)*100,
+        Surface.WaterChangeMmPerHour<0?TEXT("DRYING"):Surface.WaterChangeMmPerHour>0?TEXT("WETTING"):TEXT("STEADY")),138,Ink);
 }

@@ -130,6 +130,9 @@ void APortWorkingCrane::Configure(int32 Number,bool bQuayside,FVector Source,FVe
     ResetOperation();
     if(STSProfile.bReady) BuildSTSSensors();
     bSensorFault=FParse::Param(FCommandLine::Get(),bSTS?TEXT("PortSimSTSSensorFault"):TEXT("PortSimRMGSensorFault"));
+    // Legacy all-crane regression injection remains fatal; targeted editor/API
+    // and scheduled failures use equipment isolation instead.
+    bAppliedSensorFault=bFatalSensorTest=bSensorFault;
     FParse::Value(FCommandLine::Get(),bSTS?TEXT("PortSimSTSLockFault="):TEXT("PortSimRMGLockFault="),LockFault);
     if(!STSProfile.bReady) Stop(TEXT("Crane profile unavailable: ")+STSProfile.Error);
 }
@@ -140,6 +143,10 @@ FVector APortWorkingCrane::HeadPosition() const { return Home+Orientation.Rotate
 void APortWorkingCrane::ResetOperation()
 {
     if (!bConfigured) return;
+    FaultType=EPortCraneFault::None; RecoveryStatus.Empty(); bRailSafetyHold=false;
+    bGantryFault=bAppliedGantryFault=bFaultEvacuating=bFaultEvacuationComplete=false;
+    SensorRepairElapsed=0; SensorRepairPhase.Empty();
+    if(!bFatalSensorTest) bSensorFault=bAppliedSensorFault=false;
     ClearSTSState();
     SuspensionState=FSTSSuspension(); SuspendedOffset=FVector::ZeroVector;
     if (bExternalJobs)
@@ -249,14 +256,74 @@ bool APortWorkingCrane::DestinationClear() const
         FCollisionShape::MakeBox(FVector(120,IsValid(CargoActor)?CargoActor->ExternalDimensionsCm.Y*.5f-2.f:608.f,127.5)),Query);
 }
 
-void APortWorkingCrane::Stop(const FString& Reason)
+void APortWorkingCrane::Stop(const FString& Reason,EPortCraneFault Kind)
 {
-    Fault=Reason; SetOperationPaused(true);
-    UE_LOG(LogTemp,Error,TEXT("WORKING_CRANE_%d: %s"),CraneID,*Reason);
+    Fault=Reason; FaultType=Kind; SetOperationPaused(true);
+    if(Kind==EPortCraneFault::SensorUnavailable || Kind==EPortCraneFault::GantryUnavailable)
+    { UE_LOG(LogTemp,Warning,TEXT("EQUIPMENT_SENSOR_FAULT: crane=%d %s"),CraneID,*Reason); }
+    else { UE_LOG(LogTemp,Error,TEXT("WORKING_CRANE_%d: %s"),CraneID,*Reason); }
+}
+
+void APortWorkingCrane::SetSensorFailure(bool Failed)
+{
+    if(!Failed && bFaultEvacuating && !AxisVelocity.IsNearlyZero(1.))
+    {
+        bAutoSensorRecovery=true;
+        SensorRepairElapsed=FMath::Max(0.,SensorRepairMethod==EPortSensorRepairMethod::Reboot?SensorRebootSeconds:SensorTechnicianRepairSeconds)+FMath::Max(0.,SensorSelfCheckSeconds);
+        SensorRepairPhase=TEXT("awaiting_safe_stop"); return;
+    }
+    const bool NewFailure=Failed && !bAppliedSensorFault;
+    bAppliedSensorFault=bSensorFault=Failed; bFatalSensorTest=false;
+    if(Failed)
+    {
+        if(NewFailure) { SensorRepairElapsed=0; bFaultEvacuationComplete=false; AxisVelocity=FVector::ZeroVector; }
+        Observation.bValid=false;
+        if(Fault.IsEmpty() || IsSensorUnavailable()) Stop(TEXT("Injected sensor unavailable"),EPortCraneFault::SensorUnavailable);
+    }
+    else if(IsSensorUnavailable())
+    {
+        bFaultEvacuating=false; AxisVelocity=FVector::ZeroVector; SensorRepairPhase=TEXT("repaired");
+        Fault.Empty(); FaultType=EPortCraneFault::None; RecoveryStatus=TEXT("repaired"); NextSample=0;
+        UE_LOG(LogTemp,Display,TEXT("EQUIPMENT_SENSOR_REPAIRED: crane=%d retained_load=%d"),CraneID,RetainsLoad());
+    }
+}
+
+bool APortWorkingCrane::RetainsLoad() const
+{
+    if(bCarrying || (IsValid(CargoActor) && CargoActor->GetAttachParentActor()==this)) return true;
+    for(bool Locked:CornerLocked) if(Locked) return true;
+    return false;
+}
+
+bool APortWorkingCrane::CancelUnliftedJob()
+{
+    if(!bExternalJobs || RetainsLoad() || (IsValid(CargoActor) &&
+        CargoActor->LocationOwner!=ECargoOwner::Ship && CargoActor->LocationOwner!=ECargoOwner::AGV)) return false;
+    // Do not detach, move, or fabricate support for the failed crane's cargo.
+    ClearSTSState(); CargoActor=nullptr; HandoverAGV=nullptr; bJobActive=false;
+    AxisVelocity=FVector::ZeroVector; Stage=0; StageTime=SettleTime=0;
+    return true;
+}
+
+bool APortWorkingCrane::CanReach(FVector Source,FVector Destination) const
+{
+    return STSProfile.bReady && STSProfile.ContainsTarget(Local(Source)+FVector(0,0,WorkingCrane::LiftOffset)) &&
+        STSProfile.ContainsTarget(Local(Destination)+FVector(0,0,WorkingCrane::LiftOffset));
+}
+float APortWorkingCrane::GantryWorldY() const { return (Home+Orientation.RotateVector(FVector(0,Head.Y,0))).Y; }
+FVector2D APortWorkingCrane::RailWorkInterval() const
+{
+    float Low=GantryWorldY(),High=Low;
+    if(bFaultEvacuating) { Low=FMath::Min(Low,FaultEvacuationTargetY); High=FMath::Max(High,FaultEvacuationTargetY); }
+    if(bJobActive && !IsEquipmentUnavailable()) for(const FVector& Slot:Slots)
+    { Low=FMath::Min(Low,float(Slot.Y)); High=FMath::Max(High,float(Slot.Y)); }
+    return FVector2D(Low,High);
 }
 
 void APortWorkingCrane::Advance(float Dt,bool bGlobalPaused)
 {
+    if(bAppliedSensorFault!=bSensorFault) SetSensorFailure(bSensorFault);
+    if(bAppliedGantryFault!=bGantryFault) SetGantryFailure(bGantryFault);
     PortSimPerformance::FScope Profile(TEXT("crane_advance"));
     if(!FMath::IsFinite(Dt) || Dt<=0) { if(Dt==0)AdvanceStep(0,bGlobalPaused);return; }
     if(!bJobActive) { AdvanceStep(Dt,bGlobalPaused); return; }
@@ -296,6 +363,7 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
 {
     if (!bConfigured) return;
     SimulationTime+=Dt;
+    AdvanceFailureRecovery(Dt,bGlobalPaused);
     if(bJobActive) { JobSeconds+=Dt; if(bGlobalPaused || !bEnabled || !Fault.IsEmpty()) PausedSeconds+=Dt; }
     SetOperationPaused(bGlobalPaused || !bEnabled || !Fault.IsEmpty());
     if (bPaused || !bJobActive) return;
@@ -306,14 +374,15 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
         {
             Stop(FString::Printf(TEXT("Required %s sensor observation invalid/stale: %s (age=%.4fs limit=%.4fs)"),
                 bSTS?TEXT("STS"):TEXT("RMG"),SensorInvalidReason.IsEmpty()?TEXT("Freshness/profile check"):*SensorInvalidReason,
-                SimulationTime-Observation.Timestamp,double(STSProfile.SensorMaxAge)));
+                SimulationTime-Observation.Timestamp,double(STSProfile.SensorMaxAge)),
+                STSProfile.bReady && !bFatalSensorTest?EPortCraneFault::SensorUnavailable:EPortCraneFault::Safety);
             return;
         }
         if(bCarrying && (!Observation.AllLocked() || Observation.DynamicPayloadEstimateKg()>STSProfile.RatedPayloadKg))
         { Stop(TEXT("Loaded hoist interlock: locks/load observation invalid")); return; }
     }
-    const bool bSTSNeedsAGV=bSTS && ((Stage==5 && bDestinationReady) || Stage==6 || Stage==7);
-    const bool bRMGNeedsAGV=!bSTS && Stage<=2 && IsValid(HandoverAGV);
+    const bool bSTSNeedsAGV=AGVAtDestination() && ((Stage==5 && bDestinationReady) || Stage==6 || Stage==7);
+    const bool bRMGNeedsAGV=!AGVAtDestination() && Stage<=2 && IsValid(HandoverAGV);
     if((bSTSNeedsAGV || bRMGNeedsAGV) && !Observation.bAGVAligned)
     {
         // A newly arrived vehicle can be visible one sensor period after the
@@ -355,7 +424,7 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
     // Pick and lift the next ship box while the vehicle is away; hold it safely
     // above the dock until the returning AGV is stopped beneath the spreader.
     if (Stage==5 && !bDestinationReady) { MoveSTS(StageHoldTarget,Dt); return; }
-    StageTime+=Dt;
+    if(!bRailSafetyHold) StageTime+=Dt;
     if (StageTime>STSProfile.StageTimeout) { Stop(TEXT("Job stage timed out")); return; }
     const FVector Source=Stage==3?Local(Pickup.TrialOrigin):Local(Slots[SourceSlot]);
     const FVector Destination=Local(Slots[1-SourceSlot]);
@@ -428,7 +497,7 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
         Body->BodyInstance.SetBodyTransform(ReleasePose,ETeleportType::TeleportPhysics,false);
         Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
         Body->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
-        CargoActor->LocationOwner=bSTS && (1-SourceSlot)==0?ECargoOwner::Ship:ECargoOwner::Yard;
+        CargoActor->LocationOwner=bSTS && (bReverseTransfer || (1-SourceSlot)==0)?ECargoOwner::Ship:ECargoOwner::Yard;
         bCarrying=false;
     }
     StageHoldTarget=Head+SuspendedOffset;
@@ -442,6 +511,12 @@ bool APortWorkingCrane::ValidateOperation(FString& Error) const
     // ResetOperation clears transient faults, but cannot repair invalid settings.
     if (bConfigured && !STSProfile.bReady)
     { Error=FString::Printf(TEXT("Crane %d: profile unavailable: %s"),CraneID,*STSProfile.Error); return false; }
+    if(bConfigured && bExternalJobs && IsEquipmentUnavailable())
+    {
+        if(bCarrying && (!IsValid(CargoActor) || CargoActor->GetAttachParentActor()!=this || CargoActor->GetBody()->IsSimulatingPhysics()))
+        { Error=TEXT("Isolated crane lost its retained load"); return false; }
+        return true;
+    }
     if (bConfigured && bExternalJobs && !bJobActive && Fault.IsEmpty()) return true;
     if (!bConfigured || !IsValid(CargoActor) || (!bExternalJobs && CargoActor->GetOwner()!=this) || !Fault.IsEmpty())
     { Error=FString::Printf(TEXT("Crane %d: configuration/cargo/fault: %s"),CraneID,*Fault); return false; }
@@ -464,8 +539,8 @@ bool APortWorkingCrane::ValidateOperation(FString& Error) const
         // A loaded trolley can enter the end of the reserved segment at full
         // reference speed. Include its bounded braking distance as well as the
         // wind deflection instead of treating controlled deceleration as escape.
-        const double TrolleyStopping=FMath::Square(double(STSProfile.TrolleySpeed))/(2.*STSProfile.TrolleyAcceleration);
-        const double GantryStopping=FMath::Square(double(STSProfile.GantrySpeed))/(2.*STSProfile.GantryAcceleration);
+        const double TrolleyStopping=FMath::Square(double(STSProfile.TrolleySpeed))/(2.*FMath::Max(.001,RailAccelerationLimit(STSProfile.TrolleyAcceleration)));
+        const double GantryStopping=FMath::Square(double(STSProfile.GantrySpeed))/(2.*FMath::Max(.001,RailAccelerationLimit(STSProfile.GantryAcceleration)));
         Margin+=FMath::Max(TrolleyStopping,GantryStopping);
         // SafeZ is a transfer target rather than a hard mechanical travel stop.
         // A hoist that reaches it with upward velocity must decelerate before it
@@ -517,7 +592,7 @@ bool APortWorkingCrane::IsWaitingForAGV() const
             (Local(Slots[1-SourceSlot])-(Head+SuspendedOffset)).Size2D()<=STSProfile.LandingTolerance));
 }
 
-bool APortWorkingCrane::AssignCargo(APortContainerActor* Cargo,FVector Source,FVector Destination,bool SourceSupport,bool DestinationSupport,APortAGVActor* HandoverVehicle)
+bool APortWorkingCrane::AssignCargo(APortContainerActor* Cargo,FVector Source,FVector Destination,bool SourceSupport,bool DestinationSupport,APortAGVActor* HandoverVehicle,bool ReverseTransfer)
 {
     // Dispatch can choose an otherwise passive box in the middle of a frame.
     if(IsValid(Cargo) && Cargo->LocationOwner==ECargoOwner::Ship && !Cargo->GetAttachParentActor())
@@ -532,7 +607,7 @@ bool APortWorkingCrane::AssignCargo(APortContainerActor* Cargo,FVector Source,FV
             !STSProfile.ContainsTarget(Local(Destination)+FVector(0,0,WorkingCrane::LiftOffset)))
         { Stop(TEXT("Source/destination outside reference crane working envelope")); return false; }
     }
-    ClearSTSState(); HandoverAGV=HandoverVehicle;
+    ClearSTSState(); HandoverAGV=HandoverVehicle; bReverseTransfer=ReverseTransfer;
     CargoActor=Cargo; Slots[0]=Source; Slots[1]=Destination; SourceSlot=Stage=0;
     TelescopeTargetLengthCm=Cargo->ExternalDimensionsCm.Y;
     bDestinationReady=true;

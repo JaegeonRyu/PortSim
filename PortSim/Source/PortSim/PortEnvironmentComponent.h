@@ -2,7 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "WeatherFriction.h"
 #include "PortEnvironmentComponent.generated.h"
+
+class UPhysicalMaterial;
 
 /** Reduced-order rigid vessel response to the current wind-wave and swell state. */
 struct PORTSIM_API FPortVesselMotion
@@ -177,7 +180,6 @@ struct PORTSIM_API FPortRainState
         if(SensorKey.Contains(TEXT("lidar"),ESearchCase::IgnoreCase)) return FMath::Lerp(1.f,.75f,S);
         return 1.f;
     }
-    float WetTractionScale() const { return FMath::Lerp(1.f,.8f,Severity()); }
 };
 
 /** One environment owned by the terminal controller and sampled by equipment. */
@@ -187,6 +189,15 @@ class PORTSIM_API UPortEnvironmentComponent : public UActorComponent
     GENERATED_BODY()
 public:
     UPortEnvironmentComponent();
+    UFUNCTION(BlueprintCallable, Category="Environment|Surface") void SetSurfaceConditions(float Wetness,float Snow,float Ice);
+    UFUNCTION(BlueprintPure, Category="Environment|Surface") FPortSurfaceState GetSurfaceConditions() const;
+    UFUNCTION(BlueprintCallable, Category="Environment|Surface") void SetWaterFilmMm(float Millimeters);
+    UFUNCTION(BlueprintCallable, Category="Environment|Surface") void SetSnowDepthMm(float Millimeters);
+    UFUNCTION(BlueprintCallable, Category="Environment|Surface") void SetFrictionSettings(const FPortFrictionSettings& Settings);
+    const FPortFrictionSettings& GetFrictionSettings() const { return FrictionSettings; }
+    UPhysicalMaterial* GetContactMaterial();
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Environment|Surface") FPortFrictionSettings FrictionSettings;
+    UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Environment|Surface") FPortSurfaceState Surface;
     virtual void BeginPlay() override;
     // Called once by AQuayCrane with the already accelerated world DeltaSeconds.
     // Do not multiply speed or delta by SimulationSpeed a second time.
@@ -241,7 +252,31 @@ public:
     { return (Rain.RainfallMmPerHour-FPortRainState::MinimumRainfallMmPerHour)/(FPortRainState::MaximumRainfallMmPerHour-FPortRainState::MinimumRainfallMmPerHour); }
     void SetRainfallMmPerHour(float RainfallMmPerHour);
     const FPortRainState& GetRainState() const { return Rain; }
+    UFUNCTION(BlueprintPure, Category="Environment|Snow") bool IsSnowEnabled() const { return bSnowEnabled; }
+    UFUNCTION(BlueprintPure, Category="Environment|Snow") float GetSnowIntensity() const { return SnowIntensity; }
+    UFUNCTION(BlueprintCallable, Category="Environment|Snow") void SetSnowEnabled(bool Enabled) { bSnowEnabled=Enabled; }
+    UFUNCTION(BlueprintCallable, Category="Environment|Snow") void ToggleSnow() { bSnowEnabled=!bSnowEnabled; }
+    UFUNCTION(BlueprintCallable, Category="Environment|Snow") void SetSnowIntensity(float Intensity);
+    UFUNCTION(BlueprintPure, Category="Environment|Snow") float GetSnowfallMmPerHour() const;
+    UFUNCTION(BlueprintCallable, Category="Environment|Snow") void SetSnowfallMmPerHour(float MillimetersPerHour);
+    UFUNCTION(BlueprintPure, Category="Environment|Ice") bool IsIceEnabled() const { return bIceEnabled; }
+    UFUNCTION(BlueprintPure, Category="Environment|Ice") float GetIceIntensity() const { return IceIntensity; }
+    UFUNCTION(BlueprintCallable, Category="Environment|Ice") void SetIceEnabled(bool Enabled) { bIceEnabled=Enabled; }
+    UFUNCTION(BlueprintCallable, Category="Environment|Ice") void ToggleIce() { bIceEnabled=!bIceEnabled; }
+    UFUNCTION(BlueprintCallable, Category="Environment|Ice") void SetIceIntensity(float Intensity);
+    UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Environment|Snow") bool bSnowEnabled=false;
+    UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Environment|Snow",meta=(ClampMin="0",ClampMax="1")) float SnowIntensity=1;
+    UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Environment|Ice") bool bIceEnabled=false;
+    UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Environment|Ice",meta=(ClampMin="0",ClampMax="1")) float IceIntensity=1;
 private:
+    UPROPERTY() TObjectPtr<UPhysicalMaterial> ContactMaterial;
+    FPortSurfaceState MaterialSurface;
+    FPortFrictionSettings MaterialSettings;
+    FPortSurfaceAccumulation Accumulation;
+    FPortSurfaceState PublishedSurface;
+    bool bSurfaceInitialized=false;
+    void SynchronizeSurfaceInputs();
+    void PublishSurface();
     FPortWindState Wind;
     FPortSeaState Sea;
     FPortFogState Fog;

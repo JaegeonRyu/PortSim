@@ -63,7 +63,7 @@ void APortWorkingCrane::SampleRMGEnvironment()
                 const float Distance=FVector::Dist(Origin,Hit.ImpactPoint);
                 O.CraneDistance=O.CraneDistance<0?Distance:FMath::Min(O.CraneDistance,Distance);
                 const double Toward=FMath::Max(0.,FVector::DotProduct(Orientation.RotateVector(AxisVelocity),Marker->GetForwardVector()));
-                const double StopDistance=STSProfile.CollisionMargin+Toward*STSProfile.SensorMaxAge+Toward*Toward/(2*STSProfile.GantryAcceleration);
+                const double StopDistance=STSProfile.CollisionMargin+Toward*STSProfile.SensorMaxAge+Toward*Toward/(2*FMath::Max(.001,RailAccelerationLimit(STSProfile.GantryAcceleration)));
                 if(Distance<StopDistance)O.bCraneClear=false;
             }
         }

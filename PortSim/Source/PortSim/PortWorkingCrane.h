@@ -3,12 +3,20 @@
 #include "CoreMinimal.h"
 #include "PortEquipmentActor.h"
 #include "STSOperatingProfile.h"
+#include "WeatherFriction.h"
 #include "PortWorkingCrane.generated.h"
 
 class APortContainerActor;
 class UTextRenderComponent;
 class APortAGVActor;
 class FJsonObject;
+class APortSiteLogistics;
+
+UENUM(BlueprintType)
+enum class EPortCraneFault : uint8 { None, SensorUnavailable, Safety, GantryUnavailable };
+
+UENUM(BlueprintType)
+enum class EPortSensorRepairMethod : uint8 { Reboot, Technician };
 
 /** Independently reserved two-slot crane job. Gantry/trolley/hoist are driven;
  * cargo is locked to the spreader during transport and physically released. */
@@ -20,11 +28,17 @@ public:
     APortWorkingCrane();
     void Configure(int32 Number, bool bQuayside, FVector Source, FVector Destination, bool bCreateCargo=true);
     void Advance(float Dt, bool bGlobalPaused);
-    bool AssignCargo(APortContainerActor* Cargo, FVector Source, FVector Destination, bool SourceSupport, bool DestinationSupport, APortAGVActor* HandoverVehicle=nullptr);
+    bool AssignCargo(APortContainerActor* Cargo, FVector Source, FVector Destination, bool SourceSupport, bool DestinationSupport, APortAGVActor* HandoverVehicle=nullptr,bool ReverseTransfer=false);
+    void UpdateShipLandingTarget(FVector Target);
     void SetSTSProfile(const FSTSOperatingProfile& Profile) { STSProfile=Profile; }
     void SetWindVelocity(FVector WorldVelocityMetersPerSecond);
     void SetFogVisibilityMeters(float VisibilityMeters);
     void SetRainSensorRangeScales(float CameraScale,float LiDARScale);
+    FPortSurfaceState Surface;
+    FPortFrictionSettings Friction;
+    double RailAccelerationLimit(double RequestedCmps2) const;
+    double SeatingFrictionDemandN=0, SeatingFrictionCapacityN=0;
+    bool bSeatingFrictionOK=true;
     void UpdateMovingShipSource(APortContainerActor* Cargo,FVector WorldPosition);
     FVector GetWindVelocity() const { return WindVelocityMetersPerSecond; }
     bool HasSTSProfile() const { return bSTS && STSProfile.bReady; }
@@ -37,6 +51,22 @@ public:
     bool IsWaitingForAGV() const;
     APortAGVActor* GetHandoverVehicle() const;
     bool IsBusy() const { return bJobActive; }
+    UFUNCTION(BlueprintCallable,Category="Failures") void SetSensorFailure(bool Failed);
+    UFUNCTION(BlueprintCallable,CallInEditor,Category="Failures") void RepairSensors() { SetSensorFailure(false); }
+    UFUNCTION(BlueprintCallable,Category="Failures") void SetGantryFailure(bool Failed);
+    UFUNCTION(BlueprintCallable,CallInEditor,Category="Failures") void RepairEquipment();
+    bool IsSensorUnavailable() const { return FaultType==EPortCraneFault::SensorUnavailable && !Fault.IsEmpty(); }
+    bool IsEquipmentUnavailable() const { return IsSensorUnavailable() || (FaultType==EPortCraneFault::GantryUnavailable && !Fault.IsEmpty()); }
+    bool CanFaultEvacuate() const;
+    bool RequestFaultEvacuation(float WorldY,APortSiteLogistics* Coordinator);
+    double SensorRepairRemaining() const;
+    bool RetainsLoad() const;
+    bool CancelUnliftedJob();
+    bool CanReach(FVector Source,FVector Destination) const;
+    FVector AssignedDestination() const { return Slots[1-SourceSlot]; }
+    FVector2D RailWorkInterval() const;
+    float GantryWorldY() const;
+    float GantryHomeWorldY() const { return Home.Y; }
     UFUNCTION(BlueprintCallable, Category="Operation") void ResetOperation();
     UFUNCTION(BlueprintCallable, Category="Operation") void SetOperationPaused(bool Paused);
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
@@ -52,8 +82,29 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") int32 CompletedJobs=0;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") int32 Stage=0;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") FString Fault;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Failures") EPortCraneFault FaultType=EPortCraneFault::None;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Failures") bool bSensorFault=false;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Failures") bool bGantryFault=false;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Failures|Repair") bool bAutoSensorRecovery=true;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Failures|Repair") EPortSensorRepairMethod SensorRepairMethod=EPortSensorRepairMethod::Reboot;
+    // Simulation assumptions, not manufacturer maintenance-time specifications.
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Failures|Repair",meta=(ClampMin="0",ClampMax="86400")) double SensorRebootSeconds=60;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Failures|Repair",meta=(ClampMin="0",ClampMax="86400")) double SensorTechnicianRepairSeconds=900;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Failures|Repair",meta=(ClampMin="0",ClampMax="60")) double SensorSelfCheckSeconds=2;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Failures|Recovery",meta=(ToolTip="Only automation/perception faults independent of the travel encoder, emergency stop and anti-collision system may permit evacuation.")) bool bAllowSensorFaultEvacuation=false;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Failures|Recovery") bool bIndependentTravelSafetyHealthy=true;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Failures|Recovery") bool bFaultEvacuating=false;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Failures|Recovery") bool bFaultEvacuationComplete=false;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Failures|Recovery") float FaultEvacuationTargetY=0;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Failures|Repair") double SensorRepairElapsed=0;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Failures|Repair") FString SensorRepairPhase;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Failures") FString RecoveryStatus;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Failures") bool bRailSafetyHold=false;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") TObjectPtr<APortContainerActor> CargoActor;
 private:
+    friend class FEquipmentRecoveryTest;
+    bool bReverseTransfer=false;
+    bool AGVAtDestination() const { return bSTS!=bReverseTransfer; }
     bool bDeferRopeVisuals=false, bRopeVisualsDirty=false;
     void UpdateRopeVisuals();
     double ShipControlFraction=1;
@@ -91,7 +142,11 @@ private:
     double SimulationTime=0, NextSample=0, JobSeconds=0, PausedSeconds=0;
     double AGVAlignmentWait=0;
     bool CornerLocked[4]={false,false,false,false};
-    bool bSensorFault=false;
+    bool bAppliedSensorFault=false, bFatalSensorTest=false;
+    bool bAppliedGantryFault=false;
+    TWeakObjectPtr<APortSiteLogistics> RecoveryCoordinator;
+    void AdvanceFailureRecovery(float Dt,bool GlobalPaused);
+    bool CanServiceTravel() const;
     FString SensorInvalidReason;
     int32 LockFault=INDEX_NONE;
     void SampleSTS(bool Force=false);
@@ -142,5 +197,5 @@ private:
     bool MoveHead(FVector Target, float Dt);
     void UpdateParts();
     bool DestinationClear() const;
-    void Stop(const FString& Reason);
+    void Stop(const FString& Reason,EPortCraneFault Kind=EPortCraneFault::Safety);
 };
