@@ -7,6 +7,7 @@
 #include "TerminalActors.h"
 #include "STSOperatingProfile.h"
 #include "VesselInput.h"
+#include "PortEnvironmentComponent.h"
 #include "QuayCrane.generated.h"
 
 class FJsonObject;
@@ -124,6 +125,8 @@ public:
     bool bUnifiedTerminal = false;
     bool bAutoRunning = false;
     bool bAutoPaused = false;
+    FPortWeatherHold WeatherHold;
+    bool IsOperationPaused() const { return bAutoPaused || WeatherHold.Active; }
     bool bAutoLoading = false;
     int32 AutoCompleted = 0;
     int32 ActiveCargoIndex = 0;

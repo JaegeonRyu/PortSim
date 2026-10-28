@@ -182,6 +182,36 @@ struct PORTSIM_API FPortRainState
     }
 };
 
+/** Simulation operating assumptions, editable independently of the weather generators. */
+USTRUCT(BlueprintType)
+struct PORTSIM_API FPortWeatherOperatingLimits
+{
+    GENERATED_BODY()
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float StopWindMps=10;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float ResumeWindMps=8;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float StopVisibilityM=25;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float ResumeVisibilityM=35;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float StopRainMmPerHour=50;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float ResumeRainMmPerHour=40;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float StopSnowMmPerHour=80;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float ResumeSnowMmPerHour=60;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float StopIce=.5f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float ResumeIce=.35f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float StopTireMu=.15f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float ResumeTireMu=.2f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float StopWaveHeightM=.65f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float ResumeWaveHeightM=.55f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float RecoverySeconds=10;
+};
+
+struct PORTSIM_API FPortWeatherHold
+{
+    bool Active=false;
+    float RecoveryElapsed=0;
+    FString Reason;
+    void Update(const class UPortEnvironmentComponent& Environment,float Seconds);
+};
+
 /** One environment owned by the terminal controller and sampled by equipment. */
 UCLASS(ClassGroup=(PortSim), meta=(BlueprintSpawnableComponent))
 class PORTSIM_API UPortEnvironmentComponent : public UActorComponent
@@ -189,6 +219,7 @@ class PORTSIM_API UPortEnvironmentComponent : public UActorComponent
     GENERATED_BODY()
 public:
     UPortEnvironmentComponent();
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Environment|Operations") FPortWeatherOperatingLimits OperatingLimits;
     UFUNCTION(BlueprintCallable, Category="Environment|Surface") void SetSurfaceConditions(float Wetness,float Snow,float Ice);
     UFUNCTION(BlueprintPure, Category="Environment|Surface") FPortSurfaceState GetSurfaceConditions() const;
     UFUNCTION(BlueprintCallable, Category="Environment|Surface") void SetWaterFilmMm(float Millimeters);
