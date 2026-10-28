@@ -1462,11 +1462,16 @@ bool APortSiteLogistics::PlanRoadRoute(int32 Lane,bool Congested)
     }
     if(Job.Stage==FSiteTransfer::ReturnToStandby && Job.STS!=INDEX_NONE)
     {
-        // Depart the off-spine STS waiting bay longitudinally, then merge west.
-        const FVector Queue=Job.ExportIndex!=INDEX_NONE?TransferQuay(Job):QueueQuay(Job.STS),Approach(Queue.X,QueueAccessY,0);
+        // The export pad is only 10 m from the southbound spine (less than
+        // two 5.8 m turn radii). Depart south so LaneChange can form an S-curve;
+        // departing north would create overlapping fillets in a narrow U-turn.
+        const bool ExportReturn=Job.ExportIndex!=INDEX_NONE;
+        const FVector Queue=ExportReturn?TransferQuay(Job):QueueQuay(Job.STS);
+        const float ReturnAccessY=ExportReturn?ClearParkingGap(Queue.Y,false):QueueAccessY;
+        const FVector Approach(Queue.X,ReturnAccessY,0);
         Network.Add(Queue,Approach);
-        Network.Add(Approach,P(QuayLane,QueueAccessY));
-        Network.Add(P(QuayLane,QueueAccessY),P(QuayLane,South));
+        Network.Add(Approach,P(QuayLane,ReturnAccessY));
+        Network.Add(P(QuayLane,ReturnAccessY),P(QuayLane,South));
     }
     if(!bDepotParking && Job.Stage==5 && Job.ReturnSTS==INDEX_NONE &&
         TerminalLayout::AGVParkCrossingToYard(ReturnGap))
@@ -2405,14 +2410,7 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
                 Job.Route[Job.Waypoint-1]:(Job.bRouteStartValid?Job.RouteStart:Vehicle->GetActorLocation());
             FVector From=FMath::ClosestPointOnSegment(Vehicle->GetActorLocation(),Previous,Target);
             FVector Pursuit=Target;
-            // A fixed 3 m pursuit point can lie inside the chassis' minimum
-            // turning circle after a missed corner, producing a stable orbit.
-            // Extend pursuit along the approved route when off track; retain
-            // the short look-ahead while tracking the sampled arcs normally.
-            const float CrossTrack=FVector::Dist2D(Vehicle->GetActorLocation(),From);
-            float Remaining=FMath::Max(300.f,2.f*CrossTrack);
-            if(CrossTrack>150.f)
-                Remaining=FMath::Max(Remaining,2.f*AGVReference::MinimumInnerTurnRadiusCm);
+            float Remaining=300.f;
             for(int32 Next=Job.Waypoint;Next<=*Approved && Job.Route.IsValidIndex(Next);++Next)
             {
                 const FVector To=Job.Route[Next];
