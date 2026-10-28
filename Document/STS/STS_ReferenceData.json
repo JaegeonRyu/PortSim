@@ -1177,7 +1177,7 @@
         "ToggleLock"
       ],
       "status": "current_code",
-      "details": "Spreader 5000kg; single lock constraint/boolean rather than four sensed lock channels."
+      "details": "Spreader 8000kg simulation assumption; single lock constraint/boolean rather than four sensed lock channels."
     },
     {
       "file": "PortSim/Source/PortSim/TerminalAutomation.cpp",

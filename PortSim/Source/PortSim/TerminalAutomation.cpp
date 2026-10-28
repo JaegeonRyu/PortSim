@@ -220,6 +220,7 @@ void AQuayCrane::ResetTerminal()
     {
         ApplySeaMotion();
         ResetSiteOperations();
+        WeatherHold=FPortWeatherHold();
         bLocked=bEmergencyStop=bAutoPaused=bAutoLoading=false; bAutoRunning=false;
         AutoStage=ETerminalStage::Idle; AutoCompleted=Deliveries=0; AutoElapsed=0;
         Status=TEXT("실행 대기 — 실행 버튼을 눌러 하역을 시작하세요.");
@@ -230,6 +231,7 @@ void AQuayCrane::ResetTerminal()
     Spreader->SetSimulatePhysics(false);
     ResetFleet();
     ResetSiteOperations();
+    WeatherHold=FPortWeatherHold();
     bLocked=false; bEmergencyStop=false; bAutoPaused=false; bAutoRunning=false;
     for(bool& Locked:STSCornerLocked) Locked=false;
     STSObservation=FSTSObservation(); NextSTSSample=0;
@@ -402,7 +404,7 @@ void AQuayCrane::TickAutomatic(float Dt)
     if (!bAutoRunning) return;
     DriveInput=FVector::ZeroVector;
     AutoElapsed+=Dt; JobElapsed+=Dt;
-    if (bAutoPaused || bEmergencyStop) { JobPausedSeconds+=Dt; return; }
+    if (IsOperationPaused() || bEmergencyStop) { JobPausedSeconds+=Dt; return; }
     if(bAutoLoading) AutoDestination=TerminalSlot(ActiveCargoIndex,true);
     else if(CargoOnShip.IsValidIndex(ActiveCargoIndex) && CargoOnShip[ActiveCargoIndex])
         AutoSource=TerminalSlot(ActiveCargoIndex,true);

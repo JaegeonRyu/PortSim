@@ -204,6 +204,8 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
         Physics->SetBoolField(TEXT("active"),bJobActive);
         Vector(Physics,TEXT("wind_velocity_mps"),Observation.WindVelocityMetersPerSecond);
         auto WindConfig=C; WindConfig.Wind=Observation.WindVelocityMetersPerSecond;
+        WindConfig.WindProjectedAreasM2=WindProjectedAreasM2();
+        Vector(Physics,TEXT("wind_projected_areas_m2"),WindConfig.WindProjectedAreasM2);
         Vector(Physics,TEXT("wind_compensation_m"),WindConfig.WindEquilibriumOffset(FMath::Max(.1,(BeamZ-Head.Z)*.01),
             STSProfile.SpreaderMassKg+(bCarrying&&IsValid(CargoActor)?CargoActor->MassKg:0)));
         Vector(Physics,TEXT("offset_m"),D.Offset);

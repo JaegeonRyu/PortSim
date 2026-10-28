@@ -56,9 +56,8 @@ void APortContainerActor::SetPhysicalParameters(float Mass,FVector CoGOffset)
 void APortContainerActor::ApplyWind(FVector WindVelocityMetersPerSecond,float DragCoefficient)
 {
     if(!Body->IsSimulatingPhysics()) return;
-    const FVector DimensionsMeters=ExternalDimensionsCm*.01;
     const FVector ForceNewtons=FPortWindAerodynamics::DragForceNewtons(WindVelocityMetersPerSecond,
-        Body->GetPhysicsLinearVelocity(),Body->GetComponentQuat(),DimensionsMeters,DragCoefficient);
+        Body->GetPhysicsLinearVelocity(),Body->GetComponentQuat(),ExternalDimensionsCm*.01f,DragCoefficient);
     // Chaos uses centimetres, so one SI newton is 100 kg*cm/s^2.
     Body->AddForce(ForceNewtons*100.f);
 }

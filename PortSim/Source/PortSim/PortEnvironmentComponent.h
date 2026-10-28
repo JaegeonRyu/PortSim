@@ -84,6 +84,7 @@ struct PORTSIM_API FPortWindState
     static constexpr float MinimumSpeed=1.f;
     static constexpr float TypicalSpeed=3.5f;
     static constexpr float MaximumSpeed=7.f;
+    static constexpr float MeanVariationMetersPerSecond=1.f;
     // Normal-operation gust assumptions. These are not measured DGT limits.
     // A short plateau represents the meteorological three-second gust sample.
     static constexpr float MinimumGustPeak=2.f;
@@ -95,6 +96,7 @@ struct PORTSIM_API FPortWindState
     static constexpr float MaximumGustDirectionOffset=15.f;
     bool bWindEnabled=true;
     float WindSpeedMetersPerSecond=TypicalSpeed;
+    float ReferenceWindSpeedMetersPerSecond=TypicalSpeed;
     float WindDirectionDegrees=0;
     FVector WindDirectionVector=FVector(-1,0,0);
     float TargetWindSpeedMetersPerSecond=TypicalSpeed;
@@ -112,6 +114,7 @@ struct PORTSIM_API FPortWindState
 
     void Initialize(int32 Seed);
     void Advance(double SimulationSeconds);
+    void SetReferenceSpeed(float Speed);
     FVector EffectiveVelocity() const;
     float EffectiveDirectionDegrees() const;
     static float NormalizeDirection(float Degrees);
@@ -124,6 +127,7 @@ struct PORTSIM_API FPortWindState
 private:
     FRandomStream Random,GustRandom;
     float SampleSpeed();
+    float SampleTargetSpeed();
     void SelectTarget();
     void AdvanceMean(double SimulationSeconds);
     void AdvanceGust(double SimulationSeconds);
@@ -144,7 +148,7 @@ struct PORTSIM_API FPortWindAerodynamics
 struct PORTSIM_API FPortFogState
 {
     static constexpr float DefaultVisibilityMeters=30.f;
-    static constexpr float MinimumVisibilityMeters=5.f;
+    static constexpr float MinimumVisibilityMeters=20.f;
     static constexpr float MaximumVisibilityMeters=1000.f;
     bool bFogEnabled=false;
     float VisibilityMeters=DefaultVisibilityMeters;
@@ -178,6 +182,36 @@ struct PORTSIM_API FPortRainState
     }
 };
 
+/** Simulation operating assumptions, editable independently of the weather generators. */
+USTRUCT(BlueprintType)
+struct PORTSIM_API FPortWeatherOperatingLimits
+{
+    GENERATED_BODY()
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float StopWindMps=10;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float ResumeWindMps=8;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float StopVisibilityM=25;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float ResumeVisibilityM=35;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float StopRainMmPerHour=50;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float ResumeRainMmPerHour=40;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float StopSnowMmPerHour=80;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float ResumeSnowMmPerHour=60;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float StopIce=.5f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float ResumeIce=.35f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float StopTireMu=.15f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float ResumeTireMu=.2f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float StopWaveHeightM=.65f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float ResumeWaveHeightM=.55f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) float RecoverySeconds=10;
+};
+
+struct PORTSIM_API FPortWeatherHold
+{
+    bool Active=false;
+    float RecoveryElapsed=0;
+    FString Reason;
+    void Update(const class UPortEnvironmentComponent& Environment,float Seconds);
+};
+
 /** One environment owned by the terminal controller and sampled by equipment. */
 UCLASS(ClassGroup=(PortSim), meta=(BlueprintSpawnableComponent))
 class PORTSIM_API UPortEnvironmentComponent : public UActorComponent
@@ -185,6 +219,7 @@ class PORTSIM_API UPortEnvironmentComponent : public UActorComponent
     GENERATED_BODY()
 public:
     UPortEnvironmentComponent();
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Environment|Operations") FPortWeatherOperatingLimits OperatingLimits;
     UFUNCTION(BlueprintCallable, Category="Environment|Surface") void SetSurfaceConditions(float Wetness,float Snow,float Ice);
     UFUNCTION(BlueprintPure, Category="Environment|Surface") FPortSurfaceState GetSurfaceConditions() const;
     UFUNCTION(BlueprintCallable, Category="Environment|Surface") void SetWaterFilmMm(float Millimeters);
@@ -214,8 +249,10 @@ public:
     UFUNCTION(BlueprintCallable, Category="Environment|Wind") void ToggleWind() { Wind.bWindEnabled=!Wind.bWindEnabled; }
     UFUNCTION(BlueprintCallable, Category="Environment|Wind") void SetWindEnabled(bool Enabled) { Wind.bWindEnabled=Enabled; }
     UFUNCTION(BlueprintCallable, Category="Environment|Wind") void SetWindSpeedMetersPerSecond(float Speed);
+    /** User-selected slider value. Unlike live mean/gust wind, this does not drift with weather. */
+    UFUNCTION(BlueprintPure, Category="Environment|Wind") float GetWindSettingMetersPerSecond() const { return Wind.ReferenceWindSpeedMetersPerSecond; }
     UFUNCTION(BlueprintPure, Category="Environment|Wind") float GetWindIntensity() const
-    { return (Wind.WindSpeedMetersPerSecond-FPortWindState::MinimumSpeed)/(FPortWindState::MaximumSpeed-FPortWindState::MinimumSpeed); }
+    { return (Wind.ReferenceWindSpeedMetersPerSecond-FPortWindState::MinimumSpeed)/(FPortWindState::MaximumSpeed-FPortWindState::MinimumSpeed); }
     const FPortWindState& GetWindState() const { return Wind; }
     UFUNCTION(BlueprintPure, Category="Environment|Sea") bool IsSeaMotionEnabled() const { return Sea.bSeaMotionEnabled; }
     UFUNCTION(BlueprintPure, Category="Environment|Sea") float GetSignificantWaveHeightMeters() const { return Sea.SignificantWaveHeightMeters(); }

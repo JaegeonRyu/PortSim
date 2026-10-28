@@ -142,7 +142,7 @@ bool AQuayCrane::SaveRunSettings()
     if(Environment)
     {
         Object->SetBoolField(TEXT("wind_enabled"),Environment->IsWindEnabled());
-        Object->SetNumberField(TEXT("wind_speed_mps"),Environment->GetWindSpeedMetersPerSecond());
+        Object->SetNumberField(TEXT("wind_speed_mps"),Environment->GetWindSettingMetersPerSecond());
         Object->SetBoolField(TEXT("sea_enabled"),Environment->IsSeaMotionEnabled());
         Object->SetNumberField(TEXT("sea_intensity"),Environment->GetSeaIntensity());
         Object->SetBoolField(TEXT("rain_enabled"),Environment->IsRainEnabled());

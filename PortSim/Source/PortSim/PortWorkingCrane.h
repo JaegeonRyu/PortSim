@@ -134,6 +134,7 @@ private:
     bool TelescopeReady() const;
     bool STSSensorContains(const FString& Key,FVector Point) const;
     FVector SpreaderVelocity() const;
+    FVector WindProjectedAreasM2() const;
     FSTSOperatingProfile STSProfile;
     UPROPERTY() TObjectPtr<APortAGVActor> HandoverAGV;
     FVector AxisVelocity=FVector::ZeroVector;

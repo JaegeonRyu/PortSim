@@ -15,7 +15,7 @@ void AQuayCrane::ResetSiteOperations()
 }
 void AQuayCrane::TickSiteOperations(float Dt)
 {
-    if (RMGActor) RMGActor->SetOperationPaused(bAutoPaused || bEmergencyStop || AutoStage==ETerminalStage::Fault);
+    if (RMGActor) RMGActor->SetOperationPaused(IsOperationPaused() || bEmergencyStop || AutoStage==ETerminalStage::Fault);
     if (!SiteLogistics || (bTerminalTest && !FParse::Param(FCommandLine::Get(),TEXT("PortSimMixedTest")))) return;
     if (bTerminalTest) SiteLogistics->DispatchLimit=16;
     const bool Full=FParse::Param(FCommandLine::Get(),TEXT("PortSimFullUnloadTest"));
@@ -32,7 +32,7 @@ void AQuayCrane::TickSiteOperations(float Dt)
     WaveShipmentCount=FMath::Clamp(WaveShipmentCount,1,SiteLogistics->InitialShipCount());
     if (FirstWave) SiteLogistics->DispatchLimit=WaveShipmentCount;
     else if (CarLike) SiteLogistics->DispatchLimit=1;
-    SiteLogistics->Advance(Dt,bAutoPaused || bEmergencyStop || (bUnifiedTerminal && !bAutoRunning));
+    SiteLogistics->Advance(Dt,IsOperationPaused() || bEmergencyStop || (bUnifiedTerminal && !bAutoRunning));
     if(FParse::Param(FCommandLine::Get(),TEXT("PortSimOperationsTest")))
     {
         SiteTestTime+=Dt;

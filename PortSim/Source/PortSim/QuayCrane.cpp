@@ -212,7 +212,7 @@ void AQuayCrane::BeginPlay()
     bHUDVisible=!FParse::Param(FCommandLine::Get(),TEXT("PortSimHUDHidden"));
     // Demo always starts at a known world origin, regardless of PlayerStart placement.
     SetActorLocationAndRotation(FVector::ZeroVector, FRotator::ZeroRotator);
-    Spreader->SetMassOverrideInKg(NAME_None, 5000.f);
+    Spreader->SetMassOverrideInKg(NAME_None, 8000.f);
     bSmokeTest = FParse::Param(FCommandLine::Get(), TEXT("PortSimSmokeTest"));
     bTerminalTest = FParse::Param(FCommandLine::Get(), TEXT("PortSimTerminalTest")) || FParse::Param(FCommandLine::Get(),TEXT("PortSimFleetResetTest"));
     bTerminalMode = !bSmokeTest;
@@ -449,8 +449,14 @@ void AQuayCrane::Tick(float DeltaSeconds)
     if(!EnvironmentFrozen)
     {
         Environment->AdvanceEnvironment(DeltaSeconds);
-        ApplySeaMotion();
     }
+    const bool WasWeatherHeld=WeatherHold.Active;
+    if(bAutoRunning) WeatherHold.Update(*Environment,EnvironmentFrozen?0.f:DeltaSeconds);
+    else WeatherHold=FPortWeatherHold();
+    if(WasWeatherHeld!=WeatherHold.Active)
+        UE_LOG(LogPortSimCrane,Display,TEXT("WEATHER_%s: %s"),WeatherHold.Active?TEXT("HOLD"):TEXT("RESUME"),*WeatherHold.Reason);
+    // Keep weather evolving during a weather hold; move ship cargo only when work can advance.
+    if(!EnvironmentFrozen && !WeatherHold.Active) ApplySeaMotion();
     const FVector WindVelocity=Environment->GetEffectiveWindVelocity();
     if(SiteLogistics)
     {
@@ -460,7 +466,7 @@ void AQuayCrane::Tick(float DeltaSeconds)
         auto* ContactMaterial=Environment->GetContactMaterial();
         SiteLogistics->SetSurfaceConditions(Environment->GetSurfaceConditions(),Environment->GetFrictionSettings(),ContactMaterial);
     }
-    if(!EnvironmentFrozen)
+    if(!EnvironmentFrozen && !WeatherHold.Active)
         for(const auto& Container:ContainerActors) if(IsValid(Container)) Container->ApplyWind(WindVelocity);
     if(bPickupTest){TickPickupTest(DeltaSeconds);return;}
     // World timers, control and Chaos consume the same accelerated delta.
@@ -589,7 +595,7 @@ void AQuayCrane::Tick(float DeltaSeconds)
     {
         if (FParse::Param(FCommandLine::Get(),TEXT("PortSimEquipmentTest"))) { TestEquipmentAndCamera(); return; }
         SiteLogistics->BeginTrafficFrame();
-        if (bAutoRunning && !bAutoPaused && !bEmergencyStop && SiteLogistics->Fault.IsEmpty()) AutoElapsed+=Dt;
+        if (bAutoRunning && !IsOperationPaused() && !bEmergencyStop && SiteLogistics->Fault.IsEmpty()) AutoElapsed+=Dt;
         TickSiteOperations(Dt);
         if (bFollowAGV) FollowLoadedAGV();
         if (FParse::Param(FCommandLine::Get(),TEXT("PortSimAGVProof")))
@@ -631,7 +637,7 @@ void AQuayCrane::Tick(float DeltaSeconds)
     Spreader->WakeAllRigidBodies();
     if (bLocked) Cargo->WakeAllRigidBodies();
     const float OldLength=RopeLength;
-    const bool bDriveStopped=bEmergencyStop || (bTerminalMode && bAutoPaused) || (bTerminalMode && AutoStage==ETerminalStage::Fault);
+    const bool bDriveStopped=bEmergencyStop || (bTerminalMode && IsOperationPaused()) || (bTerminalMode && AutoStage==ETerminalStage::Fault);
     for(float Remaining=Dt;Remaining>KINDA_SMALL_NUMBER;)
     {
         const float Step=FMath::Min(Remaining,1.f/60.f); Remaining-=Step;
@@ -967,7 +973,7 @@ void APortSimHUD::DrawHUD()
                 AddHitBox(FVector2D(LabelX-6.f*Scale,RowY+21.f*Scale),FVector2D(Width+12.f*Scale,28.f*Scale),SliderName,true,50);
                 Y+=52.f*Scale;
             };
-            EnvironmentSlider(FString::Printf(TEXT("바람 %.1f m/s  [Ctrl+0]"),Environment->GetWindSpeedMetersPerSecond()),
+            EnvironmentSlider(FString::Printf(TEXT("바람 설정 %.1f m/s  [Ctrl+0]"),Environment->GetWindSettingMetersPerSecond()),
                 Environment->GetWindIntensity(),Environment->IsWindEnabled(),TEXT("WindIntensitySlider"),TEXT("ToggleWindSetting"));
             EnvironmentSlider(FString::Printf(TEXT("파도·너울 Hs %.2f m  [Ctrl+1]"),Environment->GetSignificantWaveHeightMeters()),
                 Environment->GetSeaIntensity(),Environment->IsSeaMotionEnabled(),TEXT("SeaIntensitySlider"),TEXT("ToggleSeaSetting"));
@@ -997,7 +1003,8 @@ void APortSimHUD::DrawHUD()
         Y+=43*Scale;
         Text(FString::Printf(TEXT("설정 배속: %.0f배 · 실제 배속: %.2f배"),CranePawn->SimulationSpeed,CranePawn->GetActualPlaybackRate()),FLinearColor(1,.85f,.25f));
         Text(FString::Printf(TEXT("실행시간 (배속 반영): %s"),*CranePawn->ElapsedText()),FLinearColor(1,.85f,.25f));
-        Text(FString::Printf(TEXT("%s · %s"),CranePawn->bEmergencyStop?TEXT("비상 정지"):!CranePawn->bAutoRunning?TEXT("대기"):CranePawn->bAutoPaused?TEXT("일시정지"):TEXT("실행 중"),*CranePawn->CameraViewName));
+        Text(FString::Printf(TEXT("%s · %s"),CranePawn->bEmergencyStop?TEXT("비상 정지"):!CranePawn->bAutoRunning?TEXT("대기"):CranePawn->bAutoPaused?TEXT("일시정지"):CranePawn->WeatherHold.Active?TEXT("기상 회복 대기"):TEXT("실행 중"),*CranePawn->CameraViewName));
+        if(CranePawn->WeatherHold.Active) Text(FString::Printf(TEXT("기상 대기: %s · 회복 확인 %.1f / %.1f초"),*CranePawn->WeatherHold.Reason,CranePawn->WeatherHold.RecoveryElapsed,CranePawn->GetEnvironment()->OperatingLimits.RecoverySeconds),FLinearColor(1,.7f,.2f));
         Text(TEXT("방향키 회전 · PgUp/PgDn 확대·축소"),FLinearColor(.6f,.7f,.8f));
         Text(TEXT("Tab 대기소·안벽·크레인 / Home 전체 / End 근접"),FLinearColor(.6f,.7f,.8f));
         if(!CranePawn->bRunSettingsSaved) Text(TEXT("설정 저장 실패"),FLinearColor(1,.4f,.3f));
@@ -1015,7 +1022,7 @@ void APortSimHUD::DrawHUD()
         Line(TEXT("Tab 대기소·안벽·크레인 / Home 전체 / End 근접"), FLinearColor(0.3f,1.f,0.7f));
         Line(FString::Printf(TEXT("선박 %d/24 | 완료 %d | C%02d | %s %s | %.1f s"),
             CranePawn->GetShipCargoCount(),CranePawn->AutoCompleted,CranePawn->ActiveCargoIndex+1,
-            CranePawn->GetAutoStageName(),CranePawn->bAutoPaused?TEXT("[일시정지]"):TEXT(""),CranePawn->AutoElapsed),FLinearColor::White);
+            CranePawn->GetAutoStageName(),CranePawn->IsOperationPaused()?TEXT("[작업 대기]"):TEXT(""),CranePawn->AutoElapsed),FLinearColor::White);
     }
     Line(TEXT("방향키 회전 · PgUp/PgDn 확대·축소"), FLinearColor::White);
     Line(FString::Printf(TEXT("로프 %.1f m   화물 높이 %.1f m   흔들림 %.1f deg   적재 완료 %d"),

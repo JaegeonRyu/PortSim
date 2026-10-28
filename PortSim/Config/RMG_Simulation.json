@@ -5,7 +5,7 @@
   "gantry_acceleration_mps2": 0.5,
   "hoist_acceleration_mps2": 0.5,
   "default_container_mass_kg": 12000,
-  "spreader_mass_kg": 5000,
+  "spreader_mass_kg": 8000,
   "container_cog_x_m": 0,
   "container_cog_y_m": 0,
   "container_cog_z_m": 0,
@@ -80,6 +80,7 @@
     "pose_bias_z_m": 0
   },
   "notes": [
+    "Spreader mass is an 8,000 kg simulation assumption. Wind uses the visible telescopic-frame silhouette when empty and adds the active 20/40/45 ft container dimensions when loaded; wind_area_m2 remains a legacy fallback for isolated dynamics.",
     "Manufacturer ranges and mounting regions: Konecranes RMG Technical Information, November 2023, pages 3-6. Selected single-lift configuration is a simulation choice, not an as-built crane.",
     "Exact sensor XYZ/FOV/range, control gains, drive internals, load cells and contact tolerances are unvalidated assumptions. RTG diagram is conceptual only; magnetic auto-steering is not used on this rail-mounted crane.",
     "Reduced-order common crane suspension/controller; not a reproduction of proprietary Konecranes ALC. Fixed 40ft equivalent corner geometry."

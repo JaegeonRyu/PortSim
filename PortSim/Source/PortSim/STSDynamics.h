@@ -37,6 +37,9 @@ struct FSTSDynamicsParameters
     double DrumRadius=0,GearRatio=0,Efficiency=0,Parts=0,MotorCount=0,MotorMaxTorque=0,MotorMaxRPM=0,MotorInertia=0;
     double RopeEA=0,RopeLimit=0,SkewLimit=0;
     FVector Wind=FVector::ZeroVector;
+    // Local X/Y/Z projected areas (YZ/XZ/XY faces). Zero retains the legacy
+    // scalar WindArea fallback for standalone dynamics tests/config loading.
+    FVector WindProjectedAreasM2=FVector::ZeroVector;
     double WindArea=0,WindDrag=0,WindMoment=0;
     FVector AerodynamicForce(FVector BodyVelocityMps) const;
     FVector WindEquilibriumOffset(double LengthM,double MassKg) const;

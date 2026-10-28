@@ -3,6 +3,7 @@
 #include "PortContainerActor.h"
 #include "PortSiteLogistics.h"
 #include "PortAGVActor.h"
+#include "AGVReference.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/World.h"
@@ -37,14 +38,18 @@ APortWorkingCrane::APortWorkingCrane()
     // telescopic arms, end beams and twistlocks move within this common frame.
     Spreader=Box(TEXT("Spreader"),RootComponent,FVector::ZeroVector,FVector(100));
     Spreader->SetVisibility(false);
-    SpreaderCenter=Box(TEXT("SpreaderCenter"),Spreader,FVector::ZeroVector,FVector(243.8f,500.f,50.f));
+    SpreaderCenter=Box(TEXT("SpreaderCenter"),Spreader,FVector::ZeroVector,
+        FVector(PortSpreaderTelescope::WidthCm,PortSpreaderTelescope::CentreLengthCm,PortSpreaderTelescope::CentreHeightCm));
     for(int32 End=0;End<2;++End)
     {
-        TelescopeArms.Add(Box(*FString::Printf(TEXT("TelescopeArm_%d"),End),Spreader,FVector::ZeroVector,FVector(125.f,350.f,34.f)));
-        SpreaderEndBeams.Add(Box(*FString::Printf(TEXT("SpreaderEndBeam_%d"),End),Spreader,FVector::ZeroVector,FVector(243.8f,40.f,60.f)));
+        TelescopeArms.Add(Box(*FString::Printf(TEXT("TelescopeArm_%d"),End),Spreader,FVector::ZeroVector,
+            FVector(PortSpreaderTelescope::ArmWidthCm,350.f,PortSpreaderTelescope::ArmHeightCm)));
+        SpreaderEndBeams.Add(Box(*FString::Printf(TEXT("SpreaderEndBeam_%d"),End),Spreader,FVector::ZeroVector,
+            FVector(PortSpreaderTelescope::WidthCm,PortSpreaderTelescope::EndBeamLengthCm,PortSpreaderTelescope::EndBeamHeightCm)));
     }
     for(int32 Corner=0;Corner<4;++Corner)
-        TwistLocks.Add(Box(*FString::Printf(TEXT("TwistLock_%d"),Corner),Spreader,FVector::ZeroVector,FVector(16.f,16.f,20.f)));
+        TwistLocks.Add(Box(*FString::Printf(TEXT("TwistLock_%d"),Corner),Spreader,FVector::ZeroVector,
+            FVector(PortSpreaderTelescope::TwistlockWidthCm,PortSpreaderTelescope::TwistlockLengthCm,PortSpreaderTelescope::TwistlockHeightCm)));
     Mast=Box(TEXT("Mast"),RootComponent,FVector::ZeroVector,FVector(100));
     NameLabel=Label(TEXT("CraneName"),FVector::ZeroVector);
     Tags.Add(TEXT("PortSim.WorkingCrane"));
@@ -396,11 +401,14 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
             const FVector AGVCargo=bValidAGV?HandoverAGV->CargoPosition():FVector::ZeroVector;
             const float AGVSpeed=bValidAGV?HandoverAGV->Speed:-1.f;
             const float PositionError=bValidAGV?FVector::Distance(AGVCargo,Slots[1-SourceSlot]):-1.f;
-            const float HeadingError=bValidAGV?FMath::Abs(FMath::FindDeltaAngleDegrees(HandoverAGV->GetActorRotation().Yaw,Orientation.Rotator().Yaw)):-1.f;
+            const float HeadingError=bValidAGV?AGVReference::AxialHeadingErrorDegrees(
+                HandoverAGV->GetActorRotation().Yaw,Orientation.Rotator().Yaw):-1.f;
             const bool bInLidar=bValidAGV&&STSSensorContains(TEXT("agv_position_lidar"),AGVCargo);
-            UE_LOG(LogTemp,Error,TEXT("STS_ALIGNMENT_DETAIL: crane=%d stage=%d ready=%d agv=%s observed=%d speed_cmps=%.3f position_error_cm=%.3f position_limit_cm=%.3f heading_error_deg=%.3f heading_limit_deg=%.3f lidar=%d destination=%s cargo_position=%s"),
+            const bool bDockingFix=bValidAGV&&HandoverAGV->Sensors.bFMSConnected&&
+                HandoverAGV->Sensors.bDockingNode&&HandoverAGV->Sensors.bTransponderLocked;
+            UE_LOG(LogTemp,Error,TEXT("STS_ALIGNMENT_DETAIL: crane=%d stage=%d ready=%d agv=%s observed=%d speed_cmps=%.3f position_error_cm=%.3f position_limit_cm=%.3f axial_heading_error_deg=%.3f heading_limit_deg=%.3f lidar=%d docking_fix=%d destination=%s cargo_position=%s"),
                 CraneID,Stage,bDestinationReady,*GetNameSafe(HandoverAGV),Observation.bAGVAligned,AGVSpeed,PositionError,STSProfile.AGVTolerance,
-                HeadingError,STSProfile.AGVHeadingTolerance,bInLidar,*Slots[1-SourceSlot].ToString(),*AGVCargo.ToString());
+                HeadingError,STSProfile.AGVHeadingTolerance,bInLidar,bDockingFix,*Slots[1-SourceSlot].ToString(),*AGVCargo.ToString());
             UE_LOG(LogTemp,Error,TEXT("CRANE_ALIGNMENT_TIMEOUT: crane=%d kind=%s stage=%d ready=%d agv=%s observed=%d destination=%s wait=%.2f"),
                 CraneID,bSTS?TEXT("STS"):TEXT("RMG"),Stage,bDestinationReady,*GetNameSafe(HandoverAGV),
                 Observation.bAGVAligned,*Slots[bSTS?1-SourceSlot:SourceSlot].ToString(),AGVAlignmentWait);
@@ -537,6 +545,7 @@ bool APortWorkingCrane::ValidateOperation(FString& Error) const
     {
         FSTSDynamicsParameters WindConfig=STSProfile.Dynamics;
         WindConfig.Wind=Orientation.UnrotateVector(WindVelocityMetersPerSecond);
+        WindConfig.WindProjectedAreasM2=WindProjectedAreasM2();
         const FVector WindAllowance=WindConfig.WindEquilibriumOffset(STSProfile.MaxRope,
             FMath::Max(1.f,STSProfile.SpreaderMassKg))*100.;
         Margin+=FMath::Max(FMath::Abs(WindAllowance.X),FMath::Abs(WindAllowance.Y));
