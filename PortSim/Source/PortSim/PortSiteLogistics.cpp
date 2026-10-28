@@ -2405,7 +2405,14 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
                 Job.Route[Job.Waypoint-1]:(Job.bRouteStartValid?Job.RouteStart:Vehicle->GetActorLocation());
             FVector From=FMath::ClosestPointOnSegment(Vehicle->GetActorLocation(),Previous,Target);
             FVector Pursuit=Target;
-            float Remaining=300.f;
+            // A fixed 3 m pursuit point can lie inside the chassis' minimum
+            // turning circle after a missed corner, producing a stable orbit.
+            // Extend pursuit along the approved route when off track; retain
+            // the short look-ahead while tracking the sampled arcs normally.
+            const float CrossTrack=FVector::Dist2D(Vehicle->GetActorLocation(),From);
+            float Remaining=FMath::Max(300.f,2.f*CrossTrack);
+            if(CrossTrack>150.f)
+                Remaining=FMath::Max(Remaining,2.f*AGVReference::MinimumInnerTurnRadiusCm);
             for(int32 Next=Job.Waypoint;Next<=*Approved && Job.Route.IsValidIndex(Next);++Next)
             {
                 const FVector To=Job.Route[Next];
