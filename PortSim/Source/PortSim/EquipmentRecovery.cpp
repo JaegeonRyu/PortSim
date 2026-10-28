@@ -155,6 +155,8 @@ void APortSiteLogistics::ManageEquipmentFailures()
             FVector::Dist2D(Vehicles[V]->GetActorLocation(),YardHandover(Yard[J.Slot]))>4000.)
         {
             int32& ApproachOwner=YardApproachOwners[YardApproachKey(Yard[J.Slot])];
+            if(J.bYardAdvanceBooking)
+            { J.bYardAdvanceBooking=false; J.bYardAdmissionSuspended=true; }
             if(ApproachOwner==V)
             {
                 ApproachOwner=INDEX_NONE; J.bYardAdmissionSuspended=true;
@@ -464,7 +466,7 @@ bool APortSiteLogistics::ReplanYardGroup(const TSet<int32>& Affected,const TSet<
             DeferredYardLeases.Add({V,Old}); SlotAssigned[Old]=false;
             RMGBusy[Yard[Old].Crane]=false;
         }
-        J.Slot=New; J.RMG=Yard[New].Crane; J.bRMGReserved=false; J.bYardReleased=false;
+        J.Slot=New; J.RMG=Yard[New].Crane; J.bRMGReserved=false; J.bYardReleased=false; J.bYardAdvanceBooking=false;
         SlotAssigned[New]=true; YardApproachOwners[YardApproachKey(Yard[New])]=V;
         J.bEquipmentWaiting=false;
         if(J.Stage==9)

@@ -70,7 +70,9 @@ struct FSiteTransfer
     FVector RouteStart=FVector::ZeroVector;
     bool bRouteStartValid=false;
     bool bYardReleased=false, bRMGReserved=false, bParkingDeparture=false;
+    bool bYardAdvanceBooking=false; // next service only; cannot enter the road to the RMG
     double TrafficWaitSeconds=0, YardWaitSeconds=0, LastRerouteAt=-10;
+    double DispatchRetryAfter=0;
     int32 Reroutes=0;
     int32 ReturnSTS=INDEX_NONE, ReturnCargo=INDEX_NONE;
     int32 YardEntryWaypoint=INDEX_NONE;
@@ -80,6 +82,8 @@ struct FSiteTransfer
     double EquipmentDowntimeSeconds=0;
     int32 RecoveryOriginSlot=INDEX_NONE;
     FVector RecoveryAnchor=FVector::ZeroVector;
+    bool IsDockingWaypoint() const
+    { return Waypoint==Route.Num()-1 || (Stage==3 && !bRMGReserved && Waypoint==YardEntryWaypoint); }
 };
 
 /** One manifest, conserved cargo IDs and reserved yard slots across STS -> AGV -> RMG. */
@@ -163,13 +167,21 @@ private:
     friend class FTrafficJunctionTest;
     friend class FEquipmentRecoveryTest;
     friend class FDashboardControlTest;
+    friend class FWorkerImpactTest;
+    friend class FAdvanceYardBookingTest;
+    friend class FDashboardEnvironmentTest;
+    friend class FBlockedPickupDispatchTest;
+    friend class FAGVLeasedEntryDockTest;
     FString DashboardControlSession=FGuid::NewGuid().ToString(EGuidFormats::Digits);
     double NextControlPoll=0;
     TArray<TSharedPtr<FJsonObject>> DashboardCommandResults, RecoveryEvents;
+    TArray<TSharedPtr<FJsonObject>> WorkerImpacts;
+    void UpdateWorkerImpacts();
     TSet<FString> SeenDashboardCommands;
     int32 RecoverySequence=0;
     void ProcessDashboardCommands();
     bool ApplyDashboardCommand(const FJsonObject& Command,FString& Error);
+    TSharedPtr<FJsonObject> CaptureEnvironment() const;
     void RecordRecoveryEvent(const FString& Kind,AActor* Cause,AActor* From,AActor* To,
         AActor* Cargo=nullptr,const FVector& OldPosition=FVector::ZeroVector,const FVector& NewPosition=FVector::ZeroVector);
     FSTSOperatingProfile STSProfile;
@@ -273,6 +285,10 @@ private:
     void ApplyVesselMotions(float FrameDurationSeconds=0);
     void Dispatch(int32 Lane);
     void ScheduleFleet();
+    bool ParkingDepartureAvailable(int32 Vehicle) const;
+    bool CanReleaseParkedStandby(int32 Vehicle) const;
+    void ReleaseUnenteredParkingMission(int32 Vehicle);
+    void ReassignBlockedParkingVehicles();
     void AdvanceFleetBatteries(float Dt);
     FVector ChargingBayPosition(int32 Bay) const;
     void ActivateVehicle(int32 Vehicle,int32 STS,bool FromQueue);
@@ -281,9 +297,11 @@ private:
     bool SourceAccessible(int32 Cargo) const;
     void PrepareExecutableCargo(int32 Lane);
     FString YardAdmissionReason(int32 Cargo,int32 Vehicle=INDEX_NONE) const;
-    bool ReserveYardApproach(int32 Lane);
+    bool ReserveYardApproach(int32 Lane,bool AllowAdvanceBooking=false);
     void ReleaseYardApproachIfClear(int32 Lane);
     bool YardApproachAvailable(int32 Cargo) const;
+    bool YardDispatchReady(int32 Cargo) const;
+    bool CanBookNextYardService(int32 Cargo,int32 Vehicle=INDEX_NONE) const;
     void AdvanceStep(float Dt,bool Paused);
     bool PrepareKinematicPhysicsFrame() const;
     void RecoverTrafficCycle();

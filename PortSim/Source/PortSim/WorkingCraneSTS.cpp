@@ -71,6 +71,9 @@ void APortWorkingCrane::ClearSTSState()
     for(int32 I=0;I<4;++I){LockProgress[I]=0;PhysicalSeating[I]=false;}
     Observation=FSTSObservation(); NextSample=0;
     JobSeconds=PausedSeconds=LastJobSeconds=LastPausedSeconds=0;
+    for(double& Seconds:JobStageSeconds) Seconds=0;
+    for(double& Seconds:LastJobStageSeconds) Seconds=0;
+    JobAGVWaitSeconds=0;
     AGVAlignmentWait=0;
     HandoverAGV=nullptr;
     for(bool& Locked:CornerLocked) Locked=false;
@@ -386,10 +389,22 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
                 const double WindTrackingGain=SensorConfig.Wind.IsNearlyZero()?1.:4.;
                 const double EquilibriumOffset=WindOffset[I]+AccelerationOffset;
                 const double EquilibriumAngle=FMath::Asin(FMath::Clamp(EquilibriumOffset*.01/Length,-1.,1.));
-                const double Command=C.HorizontalAcceleration(Error*.01,
+                const double ObservedRope=FMath::Max(.1,(BeamZ-Observation.DrivePosition.Z)*.01);
+                // A moving vessel is a tracking problem, not the stationary
+                // transfer used to design the travel poles. Keep its existing
+                // approach/tracking loop through acquisition; switching loops
+                // immediately before seating changes the pendulum phase.
+                const bool MovingSource=!bCarrying && Stage<=2 &&
+                    (!Observation.CargoVelocity.IsNearlyZero(.001) ||
+                     !Observation.CargoAcceleration.IsNearlyZero(.001) || !Observation.CargoJerk.IsNearlyZero(.001));
+                const double Feedback=(C.TravelResponseRatio>0 && !MovingSource)
+                    ? C.TravelAcceleration(Error*.01,(Observation.DriveVelocity[I]-ControlTargetVelocity)*.01,
+                        ObservedRope,-Observation.DriveVelocity.Z*.01,Observation.SwayRate[I],
+                        Observation.SwayAngle[I],EquilibriumAngle)
+                    : C.HorizontalAcceleration(Error*.01,
                     (Observation.DriveVelocity[I]-ControlTargetVelocity)*.01,FMath::Max(.1,(BeamZ-Observation.DrivePosition.Z)*.01),
-                    Observation.SwayRate[I],Observation.SwayAngle[I],EquilibriumAngle,WindTrackingGain)*100+
-                    PredictedTargetAcceleration;
+                    Observation.SwayRate[I],Observation.SwayAngle[I],EquilibriumAngle,WindTrackingGain);
+                const double Command=Feedback*100+PredictedTargetAcceleration;
                 // Reserve half of the acquisition stroke for drive correction
                 // and the remainder for the suspended motion. The stopping
                 // band limits the anti-sway command without disabling it or

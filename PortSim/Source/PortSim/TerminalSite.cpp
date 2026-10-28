@@ -324,7 +324,8 @@ void AQuayCrane::BuildTerminalSite()
                     const int32 Nearest=FMath::Clamp(FMath::RoundToInt((Position.Y-(Y-CraneSpacing))/CraneSpacing),0,2)+(bUnifiedTerminal?VesselIndex*3:(Y<0?0:5));
                     SiteLogistics->AddShipCargo(Position*100.,Nearest,bUnifiedTerminal && !Imported?Index/Capacity:0,
                         InputRow?FName(*InputRow->ContainerId):NAME_None,false,
-                        Imported && !ConfiguredVesselOperations[VesselIndex].Rows.ContainsByPredicate(
+                        Imported && !ConfiguredVesselOperations[VesselIndex].FileName.IsEmpty() &&
+                        !ConfiguredVesselOperations[VesselIndex].Rows.ContainsByPredicate(
                             [InputRow](const FPortVesselInputRow& R){return R.Operation==TEXT("DISCHARGE") && R.ContainerId==InputRow->ContainerId;}),
                         InputRow?InputRow->GridSlot:FIntVector(-1));
                 }

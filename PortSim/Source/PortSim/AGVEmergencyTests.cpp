@@ -57,6 +57,17 @@ bool FAGVEmergencyPhysicsTest::RunTest(const FString& Parameters)
     A->SetFMSHold(true);TestTrue(TEXT("An external nonphysical freeze invalidates the result"),A->Emergency.Invalidated && !A->Emergency.Stopped);
     TestFalse(TEXT("Invalid test cannot resume through ordinary clearance"),A->ClearEmergencyScenario(Error));
     A->ResetVehicle(FVector::ZeroVector);TestEqual(TEXT("Reset restores original CoG after unsafe test"),Box->CoGOffsetCm,OriginalCoG);
+    auto* Empty=World->SpawnActor<APortAGVActor>();Empty->ResetVehicle(FVector(0,10000,0));
+    Empty->Surface.Wetness=.25;Empty->Surface.Ice=.05;Empty->AdvanceDynamics(4,0,4);
+    const auto Actual=Empty->DynamicsInput();
+    TestFalse(TEXT("Nonfinite or out-of-range manual entry distance is rejected"),Empty->StartWorkerIntrusion(4,Error));
+    TestTrue(TEXT("Manual worker entry supports an empty moving AGV"),Empty->StartWorkerIntrusion(30,Error));
+    TestFalse(TEXT("Manual worker entry does not activate test overrides"),Empty->bEmergencyTestOverrides);
+    TestEqual(TEXT("Manual worker entry retains actual road friction"),Empty->DynamicsInput().StaticMu,Actual.StaticMu);
+    Empty->EmergencySettings.WorkerDistanceM=5;
+    TestEqual(TEXT("Active entry keeps its command-time settings"),Empty->ActiveEmergencySettings.WorkerDistanceM,30.f);
+    for(int J=0;J<7200 && !Empty->Emergency.Finished;++J)Empty->AdvanceEmergencyScenario(1./120.);
+    TestTrue(TEXT("Manual entry stops physically and can be removed"),Empty->Emergency.Stopped && Empty->ClearEmergencyScenario(Error));
     World->DestroyWorld(false);return !HasAnyErrors();
 }
 

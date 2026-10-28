@@ -1,4 +1,5 @@
-// Run alongside TestSite.ps1 only in the final validation phase.
+// Historical web preset test. Weather/CoG override commands are no longer
+// accepted by the web API; use live-worker-intrusion.mjs for current conditions.
 import {writeFile} from 'node:fs/promises';
 import {setTimeout as wait} from 'node:timers/promises';
 const base='http://127.0.0.1:4173',started=Date.now();

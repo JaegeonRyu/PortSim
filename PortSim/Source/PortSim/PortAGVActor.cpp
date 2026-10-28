@@ -69,6 +69,7 @@ void APortAGVActor::ResetVehicle(FVector Position)
 {
     if(EmergencyCargo.IsValid())EmergencyCargo->CoGOffsetCm=OriginalEmergencyCoG;
     Emergency=FAGVEmergencyState(); EmergencyCargo.Reset();
+    ActiveEmergencySettings=EmergencySettings; bEmergencyTestOverrides=false;
     WorkerMarker->SetVisibility(false); WorkerLabel->SetVisibility(false);
     ActiveDeckOffsetCm=0;
     bDriveFault=false;

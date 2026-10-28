@@ -29,6 +29,7 @@
     "kind": "unvalidated_simulation_assumptions",
     "anti_sway": true,
     "anti_skew": true,
+    "travel_response_ratio": 0.7,
     "passive_damping_per_s": 0.15,
     "anti_sway_velocity_gain": 0.15,
     "horizontal_position_gain_per_s2": 0.4,

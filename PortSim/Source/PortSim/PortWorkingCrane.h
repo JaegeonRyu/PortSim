@@ -44,6 +44,8 @@ public:
     bool HasSTSProfile() const { return bSTS && STSProfile.bReady; }
     bool HasRMGProfile() const { return !bSTS && STSProfile.bReady; }
     double LastJobSeconds=0, LastPausedSeconds=0;
+    double JobStageSeconds[8]={}, LastJobStageSeconds[8]={}, CompletedStageSeconds[8]={};
+    double JobAGVWaitSeconds=0, CompletedAGVWaitSeconds=0;
     FSTSObservation Observation;
     void SetDestinationReady(bool Ready);
     void SetHandoverVehicle(APortAGVActor* Vehicle);

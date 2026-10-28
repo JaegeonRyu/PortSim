@@ -148,6 +148,14 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
     O->SetNumberField(TEXT("agv_alignment_wait_seconds"),AGVAlignmentWait);
     O->SetNumberField(TEXT("paused_seconds"),PausedSeconds);
     O->SetNumberField(TEXT("last_job_seconds"),LastJobSeconds);
+    TArray<TSharedPtr<FJsonValue>> PhaseTimes;
+    double CompletedActive=0;
+    for(double Seconds:CompletedStageSeconds)
+    { CompletedActive+=Seconds; PhaseTimes.Add(MakeShared<FJsonValueNumber>(CompletedJobs?Seconds/CompletedJobs:0)); }
+    O->SetArrayField(TEXT("mean_cycle_stage_seconds"),PhaseTimes);
+    O->SetNumberField(TEXT("mean_cycle_seconds"),CompletedJobs?CompletedActive/CompletedJobs:0);
+    O->SetNumberField(TEXT("mean_cycle_agv_wait_seconds"),CompletedJobs?CompletedAGVWaitSeconds/CompletedJobs:0);
+    O->SetNumberField(TEXT("travel_response_ratio"),STSProfile.Dynamics.TravelResponseRatio);
     O->SetStringField(TEXT("cargo"),GetNameSafe(CargoActor));
     TArray<TSharedPtr<FJsonValue>> MapParts;
     auto MapPart=[&](const UStaticMeshComponent* Part){if(Part)MapParts.Add(MakeShared<FJsonValueObject>(DashboardLayout::Footprint(Part)));};
@@ -424,6 +432,11 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     Root->SetStringField(TEXT("generated_at"),FDateTime::UtcNow().ToIso8601());
     Root->SetStringField(TEXT("run_id"),FPaths::GetCleanFilename(ReportBase));
     Root->SetStringField(TEXT("control_session"),DashboardControlSession);
+    UpdateWorkerImpacts();
+    TArray<TSharedPtr<FJsonValue>> WorkerImpactValues;
+    for(const auto& E:WorkerImpacts)WorkerImpactValues.Add(Value(CopyRecord(E)));
+    Root->SetArrayField(TEXT("worker_impacts"),WorkerImpactValues);
+    Root->SetBoolField(TEXT("worker_intrusion_supported"),true);
     TArray<TSharedPtr<FJsonValue>> Results,Events;
     // The writer owns its entire JSON graph on another thread. Copy records,
     // including position arrays, before the game thread can prune its rings.
@@ -520,6 +533,8 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     Root->SetBoolField(TEXT("rain_enabled"),RainState.bRainEnabled);
     Root->SetNumberField(TEXT("rainfall_mm_per_hour"),RainState.bRainEnabled?RainState.RainfallMmPerHour:0.f);
     Root->SetObjectField(TEXT("surface_conditions"),SurfaceData(Surface,Friction));
+    const auto Environment=CaptureEnvironment();
+    if(Environment) Root->SetObjectField(TEXT("environment"),Environment);
     auto CentralRoad=Object();
     CentralRoad->SetNumberField(TEXT("center_y_m"),TerminalLayout::CentralRoadY);
     CentralRoad->SetNumberField(TEXT("width_m"),TerminalLayout::CentralRoadWidthM);
@@ -621,6 +636,17 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             if(STS && LaneCount==9)
             {
                 const int32 S=Crane->CraneID-YardCraneCount-1;
+                int32 Handovers=0,Placed=0,RecentHandovers=0;
+                for(const auto& C:Manifest) if(C.STS==S)
+                { Handovers+=C.STSHandoverAt>=0; Placed+=C.State==2;
+                    RecentHandovers+=C.STSHandoverAt>=0 && C.STSHandoverAt>SimulationTime-3600.; }
+                O->SetNumberField(TEXT("discharge_handover_count"),Handovers);
+                O->SetNumberField(TEXT("discharge_placed_count"),Placed);
+                O->SetNumberField(TEXT("discharge_elapsed_seconds"),SimulationTime);
+                O->SetNumberField(TEXT("discharge_moves_per_sim_hour"),SimulationTime>0?3600.*Handovers/SimulationTime:0);
+                O->SetNumberField(TEXT("yard_moves_per_sim_hour"),SimulationTime>0?3600.*Placed/SimulationTime:0);
+                O->SetNumberField(TEXT("last_hour_handover_count"),RecentHandovers);
+                O->SetBoolField(TEXT("last_hour_window_complete"),SimulationTime>=3600.);
                 int32 Ready=0,Support=0,RMG=0,Oldest=INDEX_NONE,Active=INDEX_NONE;
                 for(int32 I=0;I<Manifest.Num();++I)
                 {
@@ -628,7 +654,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
                     if(C.Actor.Get()==Crane->CargoActor) Active=I;
                     if((C.State!=0 && PreparedCargo[S]!=I) || !SourceAccessible(I) || !CanSTSService(S,I)) continue;
                     const FString Reason=YardAdmissionReason(I);
-                    Ready+=Reason.IsEmpty(); Support+=Reason==TEXT("yard_support_pending");
+                    Ready+=YardDispatchReady(I); Support+=Reason==TEXT("yard_support_pending");
                     RMG+=Reason==TEXT("rmg_approach_reserved") || Reason==TEXT("rmg_turn_clearance");
                     if(Oldest==INDEX_NONE || C.PlanningOrder<Manifest[Oldest].PlanningOrder) Oldest=I;
                 }
@@ -639,6 +665,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
                 else if(Ready>0) Reason=NextVehicles[S]!=INDEX_NONE?TEXT("agv_returning"):TEXT("vehicle_pending");
                 else if(Oldest!=INDEX_NONE) Reason=YardAdmissionReason(Oldest);
                 O->SetStringField(TEXT("dispatch_wait_reason"),Reason);
+                O->SetBoolField(TEXT("yard_advance_booking"),STSOwners[S]!=INDEX_NONE && Jobs[STSOwners[S]].bYardAdvanceBooking);
                 O->SetNumberField(TEXT("dispatch_ready_cargo_count"),Ready);
                 O->SetNumberField(TEXT("dispatch_support_blocked_count"),Support);
                 O->SetNumberField(TEXT("dispatch_rmg_blocked_count"),RMG);
@@ -751,6 +778,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
                     (V->Sensors.bControlledStop?TEXT("lidar_stop"):(V->Sensors.bFMSHold?TEXT("fms_hold"):(J.Stage?TEXT("working"):TEXT("idle"))))));
                 if(J.STS!=INDEX_NONE) O->SetStringField(TEXT("sts"),Equipment[YardCraneCount+J.STS]->GetName());
                 O->SetBoolField(TEXT("dispatch_eligible"),J.Stage==0 && V->CanAcceptWork());
+                O->SetBoolField(TEXT("yard_advance_booking"),J.bYardAdvanceBooking);
                 if(Fault.IsEmpty() && !Paused && !V->Sensors.bControlledStop && !V->Sensors.bFMSHold)
                 {
                     if(J.Stage==FSiteTransfer::ToCharge) O->SetStringField(TEXT("state"),TEXT("to_charge"));
@@ -792,8 +820,11 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     TArray<TSharedPtr<FJsonValue>> Vessels;
     if(LaneCount==9) for(int32 V=0;V<ConfiguredShips;++V)
     {
-        auto O=Object(); int32 Total=0,Unloaded=0,Placed=0;
+        auto O=Object(); int32 Total=0,Unloaded=0,Placed=0,LoadTotal=0,Loaded=0;
         for(const auto& C:Manifest) if(C.STS/3==V) { ++Total; Unloaded+=bool(C.HandoverMask&1); Placed+=C.State==2; }
+        for(const auto& C:ExportCargo) if(C.STS/3==V) { ++LoadTotal; Loaded+=C.State==2; }
+        O->SetNumberField(TEXT("loaded"),Loaded);
+        O->SetNumberField(TEXT("load_total"),LoadTotal);
         O->SetStringField(TEXT("id"),FString::Printf(TEXT("vessel-%d"),V+1));
         O->SetStringField(TEXT("name"),FString::Printf(TEXT("VESSEL-%02d"),V+1));
         O->SetStringField(TEXT("type"),TEXT("vessel"));
@@ -801,9 +832,13 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
         Vector(O,TEXT("position_m"),FVector(TerminalLayout::VesselCenterXM,TerminalLayout::VesselCenterY(V),0));
         TArray<TSharedPtr<FJsonValue>> Stowage;
         int32 StowageTiers=TerminalLayout::VesselTiers;
-        for(const auto& C:Manifest) if(C.STS/3==V)
+        for(const auto* Records:{&Manifest,&RetainedCargo,&ExportCargo})
+        for(const auto& C:*Records) if(C.STS/3==V)
         {
             auto Slot=Object();
+            const bool bLoad=Records==&ExportCargo;
+            Slot->SetStringField(TEXT("operation"),bLoad?TEXT("LOAD"):Records==&RetainedCargo?TEXT("RETAIN"):TEXT("DISCHARGE"));
+            if(bLoad) Slot->SetStringField(TEXT("load_status"),C.State==2?TEXT("complete"):C.State==1?TEXT("transfer"):TEXT("pending"));
             StowageTiers=FMath::Max(StowageTiers,C.ShipSlot.Tier);
             Slot->SetNumberField(TEXT("bay"),C.ShipSlot.Bay);
             Slot->SetNumberField(TEXT("row"),C.ShipSlot.Row);
@@ -866,7 +901,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
         O->SetNumberField(TEXT("started_at"),VesselStarted[V]);
         O->SetNumberField(TEXT("unloaded_at"),VesselUnloaded[V]);
         O->SetNumberField(TEXT("placed_at"),VesselPlaced[V]);
-        O->SetStringField(TEXT("state"),Unloaded==Total?TEXT("complete"):TEXT("working"));
+        O->SetStringField(TEXT("state"),Unloaded==Total && Loaded==LoadTotal?TEXT("complete"):TEXT("working"));
         Vessels.Add(Value(O)); Actors.Add(Value(O));
     }
     int32 YardTotals[TerminalLayout::YardBlockCount]={}, YardOccupied[TerminalLayout::YardBlockCount]={};
