@@ -561,6 +561,7 @@ void APortSiteLogistics::PrepareExecutableCargo(int32 Lane)
 void APortSiteLogistics::PrepareNextCargo(int32 Lane)
 {
     if(!CraneAvailable(YardCraneCount+Lane)) return;
+    if(STSOwners[Lane]!=INDEX_NONE && Jobs[STSOwners[Lane]].ExportIndex!=INDEX_NONE) return;
     if(LaneCount==9) { PrepareExecutableCargo(Lane); return; }
     if(STSOwners.IsValidIndex(Lane) && STSOwners[Lane]!=INDEX_NONE && Jobs[STSOwners[Lane]].Stage==10) return;
     if (PreparedCargo[Lane]==INDEX_NONE)
@@ -2553,7 +2554,7 @@ bool APortSiteLogistics::Drive(int32 Lane,float Dt)
         }
         return false;
     }
-    if (Job.Stage==3 && STSOwners[Job.STS]==Lane && FVector::Dist2D(Vehicle->GetActorLocation(),TransferQuay(Job))>1600) STSOwners[Job.STS]=INDEX_NONE;
+    if (Job.ExportIndex==INDEX_NONE && Job.Stage==3 && STSOwners[Job.STS]==Lane && FVector::Dist2D(Vehicle->GetActorLocation(),TransferQuay(Job))>1600) STSOwners[Job.STS]=INDEX_NONE;
     // Once clear of the yard's narrow handover lanes, align the empty vehicle
     // with the north/south road before entering the parking aisle.
     if (LaneCount!=9 && Job.Waypoint==1 && Job.Stage==5)
@@ -2872,7 +2873,7 @@ void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
     }
     for (const auto& Vehicle:Vehicles) Moving+=Vehicle->Speed>1.f;
     PeakMovingVehicles=FMath::Max(PeakMovingVehicles,Moving);
-    if (LaneCount==9) { AdvanceFleetBatteries(Dt); if(!Fault.IsEmpty()) return; ScheduleFleet(); ScheduleExport(); }
+    if (LaneCount==9) { AdvanceFleetBatteries(Dt); if(!Fault.IsEmpty()) return; ScheduleExport(); if(!Fault.IsEmpty()) return; ScheduleFleet(); }
     RecoverTrafficCycle();
     if(!Fault.IsEmpty()) return;
     // Age actual blocked road requests, with a capped pickup/STS-exit bonus.

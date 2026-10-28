@@ -108,7 +108,9 @@ function renderChrome(){
  const fleet=actors().filter(a=>['sts','agv','rmg'].includes(a.type)), running=fleet.filter(a=>a.state==='working').length;
  const kpi=(label,value,unit,foot,ic,progress)=>`<article class="kpi"><div class="kpi-icon">${icon(ic)}</div><div class="kpi-label">${label}</div><div class="kpi-value">${value}<small>${unit}</small></div><div class="kpi-foot">${foot}</div>${progress!=null?`<div class="progress"><span style="width:${Math.min(100,progress)}%"></span></div>`:''}</article>`;
  const completed=state?.delivered||0,total=state?.initial_ship||0;
- $('#kpis').innerHTML=kpi('운영 장비',state?num(fleet.length,0):'—','대',`STS ${counts.sts} · AGV ${counts.agv} · RMG ${counts.rmg}`,'crane')+kpi('현재 작업 중',state?num(running,0):'—','대',`${state?.paused?'운전 일시정지':live?'엔진 상태 기준':'최근 기록 기준'} · 오류 ${fleet.filter(a=>a.state==='fault').length}대`,'sensor')+kpi('야드 적재 완료',state?num(completed,0):'—',`/ ${num(total,0)}개`,`${total?num(completed/total*100):'0'}% 완료 · 선행 인양 ${state?.prefetched_jobs||0}건`,'box',total?completed/total*100:0)+kpi('실행시간',formatDuration(state?.elapsed_seconds??state?.simulation_seconds),'', `배속 반영 · ${state?.playback_rate??1}배속 · 시:분:초`,'clock');
+ const loaded=state?.loaded??0,loadTotal=state?.load_total??0;
+ const loadProgress=loadTotal?loaded/loadTotal*100:0;
+ $('#kpis').innerHTML=kpi('운영 장비',state?num(fleet.length,0):'—','대',`STS ${counts.sts} · AGV ${counts.agv} · RMG ${counts.rmg}`,'crane')+kpi('현재 작업 중',state?num(running,0):'—','대',`${state?.paused?'운전 일시정지':live?'엔진 상태 기준':'최근 기록 기준'} · 오류 ${fleet.filter(a=>a.state==='fault').length}대`,'sensor')+kpi('야드 적재 완료',state?num(completed,0):'—',`/ ${num(total,0)}개`,`${total?num(completed/total*100):'0'}% 완료 · 선행 인양 ${state?.prefetched_jobs||0}건`,'box',total?completed/total*100:0)+kpi('선적 완료',state?num(loaded,0):'—','/ '+num(loadTotal,0)+'개',loadTotal?num(loadProgress)+'% 완료':'선적 작업 없음','box',loadProgress)+kpi('실행시간',formatDuration(state?.elapsed_seconds??state?.simulation_seconds),'', `배속 반영 · ${state?.playback_rate??1}배속 · 시:분:초`,'clock');
  const mix=state?.container_size_counts;
  $('#footer-time').textContent=state?`기록 시각 ${new Date(state.generated_at).toLocaleString('ko-KR')}${mix?` · 20ft ${num(mix['20'],0)}개 / 40ft ${num(mix['40'],0)}개 / 45ft ${num(mix['45'],0)}개`:''}`:'시뮬레이션 데이터 대기';
 }
@@ -117,10 +119,12 @@ function map(){return renderTerminalOverview(state,terminalLayout,{selected,focu
 
 function stowagePlans(){
  const vessels=state?.vessels||[];
- return `<section class="panel stowage-panel"><div class="panel-head"><div><h2>선박별 선내 적재도</h2><p>시뮬레이션 Bay · Row · Tier 기준 · 칸을 선택하면 화물 상세를 표시합니다.</p></div><span class="live-label">${live?'● LIVE':'○ SNAPSHOT'}</span></div><div class="stowage-legend"><span class="aboard">선내</span><span class="transfer">이송 중</span><span class="landed">야드 완료</span><span class="waiting">후속 차수 대기</span><span>빈 칸: 초기 화물 없음</span></div><div class="stowage-vessels">${vessels.map(v=>{
+ return `<section class="panel stowage-panel"><div class="panel-head"><div><h2>선박별 선내 적재도</h2><p>시뮬레이션 Bay · Row · Tier 기준 · 칸을 선택하면 화물 상세를 표시합니다.</p></div><span class="live-label">${live?'● LIVE':'○ SNAPSHOT'}</span></div><div class="stowage-legend"><span class="aboard">선내</span><span class="transfer">이송 중</span><span class="landed">야드 완료</span><span class="waiting">후속 차수 대기</span><span class="load-pending">선적 예정 ↓</span><span class="load-transfer">선적 이송 중 ↗</span><span class="load-complete">선적 완료 ✓</span><span>빈 칸: 화물·선적 계획 없음</span></div><div class="stowage-vessels">${vessels.map(v=>{
   if(!Array.isArray(v.stowage))return `<article><h3>${esc(v.name)}</h3><p>적재도 데이터가 없습니다. 새 빌드에서 시뮬레이션을 실행해 주세요.</p></article>`;
   const slots=v.stowage, waves=[...new Set(slots.map(c=>c.wave))].sort((a,b)=>a-b);
   const aboard=slots.filter(c=>c.state==='Ship'&&!c.waiting).length;
+  const loads=slots.filter(c=>c.operation==='LOAD');
+  const loadDone=loads.filter(c=>c.load_status==='complete').length;
   const waiting=slots.filter(c=>c.waiting).length;
   const index=new Map();
   for(const c of slots){const key=`${c.wave}/${c.tier}/${c.row}/${c.bay}`;if(!index.has(key))index.set(key,[]);index.get(key).push(c);}
@@ -132,19 +136,21 @@ function stowagePlans(){
     cells+=`<span class="stowage-axis">${row}</span>`;
     for(let bay=1;bay<=v.stowage_bays;bay++){
      const occupants=index.get(`${wave}/${tier}/${row}/${bay}`);
-     if(!occupants){cells+='<span class="stowage-slot empty-slot" aria-label="초기 화물 없음"></span>';continue;}
+     if(!occupants){cells+='<span class="stowage-slot empty-slot" aria-label="화물·선적 계획 없음"></span>';continue;}
      cells+='<span class="stowage-cell">';
      for(const c of occupants){
-     const status=c.waiting?'waiting':c.state==='Ship'?'aboard':c.state==='Yard'?'landed':['STS','AGV','RMG'].includes(c.state)?'transfer':'unknown';
-     const description=`${c.name||'화물'} · Bay ${bay} / Row ${row} / Tier ${tier} · ${c.waiting?'후속 차수 대기':labels[c.state]||'상태 없음'}`;
-     cells+=`<button class="stowage-slot ${status} ${selected===c.actor_id?'selected':''}" ${c.actor_id?`data-actor="${esc(c.actor_id)}"`:'disabled'} title="${esc(description)}" aria-label="${esc(description)}">${c.state==='Yard'?'✓':c.waiting?'·':c.state==='Ship'?'■':'↗'}</button>`;
+     const isLoad=c.operation==='LOAD';
+     const loadStatus=c.load_status==='complete'?'complete':c.load_status==='transfer'?'transfer':'pending';
+     const status=isLoad?'load-'+loadStatus:c.waiting?'waiting':c.state==='Ship'?'aboard':c.state==='Yard'?'landed':['STS','AGV','RMG'].includes(c.state)?'transfer':'unknown';
+     const description=`${c.name||'화물'} · Bay ${bay} / Row ${row} / Tier ${tier} · ${isLoad?({pending:'선적 예정',transfer:'선적 이송 중',complete:'선적 완료'}[loadStatus])+' · '+(labels[c.state]||c.state):c.waiting?'후속 차수 대기':labels[c.state]||'상태 없음'}`;
+     cells+=`<button class="stowage-slot ${status} ${selected===c.actor_id?'selected':''}" ${c.actor_id?`data-actor="${esc(c.actor_id)}"`:'disabled'} title="${esc(description)}" aria-label="${esc(description)}">${isLoad?({pending:'↓',transfer:'↗',complete:'✓'}[loadStatus]):c.state==='Yard'?'✓':c.waiting?'·':c.state==='Ship'?'■':'↗'}</button>`;
      }
      cells+='</span>';
     }
    }
    layers+=`<div class="stowage-layer"><h4>${waves.length>1?`차수 ${wave} · `:''}Tier ${tier}</h4><div class="stowage-scroll"><div class="stowage-grid" style="grid-template-columns:28px repeat(${v.stowage_bays},minmax(22px,1fr))">${cells}</div></div></div>`;
   }
-  return `<article><h3>${esc(v.name)}</h3><p>선내 ${num(aboard,0)}개 · 대기 ${num(waiting,0)}개 · 전체 ${num(slots.length,0)}개</p>${layers||'<p>적재 화물이 없습니다.</p>'}</article>`;
+  return `<article><h3>${esc(v.name)}</h3><p>선내 ${num(aboard,0)}개 · 선적 완료 ${num(loadDone,0)} / ${num(loads.length,0)}개 · 대기 ${num(waiting,0)}개 · 전체 ${num(slots.length,0)}개</p>${layers||'<p>적재 화물이 없습니다.</p>'}</article>`;
  }).join('')||'<p class="empty">선박 데이터 수신 대기</p>'}</div></section>`;
 }
 

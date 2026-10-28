@@ -18,14 +18,34 @@ FVector APortSiteLogistics::TransferQuay(const FSiteTransfer& Job) const
 
 void APortSiteLogistics::ScheduleExport()
 {
-    // Discharge first, then load bottom-up. One export transfer reserves both
-    // cranes, so reversing the flow cannot deadlock an incoming discharge job.
-    if(Delivered!=Manifest.Num() || ExportCargo.IsEmpty() ||
-        Jobs.ContainsByPredicate([](const FSiteTransfer& J){return J.Stage!=0 && J.Stage!=FSiteTransfer::Charging;})) return;
+    if(ExportCargo.IsEmpty()) return;
     int32 Next=INDEX_NONE;
     for(int32 I=0;I<ExportCargo.Num();++I)
-        if(ExportCargo[I].State==0 && (Next==INDEX_NONE ||
-            ExportCargo[I].ShipSlot.Tier<ExportCargo[Next].ShipSlot.Tier)) Next=I;
+    {
+        const auto& Candidate=ExportCargo[I];
+        if(Candidate.State!=0 || !Yard.IsValidIndex(Candidate.PlannedSlot)) continue;
+        const auto& Slot=Yard[Candidate.PlannedSlot];
+        const int32 STS=Candidate.STS, RMG=Slot.Crane;
+        if(STSOwners[STS]!=INDEX_NONE || PreparedCargo[STS]!=INDEX_NONE || NextVehicles[STS]!=INDEX_NONE ||
+            !CraneAvailable(YardCraneCount+STS) || Equipment[YardCraneCount+STS]->IsBusy() ||
+            !CraneAvailable(RMG) || Equipment[RMG]->IsBusy() || RMGBusy[RMG] || BlocksBusy[Slot.Block] ||
+            YardApproachOwners[YardApproachKey(Slot)]!=INDEX_NONE) continue;
+        auto SameColumn=[&](const FSiteShipCargo& C)
+        {
+            return C.STS/3==STS/3 && C.ShipSlot.Bay==Candidate.ShipSlot.Bay &&
+                C.ShipSlot.Row==Candidate.ShipSlot.Row;
+        };
+        // Clear this column before loading; other columns can discharge concurrently.
+        if(Manifest.ContainsByPredicate([&](const FSiteShipCargo& C){return SameColumn(C) && C.State!=2;})) continue;
+        if(Candidate.ShipSlot.Tier>1)
+        {
+            auto Supports=[&](const FSiteShipCargo& C)
+            { return SameColumn(C) && C.ShipSlot.Tier==Candidate.ShipSlot.Tier-1; };
+            if(!RetainedCargo.ContainsByPredicate(Supports) &&
+                !ExportCargo.ContainsByPredicate([&](const FSiteShipCargo& C){return C.State==2 && Supports(C);})) continue;
+        }
+        if(Next==INDEX_NONE || Candidate.ShipSlot.Tier<ExportCargo[Next].ShipSlot.Tier) Next=I;
+    }
     if(Next==INDEX_NONE) return;
     const int32 Lane=Jobs.IndexOfByPredicate([this](const FSiteTransfer& J)
     {

@@ -774,8 +774,11 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     TArray<TSharedPtr<FJsonValue>> Vessels;
     if(LaneCount==9) for(int32 V=0;V<ConfiguredShips;++V)
     {
-        auto O=Object(); int32 Total=0,Unloaded=0,Placed=0;
+        auto O=Object(); int32 Total=0,Unloaded=0,Placed=0,LoadTotal=0,Loaded=0;
         for(const auto& C:Manifest) if(C.STS/3==V) { ++Total; Unloaded+=bool(C.HandoverMask&1); Placed+=C.State==2; }
+        for(const auto& C:ExportCargo) if(C.STS/3==V) { ++LoadTotal; Loaded+=C.State==2; }
+        O->SetNumberField(TEXT("loaded"),Loaded);
+        O->SetNumberField(TEXT("load_total"),LoadTotal);
         O->SetStringField(TEXT("id"),FString::Printf(TEXT("vessel-%d"),V+1));
         O->SetStringField(TEXT("name"),FString::Printf(TEXT("VESSEL-%02d"),V+1));
         O->SetStringField(TEXT("type"),TEXT("vessel"));
@@ -783,9 +786,13 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
         Vector(O,TEXT("position_m"),FVector(TerminalLayout::VesselCenterXM,TerminalLayout::VesselCenterY(V),0));
         TArray<TSharedPtr<FJsonValue>> Stowage;
         int32 StowageTiers=TerminalLayout::VesselTiers;
-        for(const auto& C:Manifest) if(C.STS/3==V)
+        for(const auto* Records:{&Manifest,&RetainedCargo,&ExportCargo})
+        for(const auto& C:*Records) if(C.STS/3==V)
         {
             auto Slot=Object();
+            const bool bLoad=Records==&ExportCargo;
+            Slot->SetStringField(TEXT("operation"),bLoad?TEXT("LOAD"):Records==&RetainedCargo?TEXT("RETAIN"):TEXT("DISCHARGE"));
+            if(bLoad) Slot->SetStringField(TEXT("load_status"),C.State==2?TEXT("complete"):C.State==1?TEXT("transfer"):TEXT("pending"));
             StowageTiers=FMath::Max(StowageTiers,C.ShipSlot.Tier);
             Slot->SetNumberField(TEXT("bay"),C.ShipSlot.Bay);
             Slot->SetNumberField(TEXT("row"),C.ShipSlot.Row);
@@ -848,7 +855,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
         O->SetNumberField(TEXT("started_at"),VesselStarted[V]);
         O->SetNumberField(TEXT("unloaded_at"),VesselUnloaded[V]);
         O->SetNumberField(TEXT("placed_at"),VesselPlaced[V]);
-        O->SetStringField(TEXT("state"),Unloaded==Total?TEXT("complete"):TEXT("working"));
+        O->SetStringField(TEXT("state"),Unloaded==Total && Loaded==LoadTotal?TEXT("complete"):TEXT("working"));
         Vessels.Add(Value(O)); Actors.Add(Value(O));
     }
     int32 YardTotals[TerminalLayout::YardBlockCount]={}, YardOccupied[TerminalLayout::YardBlockCount]={};
