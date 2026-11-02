@@ -20,6 +20,7 @@ const files = new Map([
   ['/recovery-view.mjs', ['recovery-view.mjs', 'text/javascript']],
   ['/control-view.mjs', ['control-view.mjs', 'text/javascript']],
   ['/terminal-map.mjs', ['terminal-map.mjs', 'text/javascript']],
+  ['/sts-wind-view.mjs', ['sts-wind-view.mjs', 'text/javascript']],
   ['/terminal-map.css', ['terminal-map.css', 'text/css']]
 ]);
 export function createDashboardServer({repo=defaultRepo}={}){
