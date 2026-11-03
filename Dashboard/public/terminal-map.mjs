@@ -85,9 +85,11 @@ export function renderTerminalOverview(state,layout,{selected=null,focus=null,mo
  for(const a of actors.filter(a=>a.type==='container'&&a.state==='Yard'&&xy(a.position_m)&&xy(a.dimensions_m)))
   h+=item(a,footprintRect({position_m:a.position_m,size_m:a.dimensions_m.slice(0,2),yaw_deg:a.rotation_deg?.[2]||0},'class="map-yard-cargo map-selection"'));
  h+=impactOverlay(state,focus,x=>x,y=>y,selected);
- for(const a of actors.filter(a=>['sts','rmg','agv'].includes(a.type))){
+ for(const a of actors.filter(a=>['sts','rmg','agv','rs'].includes(a.type))){
   const p=mapPosition(a);if(!xy(p))continue;const [x,y]=p;
-  if(a.type==='agv'){
+  if(a.type==='rs'){
+   h+=item(a,footprintRect({position_m:p,size_m:[9,3.2],yaw_deg:yaw},'class="map-selection" fill="#dc8d40" stroke="#805020"'));
+  }else if(a.type==='agv'){
    const yaw=a.rotation_deg?.[2]||0;
    h+=item(a,`<circle cx="${x}" cy="${y}" r="7" fill="transparent"/>`+footprintRect({position_m:p,size_m:[4.2,14.6],yaw_deg:yaw},`class="map-agv map-selection${a.payload_kg>0?' loaded':''}"`));
   }else{

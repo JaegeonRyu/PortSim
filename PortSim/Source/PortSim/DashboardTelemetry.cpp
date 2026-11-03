@@ -7,6 +7,7 @@
 #include "PortWorkingCrane.h"
 #include "PortContainerActor.h"
 #include "PortAGVActor.h"
+#include "PortSupportVehicle.h"
 #include "AGVReference.h"
 #include "SpreaderTelescope.h"
 #include "Components/SceneComponent.h"
@@ -805,6 +806,28 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             if(V->bDriveFault) O->SetStringField(TEXT("state"),TEXT("fault"));
             if(V->Emergency.Active)O->SetStringField(TEXT("state"),V->Emergency.Finished?TEXT("emergency_hold"):
                 V->Emergency.BrakeCommand?TEXT("emergency_braking"):TEXT("emergency_detection"));
+        }
+        else if(auto* RS=Cast<APortSupportVehicle>(A); RS && RS->EquipmentType==EPortSupportType::ReachStacker)
+        {
+            O->SetStringField(TEXT("type"),TEXT("rs"));
+            O->SetStringField(TEXT("name"),FString::Printf(TEXT("R/S-%02d"),RS->EquipmentNumber));
+            O->SetStringField(TEXT("state"),TEXT("idle"));
+            O->SetStringField(TEXT("loaded_recovery_status"),TEXT("복구 배정 대기"));
+            double Load=0;
+            for(const auto& Cargo:ShipContainers) if(Cargo->GetAttachParentActor()==RS)
+            {Load+=Cargo->MassKg;O->SetStringField(TEXT("cargo"),Cargo->GetName());}
+            O->SetNumberField(TEXT("payload_kg"),Load);
+            O->SetNumberField(TEXT("recovery_capacity_kg"),45000);
+            for(const auto& R:LoadedAGVRecoveries) if(R.Stacker.Get()==RS)
+            {
+                O->SetStringField(TEXT("state"),Paused?TEXT("paused"):TEXT("working"));
+                O->SetBoolField(TEXT("loaded_recovery_active"),true);
+                O->SetStringField(TEXT("loaded_recovery_status"),R.Status);
+                O->SetStringField(TEXT("failed_agv"),Vehicles[R.Failed]->GetName());
+                O->SetStringField(TEXT("replacement_agv"),Vehicles[R.Replacement]->GetName());
+                O->SetNumberField(TEXT("recovery_transferred_count"),R.Box);
+                O->SetNumberField(TEXT("recovery_cargo_count"),R.Cargo.Num());
+            }
         }
         else if(auto* C=Cast<APortContainerActor>(A))
         {
