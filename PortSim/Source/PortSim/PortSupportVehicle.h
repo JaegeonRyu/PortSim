@@ -13,6 +13,7 @@ class PORTSIM_API APortSupportVehicle : public APortEquipmentActor
     GENERATED_BODY()
 public:
     void Configure(EPortSupportType Type,int32 Number);
+    void PositionRecoverySpreader(FVector Position,FRotator Rotation,float LengthCm);
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) EPortSupportType EquipmentType=EPortSupportType::YardChassis;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 EquipmentNumber=0;
 };

@@ -42,12 +42,12 @@ bool APortSiteLogistics::ApplyDashboardCommand(const FJsonObject& C,FString& Err
     { Error=TEXT("명령 유효 시간이 지났습니다."); return false; }
     if(!C.TryGetStringField(TEXT("actor_id"),ActorID) || !C.TryGetStringField(TEXT("action"),Action) ||
         (Action!=TEXT("fail") && Action!=TEXT("fail_reboot") && Action!=TEXT("fail_sensor_repair") && Action!=TEXT("fail_gantry") && Action!=TEXT("repair") &&
-         Action!=TEXT("test_wet_worker") && Action!=TEXT("test_wet_unsecured") && Action!=TEXT("worker_enter") && Action!=TEXT("clear_worker")))
+         Action!=TEXT("replace_loaded_agv") && Action!=TEXT("test_wet_worker") && Action!=TEXT("test_wet_unsecured") && Action!=TEXT("worker_enter") && Action!=TEXT("clear_worker")))
     { Error=TEXT("지원하지 않는 명령입니다."); return false; }
     if(!Fault.IsEmpty()) { Error=TEXT("전체 안전 정지 원인을 먼저 해결하세요."); return false; }
     for(const auto& Crane:Equipment) if(Crane->GetName()==ActorID)
     {
-        if(Action.StartsWith(TEXT("test_")) || Action==TEXT("worker_enter") || Action==TEXT("clear_worker")){Error=TEXT("AGV 전용 돌발상황 명령입니다.");return false;}
+        if(Action==TEXT("replace_loaded_agv") || Action.StartsWith(TEXT("test_")) || Action==TEXT("worker_enter") || Action==TEXT("clear_worker")){Error=TEXT("AGV 전용 돌발상황 명령입니다.");return false;}
         if(!Crane->Fault.IsEmpty() && !Crane->IsEquipmentUnavailable())
         { Error=TEXT("센서 수리로 안전 오류를 해제할 수 없습니다."); return false; }
         if(Action==TEXT("repair")) Crane->RepairEquipment();
@@ -71,6 +71,9 @@ bool APortSiteLogistics::ApplyDashboardCommand(const FJsonObject& C,FString& Err
     }
     for(const auto& V:Vehicles) if(V->GetName()==ActorID)
     {
+        if(Action==TEXT("replace_loaded_agv")) return RequestLoadedAGVRecovery(Vehicles.IndexOfByKey(V),Error);
+        if(IsLoadedRecoveryVehicle(Vehicles.IndexOfByKey(V)) && Action!=TEXT("repair"))
+        {Error=TEXT("R/S 복구 중에는 추가 고장·돌발상황 명령을 사용할 수 없습니다.");return false;}
         if(Action==TEXT("clear_worker"))
         {
             if(!V->ClearEmergencyScenario(Error))return false;

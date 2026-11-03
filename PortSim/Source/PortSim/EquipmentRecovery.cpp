@@ -145,6 +145,7 @@ void APortSiteLogistics::ManageEquipmentFailures()
     for(int32 V=0;V<Jobs.Num();++V)
     {
         auto& J=Jobs[V];
+        if(IsLoadedRecoveryVehicle(V)) continue;
         J.bEquipmentWaiting=(Equipment.IsValidIndex(YardCraneCount+J.STS) &&
             Equipment[YardCraneCount+J.STS]->IsEquipmentUnavailable() && (J.Stage==6 || J.Stage==1 || J.Stage==10)) ||
             (Equipment.IsValidIndex(J.RMG) && Equipment[J.RMG]->IsEquipmentUnavailable() && J.Stage>=2 && J.Stage<=9);
@@ -370,6 +371,7 @@ bool APortSiteLogistics::ReplanYardGroup(const TSet<int32>& Affected,const TSet<
     }
     for(int32 I:Affected) if(const int32* V=Active.Find(I))
     {
+        if(IsLoadedRecoveryVehicle(*V)) return false;
         const auto& J=Jobs[*V];
         if(J.Stage==3 || J.Stage==4 || J.bRecoveryRoutePending) return false;
         if(J.Stage==9 && (Vehicles[*V]->Speed>.1f || !J.Route.IsValidIndex(J.Waypoint-1))) return false;

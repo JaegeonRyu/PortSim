@@ -4,6 +4,22 @@
 #include "Materials/MaterialInterface.h"
 #include "Engine/StaticMesh.h"
 
+void APortSupportVehicle::PositionRecoverySpreader(FVector Position,FRotator Rotation,float LengthCm)
+{
+    TInlineComponentArray<UStaticMeshComponent*> Parts(this);
+    for(auto* Part:Parts)
+    {
+        if(Part->GetName()==TEXT("Spreader"))
+        {Part->SetWorldLocationAndRotation(Position,Rotation);Part->SetWorldScale3D(FVector(2.4f,LengthCm/100.f,.5f));}
+        if(Part->GetName()==TEXT("TelescopicBoom"))
+        {
+            const FVector Base=GetActorLocation()+FVector(0,0,350),D=Position-Base;
+            Part->SetWorldLocation((Base+Position)*.5f);Part->SetWorldRotation(D.Rotation());
+            Part->SetWorldScale3D(FVector(D.Size()/100.f,1,1));
+        }
+    }
+}
+
 void APortSupportVehicle::Configure(EPortSupportType Type,int32 Number)
 {
     EquipmentType=Type; EquipmentNumber=Number;

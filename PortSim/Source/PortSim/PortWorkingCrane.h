@@ -56,6 +56,7 @@ public:
     bool IsWaitingForAGV() const;
     APortAGVActor* GetHandoverVehicle() const;
     bool IsBusy() const { return bJobActive; }
+    bool IsAGVHandoverComplete() const { return bAGVHandoverComplete; }
     UFUNCTION(BlueprintCallable,Category="Failures") void SetSensorFailure(bool Failed);
     UFUNCTION(BlueprintCallable,CallInEditor,Category="Failures") void RepairSensors() { SetSensorFailure(false); }
     UFUNCTION(BlueprintCallable,Category="Failures") void SetGantryFailure(bool Failed);
@@ -108,6 +109,9 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") TObjectPtr<APortContainerActor> CargoActor;
 private:
     friend class FEquipmentRecoveryTest;
+    friend class FRMGAGVHandoverTest;
+    bool SecureRMGToAGV();
+    bool bAGVHandoverComplete=false;
     bool bReverseTransfer=false;
     bool AGVAtDestination() const { return bSTS!=bReverseTransfer; }
     bool bDeferRopeVisuals=false, bRopeVisualsDirty=false;

@@ -20,6 +20,7 @@ bool FTerminalCheckpoint::CanPredict(const AQuayCrane& Owner)
     PortSimPerformance::FScope Timing(TEXT("replay_physics_boundary"));
     if(!Owner.bUnifiedTerminal || !IsValid(Owner.SiteLogistics) || !Owner.SiteLogistics->bReady ||
         UPhysicsSettings::Get()->bTickPhysicsAsync || UPhysicsSettings::Get()->PhysicsPrediction.bEnablePhysicsPrediction) return false;
+    if(Owner.SiteLogistics->HasLoadedAGVRecovery()) return false;
     // Terminal cargo is the common live-physics boundary. Check it before
     // enumerating every component in the world on each accelerated live tick.
     for(const auto& Cargo:Owner.SiteLogistics->ShipContainers)
@@ -151,6 +152,7 @@ void FTerminalCheckpoint::Capture(APortWorkingCrane& O)
     Values(O.bAutoSensorRecovery,O.SensorRepairMethod,O.SensorRebootSeconds,O.SensorTechnicianRepairSeconds,
         O.SensorSelfCheckSeconds,O.bAllowSensorFaultEvacuation,O.bIndependentTravelSafetyHealthy,O.bFaultEvacuating,
         O.bFaultEvacuationComplete,O.FaultEvacuationTargetY,O.SensorRepairElapsed,O.SensorRepairPhase,O.RecoveryStatus,O.bRailSafetyHold);
+    Values(O.bAGVHandoverComplete);
     Values(O.CargoActor,O.bReverseTransfer,O.bDeferRopeVisuals,O.bRopeVisualsDirty,O.ShipControlFraction,O.bDeferParts,
         O.bPartsDirty,O.SuspensionState,O.Pickup,O.LockProgress,O.PhysicalSeating,O.PlantAcceleration,O.LockedCargoTransform,O.SuspendedOffset);
     Values(O.HandoverAGV,O.AxisVelocity,O.WindVelocityMetersPerSecond,O.FogVisibilityMeters,O.RainCameraRangeScale,

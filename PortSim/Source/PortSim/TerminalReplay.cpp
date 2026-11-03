@@ -19,8 +19,12 @@
 
 namespace
 {
-    TAutoConsoleVariable<int32> BatchPhysics(TEXT("PortSim.BatchLivePhysics"),0,
+    TAutoConsoleVariable<int32> BatchPhysics(TEXT("PortSim.BatchLivePhysics"),1,
         TEXT("Batch forward-only terminal cargo physics at fixed 1/60-second steps."));
+    TAutoConsoleVariable<int32> LivePhysicsSteps(TEXT("PortSim.LivePhysicsMaxSteps"),16,
+        TEXT("Hard limit on live cargo physics steps per presentation (1..16)."));
+    TAutoConsoleVariable<float> LivePhysicsBudget(TEXT("PortSim.LivePhysicsBudgetMs"),8.f,
+        TEXT("Wall-time budget for live cargo physics per presentation (1..33 ms); one step always completes."));
     bool AdvancingPhysics=false;
     bool Predicting=false; // Game thread only. UObject work never crosses threads.
     TArray<FTerminalReplayLog> PendingLogs;
@@ -94,7 +98,14 @@ bool FTerminalReplay::AdvanceLivePhysics(AQuayCrane& Owner)
     ON_SCOPE_EXIT { Scene->SetUpForFrame(&Gravity,0.f,0.f,0.f,Settings->MaxSubstepDeltaTime,Settings->MaxSubsteps,false); };
     Owner.PlaybackClock->SetBufferedPlayback(true);
     State=TEXT("live_physics_batch");
-    const int32 Steps=static_cast<int32>(FMath::Clamp(FMath::FloorToDouble((Credit+1.e-9)*60.),0.,120.));
+    const int32 MaxSteps=FMath::Clamp(LivePhysicsSteps.GetValueOnGameThread(),1,16);
+    const float RequestedBudget=LivePhysicsBudget.GetValueOnGameThread();
+    const double BudgetSeconds=(FMath::IsFinite(RequestedBudget)?FMath::Clamp(RequestedBudget,1.f,33.f):8.f)/1000.;
+    // Drop excess wall-clock demand, never simulation steps. A slow machine
+    // runs below the requested rate instead of building an unbounded catch-up queue.
+    Credit=FMath::Clamp(Credit,0.,MaxSteps*UPortSimTimeStep::StepSeconds);
+    const int32 Steps=FMath::Min(MaxSteps,FMath::FloorToInt((Credit+1.e-9)/UPortSimTimeStep::StepSeconds));
+    const double Started=FPlatformTime::Seconds();
     const uint64 InputRevision=Revision;
     {
         TGuardValue<bool> Guard(AdvancingPhysics,true);
@@ -110,6 +121,7 @@ bool FTerminalReplay::AdvanceLivePhysics(AQuayCrane& Owner)
             if(Revision!=InputRevision) break;
             Credit-=UPortSimTimeStep::StepSeconds;
             if(!Owner.bAutoRunning || Owner.bAutoPaused || Owner.bEmergencyStop || !Owner.SiteLogistics->Fault.IsEmpty()) break;
+            if(FPlatformTime::Seconds()-Started>=BudgetSeconds) break;
         }
     }
     Owner.SiteLogistics->ExportDashboard(Owner.IsOperationPaused());
@@ -239,7 +251,9 @@ bool FTerminalReplay::Tick(AQuayCrane& Owner,double WallSeconds)
         // A release happened on the first predicted step. The displayed
         // checkpoint has already been restored; execute that step live once.
         bBoundary=false; State=TEXT("live_chaos"); Clock->SetBufferedPlayback(false);
-        Current.Reset(); Credit-=UPortSimTimeStep::StepSeconds;
+        Current.Reset();
+        if(AdvanceLivePhysics(Owner)) return true;
+        Credit-=UPortSimTimeStep::StepSeconds;
         return false;
     }
     if(DueSteps==0 && Available<Reserve && !bBoundary)

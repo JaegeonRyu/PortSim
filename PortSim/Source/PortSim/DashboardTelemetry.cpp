@@ -788,6 +788,17 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
                 O->SetArrayField(TEXT("route"),Route);
                 O->SetNumberField(TEXT("route_remaining_m"),Remaining);
             }
+            FString RecoveryReason;
+            O->SetBoolField(TEXT("can_replace_loaded_agv"),CanRecoverLoadedAGV(Lane,RecoveryReason));
+            O->SetStringField(TEXT("loaded_recovery_reason"),RecoveryReason);
+            O->SetBoolField(TEXT("loaded_recovery_active"),IsLoadedRecoveryVehicle(Lane));
+            for(const auto& R:LoadedAGVRecoveries) if(R.Failed==Lane || R.Replacement==Lane)
+            {
+                O->SetStringField(TEXT("loaded_recovery_status"),R.Status);
+                O->SetStringField(TEXT("replacement_agv"),Vehicles[R.Replacement]->GetName());
+                O->SetNumberField(TEXT("recovery_transferred_count"),R.Box);
+                O->SetNumberField(TEXT("recovery_cargo_count"),R.Cargo.Num());
+            }
             O->SetBoolField(TEXT("drive_failure"),V->bDriveFault);
             O->SetStringField(TEXT("fault"),V->bDriveFault?TEXT("주행 고장 · 위치와 화물을 유지하며 수리 대기"):TEXT(""));
             O->SetStringField(TEXT("fault_scope"),V->bDriveFault?TEXT("equipment"):TEXT(""));

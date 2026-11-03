@@ -66,6 +66,7 @@ void APortWorkingCrane::UpdateMovingShipSource(APortContainerActor* Cargo,FVecto
 void APortWorkingCrane::ClearSTSState()
 {
     bReverseTransfer=false;
+    bAGVHandoverComplete=false;
     AxisVelocity=PlantAcceleration=FVector::ZeroVector;
     Pickup=FSTSPickupController();
     for(int32 I=0;I<4;++I){LockProgress[I]=0;PhysicalSeating[I]=false;}

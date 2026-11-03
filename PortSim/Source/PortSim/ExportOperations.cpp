@@ -102,14 +102,10 @@ void APortSiteLogistics::AdvanceExport(int32 Lane,float Dt)
         Job.Stage=4;
         break;
     case 4:
-        if(RMG->IsBusy()) return;
-        if(!Cargo->GetActorLocation().Equals(Vehicle->CargoPosition(),10.f) || Vehicle->Speed>.1f)
+        if(!RMG->IsAGVHandoverComplete()) return;
+        if(Cargo->GetAttachParentActor()!=Vehicle || Cargo->GetBody()->IsSimulatingPhysics() ||
+            Cargo->LocationOwner!=ECargoOwner::AGV || !Cargo->GetActorLocation().Equals(Vehicle->CargoPosition(),10.f) || Vehicle->Speed>.1f)
         { Stop(TEXT("적하 RMG/AGV 정렬 오류")); return; }
-        Cargo->GetBody()->SetSimulatePhysics(false);
-        Cargo->SetActorLocationAndRotation(Vehicle->CargoPosition(),Vehicle->GetActorRotation(),false,nullptr,ETeleportType::TeleportPhysics);
-        Cargo->AttachToComponent(Vehicle->GetRootComponent(),FAttachmentTransformRules::KeepWorldTransform);
-        Cargo->LocationOwner=ECargoOwner::AGV;
-        Vehicle->SetPayload(Cargo->MassKg);
         Yard[Job.Slot].Occupied=false;
         Booking.HandoverMask|=1;
         Job.Stage=5; Job.ReturnSTS=Job.STS;

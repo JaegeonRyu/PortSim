@@ -1,10 +1,37 @@
 #include "TerminalReplay.h"
 #include "PortWorkingCrane.h"
 #include "PortContainerActor.h"
+#include "PortAGVActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+
+bool APortWorkingCrane::SecureRMGToAGV()
+{
+    if(bSTS || !bExternalJobs || !AGVAtDestination() || Stage!=5 || !bCarrying ||
+        !IsValid(CargoActor) || !IsValid(HandoverAGV) ||
+        !Observation.IsFresh(SimulationTime,STSProfile.SensorMaxAge) ||
+        !Observation.bAGVAligned || !AGVAligned() || !Observation.bCargoSupported || !CargoSupported() ||
+        !Observation.AllLocked() || !Observation.bLanded ||
+        Observation.SpreaderVelocity.Size()>STSProfile.SettleSpeed ||
+        !CargoActor->GetActorLocation().Equals(HandoverAGV->CargoPosition(),FMath::Min(10.f,STSProfile.LandingTolerance)) ||
+        CargoActor->GetActorUpVector().Z<.99f ||
+        CargoActor->GetAttachParentActor()!=this || CargoActor->GetBody()->IsSimulatingPhysics() ||
+        !DestinationClear()) return false;
+    // In this model, a verified rigid attachment represents the AGV cargo
+    // restraint. Preserve the measured seated pose; never snap an unsafe load.
+    if(!CargoActor->AttachToComponent(HandoverAGV->GetRootComponent(),FAttachmentTransformRules::KeepWorldTransform) ||
+        CargoActor->GetAttachParentActor()!=HandoverAGV)
+    {
+        Stop(TEXT("RMG receiving AGV cargo restraint failed"));
+        return false;
+    }
+    CargoActor->LocationOwner=ECargoOwner::AGV;
+    HandoverAGV->SetPayload(CargoActor->MassKg);
+    bAGVHandoverComplete=true;
+    return true;
+}
 
 void APortWorkingCrane::SampleRMGEnvironment()
 {

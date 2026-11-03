@@ -16,9 +16,10 @@ export function equipmentCommands({directory,readState}){
   if(input.run_id!==state.run_id || input.control_session!==state.control_session)return reply(409,'실행이 변경됐습니다. 새로고침하세요.');
   if(state.fault)return reply(409,'전체 안전 정지 원인을 먼저 해결하세요.');
   const actor=state.actors.find(a=>a.id===input.actor_id);
-  const actions=actor?.type==='agv'?['fail','repair','worker_enter','clear_worker']:['fail','fail_reboot','fail_sensor_repair','fail_gantry','repair'];
+  const actions=actor?.type==='agv'?['fail','repair','replace_loaded_agv','worker_enter','clear_worker']:['fail','fail_reboot','fail_sensor_repair','fail_gantry','repair'];
   if(!actor || !['sts','rmg','agv'].includes(actor.type) || !actions.includes(input.action))return reply(400,'지원하지 않는 장비 또는 명령입니다.');
   if(actor.fault && actor.fault_scope!=='equipment')return reply(409,'센서 수리로 안전 오류를 해제할 수 없습니다.');
+  if(input.action==='replace_loaded_agv' && !actor.can_replace_loaded_agv)return reply(409,actor.loaded_recovery_reason||'현재 화물 인계를 배정할 수 없습니다.');
   if(input.action==='worker_enter'&&(!Number.isFinite(input.worker_distance_m)||input.worker_distance_m<5||input.worker_distance_m>80))return reply(400,'작업자 진입 거리는 5~80m로 입력하세요.');
   await mkdir(directory,{recursive:true});
   let pending=0;
@@ -33,6 +34,7 @@ export function equipmentCommands({directory,readState}){
   if(pending>=32)return reply(429,'대기 중인 명령이 많습니다. 잠시 후 다시 시도하세요.');
   const id=randomUUID().replaceAll('-','');
   const command={id,run_id:state.run_id,control_session:state.control_session,actor_id:actor.id,action:input.action,created_at:new Date().toISOString()};
+  if(input.action==='replace_loaded_agv' && !actor.can_replace_loaded_agv)return reply(409,actor.loaded_recovery_reason||'현재 화물 인계를 배정할 수 없습니다.');
   if(input.action==='worker_enter')command.worker_distance_m=input.worker_distance_m;
   const temporary=path.join(directory,`${id}.tmp`),target=path.join(directory,`${id}.json`);
   await writeFile(temporary,JSON.stringify(command),{flag:'wx'});await rename(temporary,target);

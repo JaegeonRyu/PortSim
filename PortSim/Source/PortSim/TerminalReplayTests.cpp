@@ -155,27 +155,36 @@ bool FTerminalReplayCheckpointTest::RunTest(const FString& Parameters)
     };
     ResetDrop();
     Owner->TerminalReplay.Invalidate();
-    Owner->TerminalReplay.Credit=1.;
-    TestTrue(TEXT("Supported free cargo advances without checkpoint rewind"),Owner->TerminalReplay.AdvanceLivePhysics(*Owner));
+    // Complete a requested number of fixed steps across bounded presentations,
+    // including machines where the wall-time budget ends a batch early.
+    auto AdvanceSteps=[&](int32 Count,int32 Batch)
+    {
+        while(Count>0)
+        {
+            const uint64 Before=Owner->TerminalReplay.DisplayedSteps;
+            Owner->TerminalReplay.Credit=FMath::Min(Count,Batch)/60.;
+            if(!Owner->TerminalReplay.AdvanceLivePhysics(*Owner)) return false;
+            const int32 Completed=int32(Owner->TerminalReplay.DisplayedSteps-Before);
+            if(Completed<=0 || Completed>FMath::Min(Count,Batch)) return false;
+            Count-=Completed;
+        }
+        return true;
+    };
+    TestTrue(TEXT("Supported free cargo advances without checkpoint rewind"),AdvanceSteps(60,16));
     const double FullZ=Drop->GetActorLocation().Z,FullVz=DropBody->GetPhysicsLinearVelocity().Z;
     TestTrue(FString::Printf(TEXT("Batch advances one second of real gravity z=%.6f vz=%.6f gravity=%.6f"),FullZ,FullVz,World->GetGravityZ()),FullZ<99520. && FullZ>99480. && FullVz<-970. && FullVz>-990.);
     auto* Scene=World->GetPhysicsScene();
     Scene->StartFrame(); Scene->WaitPhysScenes(); Scene->EndFrame();
     TestTrue(TEXT("Enclosing zero-time physics frame does not integrate twice"),FMath::Abs(Drop->GetActorLocation().Z-FullZ)<1.e-6);
     ResetDrop();
-    for(int32 I=0;I<4;++I)
-    {
-        Owner->TerminalReplay.Credit=.25;
-        TestTrue(TEXT("Split fixed-step physics batch succeeds"),Owner->TerminalReplay.AdvanceLivePhysics(*Owner));
-    }
+    TestTrue(TEXT("Split fixed-step physics batch succeeds"),AdvanceSteps(60,4));
     TestTrue(TEXT("Batch partition preserves real physics position"),FMath::Abs(Drop->GetActorLocation().Z-FullZ)<.01);
     TestTrue(TEXT("Batch partition preserves real physics velocity"),FMath::Abs(DropBody->GetPhysicsLinearVelocity().Z-FullVz)<.01);
     auto* Floor=World->SpawnActor<APortContainerActor>();
     Floor->GetBody()->SetSimulatePhysics(false);
     Floor->SetActorLocation(FVector(1000000,1000000,0));
     ResetDrop(1000.);
-    Owner->TerminalReplay.Credit=2.;
-    TestTrue(TEXT("Contact batch succeeds"),Owner->TerminalReplay.AdvanceLivePhysics(*Owner));
+    TestTrue(TEXT("Contact batch succeeds"),AdvanceSteps(120,16));
     const double ContactZ=Drop->GetActorLocation().Z;
     TestTrue(TEXT("Real collision supports the falling cargo"),ContactZ>250. && ContactZ<270.);
     ResetDrop(1000.);
@@ -193,12 +202,13 @@ bool FTerminalReplayCheckpointTest::RunTest(const FString& Parameters)
     Owner->TerminalReplay.Invalidate();
     const double BeforePhysicsDebt=Owner->TerminalReplay.DisplayedSeconds();
     TestTrue(TEXT("Delayed cargo playback uses forward physics"),Owner->TerminalReplay.Tick(*Owner,.25));
-    TestEqual(TEXT("Physics catch-up is bounded to two seconds per presentation"),
-        Owner->TerminalReplay.DisplayedSeconds()-BeforePhysicsDebt,2.);
-    TestTrue(TEXT("Physics catch-up preserves remaining debt"),FMath::Abs(Owner->TerminalReplay.Credit-2.)<1.e-9);
-    TestTrue(TEXT("Next presentation consumes physics debt"),Owner->TerminalReplay.Tick(*Owner,0.));
-    TestEqual(TEXT("Physics catch-up preserves all requested time"),
-        Owner->TerminalReplay.DisplayedSeconds()-BeforePhysicsDebt,4.);
+    const double Advanced=Owner->TerminalReplay.DisplayedSeconds()-BeforePhysicsDebt;
+    TestTrue(TEXT("Physics work is bounded to sixteen fixed steps"),Advanced>0. && Advanced<=16./60.+1.e-9);
+    TestTrue(TEXT("Overload drops excess wall-time demand"),
+        FMath::Abs(Advanced+Owner->TerminalReplay.Credit-16./60.)<1.e-9);
+    TestTrue(TEXT("Next presentation consumes only bounded physics debt"),Owner->TerminalReplay.Tick(*Owner,0.));
+    TestTrue(TEXT("No unbounded catch-up survives a stall"),
+        Owner->TerminalReplay.DisplayedSeconds()-BeforePhysicsDebt<=16./60.+1.e-9);
     Owner->bAutoPaused=true;
     TestFalse(TEXT("Paused cargo returns to paused world path"),Owner->TerminalReplay.Tick(*Owner,5.));
     TestEqual(TEXT("Paused time is not retained as physics debt"),Owner->TerminalReplay.Credit,0.);

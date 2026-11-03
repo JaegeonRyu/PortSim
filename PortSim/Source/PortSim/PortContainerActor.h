@@ -11,7 +11,7 @@ class UStaticMeshComponent;
 class UTextRenderComponent;
 
 UENUM(BlueprintType)
-enum class ECargoOwner : uint8 { Ship, STS, AGV, RMG, Yard };
+enum class ECargoOwner : uint8 { Ship, STS, AGV, RMG, Yard, ReachStacker };
 
 UCLASS(Blueprintable)
 class PORTSIM_API APortContainerActor : public AActor

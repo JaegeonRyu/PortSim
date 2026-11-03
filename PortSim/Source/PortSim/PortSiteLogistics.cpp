@@ -2035,6 +2035,8 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
         const FVector DockingAxis=LaneCount==9 && Docking?
             (TrafficRecoveryTargets.Contains(Vehicle->VehicleID)?
                 (FMath::Abs(Vehicle->GetActorRightVector().X)>.999f?FVector(1,0,0):FVector(0,1,0)):
+             Job.Stage==FSiteTransfer::ToRecovery && Job.Route.Num()>1?
+                (Job.Route.Last()-Job.Route[Job.Route.Num()-2]).GetSafeNormal2D():
              Job.Stage==3?
                 FVector(1,0,0):FVector(0,1,0)):FVector::ZeroVector;
         Vehicle->SetFMSCommand(Target,Job.Waypoint,Job.Route.Num(),Docking,Acceptance,DockingAxis);
@@ -2583,7 +2585,7 @@ void APortSiteLogistics::RecoverTrafficCycle()
         while(Current>=100 && Jobs.IsValidIndex(Current-100) && !Chain.Contains(Current))
         {
             const int32 I=Current-100;
-            if(Vehicles[I]->Emergency.Active || (!Vehicles[I]->Sensors.bFMSHold && !Vehicles[I]->Sensors.bControlledStop) ||
+            if(IsLoadedRecoveryVehicle(I) || Vehicles[I]->Emergency.Active || (!Vehicles[I]->Sensors.bFMSHold && !Vehicles[I]->Sensors.bControlledStop) ||
                 Vehicles[I]->Speed>1.f || Jobs[I].StationaryTime<10) break;
             Chain.Add(Current);
             const int32* Blocker=RoadBlockers.Find(Current);
@@ -2866,6 +2868,7 @@ void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
         if (!Crane->Fault.IsEmpty() && !Crane->IsEquipmentUnavailable()) { Stop(Crane->Fault); return; }
     }
     ManageEquipmentFailures();
+    AdvanceLoadedAGVRecoveries(Dt);
     if(!Fault.IsEmpty()) return;
     int32 Moving=0;
     // Use the actual individually attached cargo, including both 20ft boxes.
@@ -2914,6 +2917,7 @@ void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
     for (int32 Lane:Order)
     {
         auto& Job=Jobs[Lane]; auto* Vehicle=Vehicles[Lane].Get();
+        if(IsLoadedRecoveryVehicle(Lane)) continue;
         if(Vehicle->Emergency.Active)
         {
             const bool WasFinished=Vehicle->Emergency.Finished;
@@ -3193,6 +3197,7 @@ void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
 void APortSiteLogistics::ResetLogistics()
 {
     if (!bReady) return;
+    ResetLoadedAGVRecoveries();
     PairedTrips=0; NextTripID=1;
     DashboardControlSession=FGuid::NewGuid().ToString(EGuidFormats::Digits);
     DashboardCommandResults.Reset(); SeenDashboardCommands.Reset(); RecoveryEvents.Reset(); WorkerImpacts.Reset(); RecoverySequence=0; NextControlPoll=0;
@@ -3261,6 +3266,7 @@ int32 APortSiteLogistics::InTransit() const { return Manifest.Num()-ShipRemainin
 
 bool APortSiteLogistics::Validate(FString& Error) const
 {
+    if(!ValidateLoadedAGVRecoveries(Error)) return false;
     if (!Fault.IsEmpty()) { Error=Fault; return false; }
     if (BaselineYard-InitialYard!=ReceivingCapacity || ReceivingCapacity<InitialShipCount()) { Error=TEXT("Insufficient receiving capacity"); return false; }
     if (LaneCount==9)
@@ -3475,6 +3481,12 @@ bool APortSiteLogistics::Validate(FString& Error) const
             OccupiedChargers.Add(Job.ChargingBay);
         }
         if (!Job.Stage) continue;
+        if(IsLoadedRecoveryVehicle(Lane))
+        {
+            if(Job.Stage!=FSiteTransfer::ToRecovery && Job.ExportIndex==INDEX_NONE)
+            { JobCargo.Add(Job.Cargo); ++Physical; if(Job.ExtraCargo!=INDEX_NONE){JobCargo.Add(Job.ExtraCargo);++Physical;} }
+            continue;
+        }
         if(Job.ExportIndex!=INDEX_NONE)
         {
             if(!ExportCargo.IsValidIndex(Job.ExportIndex) ||
