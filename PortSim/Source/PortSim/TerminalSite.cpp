@@ -132,13 +132,16 @@ void AQuayCrane::BuildTerminalSite()
         // These signs never change: keep their render texture, not a Slate
         // repaint for every simulation/render frame and offscreen sign.
         Text->SetManuallyRedraw(true);
-        Text->SetTickWhenOffscreen(false);
+        Text->SetTickWhenOffscreen(true); // Complete the one initial draw even outside the camera.
         Text->RegisterComponent();
         Text->SetSlateWidget(SNew(STextBlock)
             .Text(FText::FromString(Name))
             .Font(FCoreStyle::GetDefaultFontStyle("Regular",48))
             .ColorAndOpacity(FLinearColor::White)
             .Justification(ETextJustify::Center));
+        // Render the static sign once, then remove its per-world-step tick.
+        Text->SetTickMode(ETickMode::Disabled);
+        Text->RequestRenderUpdate();
     };
     // Visual zoning only: same one-based block/bay ranges as terminal-map.mjs.
     // No collision, slot classification, routing or cargo-allocation changes.

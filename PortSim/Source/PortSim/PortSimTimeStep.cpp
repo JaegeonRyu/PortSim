@@ -57,8 +57,8 @@ bool UPortSimTimeStep::UpdateTimeStep(UEngine* InEngine)
         FPlatformProcess::SleepNoStats(static_cast<float>(Deadline-Now));
         Now=FPlatformTime::Seconds();
     }
-    // Under load, report a lower achieved rate instead of enlarging the physics
-    // interval or catching up with a burst after an editor/debugger stall.
+    // Never enlarge the physics interval. Buffered terminal playback accounts
+    // for elapsed-time debt separately; the ordinary world clock has no queue.
     const double SimulationDelta=StepSeconds;
     // Preserve cadence across sleep/scheduler jitter rather than adding that
     // overshoot to every interval. Bound lag to one tick: no stall catch-up queue.

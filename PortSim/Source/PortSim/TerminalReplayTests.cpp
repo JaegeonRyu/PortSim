@@ -12,6 +12,8 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/CommandLine.h"
 #include "Misc/ScopeExit.h"
+#include "HAL/IConsoleManager.h"
+#include "Physics/Experimental/PhysScene_Chaos.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerminalReplayCheckpointTest,"PortSim.Playback.TerminalCheckpoint",
     EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
@@ -20,6 +22,10 @@ bool FTerminalReplayCheckpointTest::RunTest(const FString& Parameters)
     const FString Command=FCommandLine::Get();
     FCommandLine::Append(TEXT(" -PortSimShips=1 -PortSimCargo1=9 -PortSimEnvironmentSeed=166290927"));
     ON_SCOPE_EXIT { FCommandLine::Set(*Command); };
+    auto* BatchVariable=IConsoleManager::Get().FindConsoleVariable(TEXT("PortSim.BatchLivePhysics"));
+    const int32 PreviousBatch=BatchVariable->GetInt();
+    BatchVariable->Set(0,ECVF_SetByCode); // Exercise the unsupported/disabled fallback first.
+    ON_SCOPE_EXIT { BatchVariable->Set(PreviousBatch,ECVF_SetByCode); };
     const auto Init=UWorld::InitializationValues().AllowAudioPlayback(false).CreatePhysicsScene(true)
         .RequiresHitProxies(false).CreateNavigation(false).CreateAISystem(false);
     auto* World=UWorld::CreateWorld(EWorldType::Game,false,NAME_None,nullptr,true,ERHIFeatureLevel::Num,&Init);
@@ -68,6 +74,53 @@ bool FTerminalReplayCheckpointTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Real terminal enters buffered replay"),Owner->TerminalReplay.Tick(*Owner,1./60.));
     TestEqual(TEXT("8x display matches eight reference physics steps"),Site->SimulationTime,ReferenceTime);
     TestTrue(TEXT("Replay geometry equals continuous model"),Vehicle->GetActorLocation().Equals(ReferencePosition,1.e-6));
+    // A delayed render frame must not discard time or trigger a refill pause.
+    const double BeforeDelay=Site->SimulationTime;
+    TestTrue(TEXT("Delayed frame stays in replay"),Owner->TerminalReplay.Tick(*Owner,.1));
+    TestTrue(TEXT("100ms at 8x advances 800ms"),FMath::Abs(Site->SimulationTime-BeforeDelay-.8)<1.e-5);
+    for(const int32 Rate : {2,4,8,16})
+    {
+        Owner->TerminalReplay.Invalidate();
+        Owner->SimulationSpeed=Rate; Owner->ApplyPlaybackRate();
+        Owner->PlaybackClock->Shutdown(nullptr); Owner->PlaybackClock->Initialize(nullptr);
+        const double Start=Owner->TerminalReplay.DisplayedSeconds();
+        double Wall=0.;
+        for(int32 Frame=0;Frame<20;++Frame)
+        {
+            const double Dt=Frame%2==0?.04:.06;
+            Wall+=Dt;
+            TestTrue(TEXT("Variable cadence remains buffered"),Owner->TerminalReplay.Tick(*Owner,Dt));
+            const double Error=Wall*Rate-(Owner->TerminalReplay.DisplayedSeconds()-Start);
+            TestTrue(FString::Printf(TEXT("Playback tracks elapsed time rate=%d frame=%d error=%.9f"),Rate,Frame,Error),Error>=-1.e-5 && Error<Rate/60.+1.e-5);
+        }
+        TestTrue(FString::Printf(TEXT("No elapsed time lost rate=%d error=%.9f"),Rate,Wall*Rate-(Owner->TerminalReplay.DisplayedSeconds()-Start)),
+            FMath::Abs(Owner->TerminalReplay.DisplayedSeconds()-Start+Owner->TerminalReplay.Credit-Wall*Rate)<1.e-9);
+    }
+    // A multi-second stall is capped per presentation without losing the debt
+    // or retaining one full terminal snapshot for every skipped picture.
+    Owner->TerminalReplay.Invalidate();
+    Owner->SimulationSpeed=16; Owner->ApplyPlaybackRate();
+    Owner->PlaybackClock->Shutdown(nullptr); Owner->PlaybackClock->Initialize(nullptr);
+    const double BeforeStall=Owner->TerminalReplay.DisplayedSeconds();
+    TestTrue(TEXT("Large stall remains buffered"),Owner->TerminalReplay.Tick(*Owner,2.));
+    TestEqual(TEXT("Catch-up bounded to 960 fixed steps"),Owner->TerminalReplay.DisplayedSeconds()-BeforeStall,16.);
+    TestTrue(TEXT("Skipped pictures do not accumulate checkpoints"),Owner->TerminalReplay.Future.Num()<=2);
+    TestTrue(TEXT("Remaining debt is processed next presentation"),Owner->TerminalReplay.Tick(*Owner,0.));
+    TestEqual(TEXT("Two-second 16x stall preserves all 32 seconds"),Owner->TerminalReplay.DisplayedSeconds()-BeforeStall,32.);
+    const double BeforeBoundary=Owner->TerminalReplay.DisplayedSeconds();
+    auto* BoundaryBody=Site->Manifest[0].Actor->GetBody();
+    BoundaryBody->SetSimulatePhysics(true); BoundaryBody->PutAllRigidBodiesToSleep();
+    TestFalse(TEXT("Chaos boundary uses a real world step"),Owner->TerminalReplay.Tick(*Owner,.1));
+    TestTrue(TEXT("Chaos boundary retains unprocessed elapsed time"),
+        FMath::Abs(Owner->TerminalReplay.Credit-(1.6-1./60.))<1.e-9);
+    BoundaryBody->SetSimulatePhysics(false);
+    // Represent the model part of the one live world step; Chaos itself is not
+    // advanced by this accounting regression and is never checkpointed.
+    Owner->AdvanceTerminalReplayStep(1.f/60.f);
+    TestTrue(TEXT("Replay resumes after the boundary"),Owner->TerminalReplay.Tick(*Owner,0.));
+    TestTrue(TEXT("Boundary round-trip loses no playback time"),
+        FMath::Abs(Owner->TerminalReplay.DisplayedSeconds()-BeforeBoundary+Owner->TerminalReplay.Credit+1./60.-1.6)<1.e-9);
+    Owner->SimulationSpeed=8; Owner->ApplyPlaybackRate();
     const double Displayed=Site->SimulationTime;
     Owner->Environment->SetWindSpeedMetersPerSecond(7.f);
     TestEqual(TEXT("External input discards all future"),Owner->TerminalReplay.BufferedSeconds(),0.);
@@ -83,6 +136,76 @@ bool FTerminalReplayCheckpointTest::RunTest(const FString& Parameters)
     Body->SetSimulatePhysics(true); Body->PutAllRigidBodiesToSleep();
     TestFalse(TEXT("Sleeping Chaos body blocks prediction"),FTerminalCheckpoint::CanPredict(*Owner));
     Body->SetSimulatePhysics(false);
+    BatchVariable->Set(1,ECVF_SetByCode);
+    const double PreviousDrag=Site->STSProfile.Dynamics.WindDrag;
+    Site->STSProfile.Dynamics.WindDrag=0;
+    ON_SCOPE_EXIT { Site->STSProfile.Dynamics.WindDrag=PreviousDrag; };
+    auto* Drop=World->SpawnActor<APortContainerActor>();
+    Site->ShipContainers.Add(Drop);
+    Drop->LocationOwner=ECargoOwner::Yard;
+    auto* DropBody=Drop->GetBody();
+    DropBody->SetLinearDamping(0.f); // Analytic free-fall reference, independent of cargo drag tuning.
+    auto ResetDrop=[&](double Height=100000.)
+    {
+        DropBody->SetSimulatePhysics(false);
+        Drop->SetActorLocation(FVector(1000000,1000000,Height));
+        DropBody->SetSimulatePhysics(true);
+        DropBody->SetPhysicsLinearVelocity(FVector::ZeroVector);
+        DropBody->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+    };
+    ResetDrop();
+    Owner->TerminalReplay.Invalidate();
+    Owner->TerminalReplay.Credit=1.;
+    TestTrue(TEXT("Supported free cargo advances without checkpoint rewind"),Owner->TerminalReplay.AdvanceLivePhysics(*Owner));
+    const double FullZ=Drop->GetActorLocation().Z,FullVz=DropBody->GetPhysicsLinearVelocity().Z;
+    TestTrue(FString::Printf(TEXT("Batch advances one second of real gravity z=%.6f vz=%.6f gravity=%.6f"),FullZ,FullVz,World->GetGravityZ()),FullZ<99520. && FullZ>99480. && FullVz<-970. && FullVz>-990.);
+    auto* Scene=World->GetPhysicsScene();
+    Scene->StartFrame(); Scene->WaitPhysScenes(); Scene->EndFrame();
+    TestTrue(TEXT("Enclosing zero-time physics frame does not integrate twice"),FMath::Abs(Drop->GetActorLocation().Z-FullZ)<1.e-6);
+    ResetDrop();
+    for(int32 I=0;I<4;++I)
+    {
+        Owner->TerminalReplay.Credit=.25;
+        TestTrue(TEXT("Split fixed-step physics batch succeeds"),Owner->TerminalReplay.AdvanceLivePhysics(*Owner));
+    }
+    TestTrue(TEXT("Batch partition preserves real physics position"),FMath::Abs(Drop->GetActorLocation().Z-FullZ)<.01);
+    TestTrue(TEXT("Batch partition preserves real physics velocity"),FMath::Abs(DropBody->GetPhysicsLinearVelocity().Z-FullVz)<.01);
+    auto* Floor=World->SpawnActor<APortContainerActor>();
+    Floor->GetBody()->SetSimulatePhysics(false);
+    Floor->SetActorLocation(FVector(1000000,1000000,0));
+    ResetDrop(1000.);
+    Owner->TerminalReplay.Credit=2.;
+    TestTrue(TEXT("Contact batch succeeds"),Owner->TerminalReplay.AdvanceLivePhysics(*Owner));
+    const double ContactZ=Drop->GetActorLocation().Z;
+    TestTrue(TEXT("Real collision supports the falling cargo"),ContactZ>250. && ContactZ<270.);
+    ResetDrop(1000.);
+    for(int32 I=0;I<120;++I)
+    {
+        Owner->TerminalReplay.Credit=1./60.;
+        Owner->TerminalReplay.AdvanceLivePhysics(*Owner);
+        Scene->StartFrame(); Scene->WaitPhysScenes(); Scene->EndFrame();
+    }
+    TestTrue(TEXT("Contact result matches individual fixed physics frames"),FMath::Abs(Drop->GetActorLocation().Z-ContactZ)<.1);
+    Floor->Destroy();
+    ResetDrop();
+    Owner->SimulationSpeed=16; Owner->ApplyPlaybackRate();
+    Owner->PlaybackClock->Shutdown(nullptr); Owner->PlaybackClock->Initialize(nullptr);
+    Owner->TerminalReplay.Invalidate();
+    const double BeforePhysicsDebt=Owner->TerminalReplay.DisplayedSeconds();
+    TestTrue(TEXT("Delayed cargo playback uses forward physics"),Owner->TerminalReplay.Tick(*Owner,.25));
+    TestEqual(TEXT("Physics catch-up is bounded to two seconds per presentation"),
+        Owner->TerminalReplay.DisplayedSeconds()-BeforePhysicsDebt,2.);
+    TestTrue(TEXT("Physics catch-up preserves remaining debt"),FMath::Abs(Owner->TerminalReplay.Credit-2.)<1.e-9);
+    TestTrue(TEXT("Next presentation consumes physics debt"),Owner->TerminalReplay.Tick(*Owner,0.));
+    TestEqual(TEXT("Physics catch-up preserves all requested time"),
+        Owner->TerminalReplay.DisplayedSeconds()-BeforePhysicsDebt,4.);
+    Owner->bAutoPaused=true;
+    TestFalse(TEXT("Paused cargo returns to paused world path"),Owner->TerminalReplay.Tick(*Owner,5.));
+    TestEqual(TEXT("Paused time is not retained as physics debt"),Owner->TerminalReplay.Credit,0.);
+    Owner->bAutoPaused=false;
+    Site->ShipContainers.Remove(Drop);
+    TestFalse(TEXT("External free bodies exclude terminal physics batching"),Owner->TerminalReplay.AdvanceLivePhysics(*Owner));
+    Drop->Destroy();
     Owner->TerminalReplay.Invalidate(); Initial.Reset();
     return true;
 }

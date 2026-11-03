@@ -10,9 +10,9 @@ struct FTerminalReplayLog
     FString Message;
 };
 
-// Transactions run on the game thread, without rendering or publishing output.
-// Chaos is deliberately excluded: a free/sleeping rigid body or a transition
-// that releases one is a boundary at which normal live world ticking resumes.
+// Checkpoint transactions exclude Chaos history. Supported terminal cargo can
+// instead advance real physics forward in fixed steps, without checkpointing.
+// External bodies and unsupported physics settings retain normal world ticking.
 class FTerminalReplay
 {
 public:
@@ -24,9 +24,11 @@ public:
     uint64 Generation() const { return Revision; }
     float AchievedRate() const { return ActualRate; }
     static bool IsPredicting();
+    static bool IsAdvancingPhysics();
     static void Log(FName Category,ELogVerbosity::Type Verbosity,FString Message);
 private:
     friend class FTerminalReplayCheckpointTest;
+    bool AdvanceLivePhysics(AQuayCrane& Owner);
     TArray<TSharedPtr<FTerminalCheckpoint>> Future;
     TArray<int32> FutureSteps;
     TArray<TArray<FTerminalReplayLog>> FutureLogs;

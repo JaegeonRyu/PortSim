@@ -20,15 +20,14 @@ bool FTerminalCheckpoint::CanPredict(const AQuayCrane& Owner)
     PortSimPerformance::FScope Timing(TEXT("replay_physics_boundary"));
     if(!Owner.bUnifiedTerminal || !IsValid(Owner.SiteLogistics) || !Owner.SiteLogistics->bReady ||
         UPhysicsSettings::Get()->bTickPhysicsAsync || UPhysicsSettings::Get()->PhysicsPrediction.bEnablePhysicsPrediction) return false;
-    if(FTerminalReplay::IsPredicting())
-    {
-        // No engine ticks or external callbacks run inside a transaction. The
-        // unified model can only release its manifest cargo into Chaos. Check
-        // those bodies each step; the whole world is checked at entry below.
-        for(const auto& Cargo:Owner.SiteLogistics->ShipContainers)
-            if(!IsValid(Cargo) || Cargo->GetBody()->IsSimulatingPhysics()) return false;
-        return true;
-    }
+    // Terminal cargo is the common live-physics boundary. Check it before
+    // enumerating every component in the world on each accelerated live tick.
+    for(const auto& Cargo:Owner.SiteLogistics->ShipContainers)
+        if(!IsValid(Cargo) || Cargo->GetBody()->IsSimulatingPhysics()) return false;
+    // No engine ticks or external callbacks run inside a transaction; only
+    // manifest cargo can become dynamic there. At entry still check the whole
+    // world below, including sleeping/external rigid bodies.
+    if(FTerminalReplay::IsPredicting()) return true;
     // Sleeping rigid bodies also carry Chaos history and are not safe to rewind.
     for(TActorIterator<AActor> It(Owner.GetWorld());It;++It)
     {

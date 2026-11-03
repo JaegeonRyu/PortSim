@@ -19,6 +19,7 @@ public:
     void SetPlaybackRate(float Rate);
     void NotifyExternalInput();
     float GetEffectiveRate() const;
+    bool IsBufferedPlayback() const { return bBufferedPlayback; }
     void SetBufferedPlayback(bool Enabled) { bBufferedPlayback=Enabled; }
     void SetLiveFallback(bool Enabled) { bLiveFallback=Enabled; }
     uint64 GetInputRevision() const { return InputGate.Revision; }

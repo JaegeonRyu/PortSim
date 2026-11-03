@@ -457,7 +457,7 @@ void AQuayCrane::Tick(float DeltaSeconds)
     Super::Tick(DeltaSeconds);
     const float Dt=DeltaSeconds;
     const double ReplayNow=FPlatformTime::Seconds();
-    const double ReplayDelta=PreviousReplayWall>0?FMath::Clamp(ReplayNow-PreviousReplayWall,0.,.1):double(DeltaSeconds);
+    const double ReplayDelta=PreviousReplayWall>0?FMath::Max(ReplayNow-PreviousReplayWall,0.):double(DeltaSeconds);
     PreviousReplayWall=ReplayNow;
     const double PreviousReplaySeconds=TerminalReplay.DisplayedSeconds();
     const bool bReplayFrame=bUnifiedTerminal && TerminalReplay.Tick(*this,

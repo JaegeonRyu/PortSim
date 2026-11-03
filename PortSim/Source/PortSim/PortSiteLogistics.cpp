@@ -2672,8 +2672,8 @@ void APortSiteLogistics::Stop(const FString& Reason)
 
 void APortSiteLogistics::Advance(float Dt,bool Paused)
 {
-    if(bReady && !FTerminalReplay::IsPredicting()) ProcessDashboardCommands();
-    if(!FTerminalReplay::IsPredicting()) PortSimPerformance::Report(SimulationTime,Delivered,GetWorld());
+    if(bReady && !FTerminalReplay::IsPredicting() && !FTerminalReplay::IsAdvancingPhysics()) ProcessDashboardCommands();
+    if(!FTerminalReplay::IsPredicting() && !FTerminalReplay::IsAdvancingPhysics()) PortSimPerformance::Report(SimulationTime,Delivered,GetWorld());
     PortSimPerformance::FScope Profile(TEXT("site_advance"));
     if(!bReady) return;
     if(Paused || !Fault.IsEmpty() || Dt<=0.f)
@@ -2694,14 +2694,18 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
     const int32 Steps=FMath::FloorToInt((PendingSimulationSeconds+1.e-9)/TrafficStepSeconds);
     if(Steps<=0) { ApplyFreeCargoWind(); PrepareKinematicPhysicsFrame(); return; }
     bDeferringVisuals=true;
-    for(const auto& Box:ShipContainers) if(IsValid(Box)) Box->BeginVisualFrame();
+    // Detach/reattach all cargo artwork only when several traffic steps share
+    // one frame. At fixed 1/60-second playback there is at most one step;
+    // rebuilding 600 attachment hierarchies costs more than their pose updates.
+    const bool DeferArtwork=Steps>1;
+    if(DeferArtwork) for(const auto& Box:ShipContainers) if(IsValid(Box)) Box->BeginVisualFrame();
     for(const auto& Crane:Equipment) Crane->DeferRopeVisuals(true);
     ON_SCOPE_EXIT
     {
         for(const auto& Box:ShipContainers) if(IsValid(Box))
         {
             if(Box->LocationOwner==ECargoOwner::Ship && !Box->GetAttachParentActor()) Box->ApplySecuredMotionFraction(1.);
-            Box->EndVisualFrame();
+            if(DeferArtwork) Box->EndVisualFrame();
         }
         for(const auto& Crane:Equipment) Crane->DeferRopeVisuals(false);
         bDeferringVisuals=false;

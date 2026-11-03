@@ -1,5 +1,6 @@
 #if WITH_DEV_AUTOMATION_TESTS
 #include "PortSimTimeStep.h"
+#include "PortSimGameEngine.h"
 #include "HAL/PlatformProcess.h"
 #include "Misc/App.h"
 #include "Misc/AutomationTest.h"
@@ -48,6 +49,33 @@ bool FPlaybackFixedWorldStepTest::RunTest(const FString& Parameters)
     Clock->UpdateTimeStep(nullptr);
     TestEqual(TEXT("Input hold retains fixed physical step"),FApp::GetDeltaTime(),UPortSimTimeStep::StepSeconds);
     Clock->Shutdown(nullptr);
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPlaybackPresentationCadenceTest,"PortSim.Playback.PresentationCadence",
+    EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FPlaybackPresentationCadenceTest::RunTest(const FString& Parameters)
+{
+    auto* Engine=NewObject<UPortSimGameEngine>();
+    auto* Clock=NewObject<UPortSimTimeStep>(Engine);
+    Engine->SetCustomTimeStep(Clock);
+    ON_SCOPE_EXIT { Engine->SetCustomTimeStep(nullptr); };
+    for(float Rate:{2.f,4.f,8.f,16.f})
+    {
+        Clock->SetPlaybackRate(Rate);
+        Engine->StepsSincePresentation=0;
+        for(int32 Step=1;Step<=int32(Rate);++Step)
+        {
+            // Every draw deadline has already passed, as on an overloaded GPU.
+            Engine->NextPresentationWall=0;
+            Engine->RedrawViewports(false);
+            TestEqual(TEXT("Late render cannot consume every live physics step"),
+                Engine->StepsSincePresentation,Step<int32(Rate)?Step:0);
+        }
+    }
+    Clock->SetBufferedPlayback(true);
+    Engine->NextPresentationWall=0;
+    Engine->RedrawViewports(false);
+    TestEqual(TEXT("Buffered model batches need only one engine step per picture"),Engine->StepsSincePresentation,0);
     return true;
 }
 #endif

@@ -103,7 +103,7 @@ function renderChrome(){
  $('#sidebar-types').innerHTML=Object.entries(types).filter(([t])=>t!=='other').map(([t,[name,,color]])=>`<button class="type-nav" data-type="${t}"><span class="type-dot" style="background:${color}"></span>${name}<span class="count">${state?counts[t]:'—'}</span></button>`).join('');
  $('#sidebar-status').textContent=live?'실행 데이터 수신 중':state?'마지막 기록 조회 중':'시뮬레이터 실행 대기';
  const status=live?'엔진 연결됨':state?'저장된 실행 기록':'엔진 연결 대기';
- const playbackMode={replay:'사전 계산 재생',preparing:'재생 버퍼 준비',live_input_hold:'입력 반영 · 1배속',live_chaos:'자유 강체 · 실시간',live:'실시간'}[state?.playback_mode]||'실시간';
+ const playbackMode={replay:'사전 계산 재생',preparing:'재생 버퍼 준비',live_input_hold:'입력 반영 · 1배속',live_physics_batch:'자유 강체 · 고정 간격 배속',live_chaos:'자유 강체 · 실시간',live:'실시간'}[state?.playback_mode]||'실시간';
  $('#connection').className=`connection ${live?'live':''}`;
  $('#connection').innerHTML=`<span class="connection-dot"></span><strong>${status}</strong><span>· ${live?'1~2초 간격 갱신':state?`${num(age,0)}초 전 기록 · 현재 실시간 아님`:'언리얼에서 시뮬레이션을 실행하면 액터가 나타납니다.'}</span>${state?.paused?' · 일시정지':''}${state?' · '+weatherHoldStatus(state):''}<span class="tag">${state?esc(state.run_id.slice(0,21)): 'REFERENCE AVAILABLE'}</span>`;
  const fleet=actors().filter(a=>['sts','agv','rmg'].includes(a.type)), running=fleet.filter(a=>a.state==='working').length;

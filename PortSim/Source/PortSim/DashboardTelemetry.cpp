@@ -373,7 +373,7 @@ void APortSiteLogistics::RecordVesselEvent(int32 CargoIndex,bool Placed)
 
 void APortSiteLogistics::ExportDashboard(bool Paused,bool Force)
 {
-    if(FTerminalReplay::IsPredicting()) return;
+    if(FTerminalReplay::IsPredicting() || FTerminalReplay::IsAdvancingPhysics()) return;
     using namespace Dashboard;
     if(!bReady || (!Force && FPlatformTime::Seconds()<NextDashboardWall)) return;
     // Bound work to one snapshot: slow storage must not create a growing queue.
