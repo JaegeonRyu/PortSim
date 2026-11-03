@@ -18,6 +18,8 @@
 
 ## AGV — AGV 배차·교통·센서·물리
 
+- [적재 AGV 고장 시 R/S 인계·대시보드 사용](Safety/LoadedAGVRecovery.md)
+
 - [자동화 컨테이너 터미널에서의 AGV 충돌 방지 및 교착 해결 방안.pdf](<AGV/자동화 컨테이너 터미널에서의 AGV 충돌 방지 및 교착 해결 방안.pdf>)
 - [AGV 돌발상황 통합 (2026-10-24)](<AGV/AGV_Emergency.md>)
 - [AGV 노면 슬립·CoG 안정성 (2026-10-22)](<AGV/AGV_Physics.md>)

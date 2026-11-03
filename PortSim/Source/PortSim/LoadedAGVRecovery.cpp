@@ -70,6 +70,11 @@ bool APortSiteLogistics::CanRecoverLoadedAGV(int32 V,FString& Error) const
 // not an OEM reach-stacker dynamics/load-chart model.
 bool APortSiteLogistics::PlanLoadedRecoveryRoad(FVector Start,FVector Goal,FVector Axis,int32 Depot,TArray<FVector>& Route) const
 {
+    // Road graph edges are axis aligned. Measured headings contain small
+    // steering residuals even after a straight-road stop.
+    if(FMath::Max(FMath::Abs(Axis.X),FMath::Abs(Axis.Y))<.999f) return false;
+    Axis=FMath::Abs(Axis.X)>FMath::Abs(Axis.Y)?FVector(FMath::Sign(Axis.X),0,0):FVector(0,FMath::Sign(Axis.Y),0);
+    const bool Stacker=Depot==INDEX_NONE;
     FAGVRoadNetwork N;
     auto P=[](float X,float Y){return FVector(TerminalLayout::SiteCmX(X),Y,0);};
     const float South=TerminalLayout::AGVSouthReturnY,North=TerminalLayout::AGVNorthInboundY;
@@ -107,6 +112,10 @@ bool APortSiteLogistics::PlanLoadedRecoveryRoad(FVector Start,FVector Goal,FVect
         const double T=FMath::Clamp(FVector::DotProduct(Approach-Road.A,D)/D.SizeSquared(),0.,1.);
         const FVector On=Road.A+D*T;
         if(FVector::Dist2D(On,Approach)>3500) continue;
+        // A short perpendicular spur cannot fit the corner fillet. Let the
+        // graph use a farther road instead of selecting an unroundable path.
+        const double Spur=FVector::Dist2D(On,Approach);
+        if(Spur>.1 && Spur<AGVReference::MinimumInnerTurnRadiusCm+100) continue;
         N.Add(On,Approach,true); Connected=true;
     }
     if(!Connected) return false;
@@ -116,7 +125,7 @@ bool APortSiteLogistics::PlanLoadedRecoveryRoad(FVector Start,FVector Goal,FVect
     {
         double Cost=0;
         for(const auto& V:Vehicles) if(V->bDriveFault && !V->GetActorLocation().Equals(Start,10) &&
-            AGVTrafficGeometry::SweptChassisIntersects(A,B,V->GetActorLocation(),V->GetActorRightVector(),730,210,50)) Cost+=1.e9;
+            AGVTrafficGeometry::SweptChassisIntersects(A,B,V->GetActorLocation(),V->GetActorRightVector(),Stacker?450:730,Stacker?170:210,50,730,210)) Cost+=1.e9;
         return Cost;
     };
     if(!N.Find(Start,Goal,Raw,ObstacleCost)) return false;
@@ -145,6 +154,12 @@ bool APortSiteLogistics::RequestLoadedAGVRecovery(int32 Failed,FString& Error)
     {Error=TEXT("인계할 화물 또는 대체 AGV 하중을 확인하세요.");return false;}
     // Parallel receiving bay, with the stacker between the two stopped decks.
     const FVector Axis=Old->GetActorRightVector();
+    bool AvailableAGV=false,AvailableRS=false,AGVRouteFound=false;
+    for(int32 V=0;V<Jobs.Num();++V)
+        AvailableAGV|=V!=Failed && !Jobs[V].Stage && Vehicles[V]->CanAcceptWork() && !IsLoadedRecoveryVehicle(V);
+    for(TActorIterator<APortSupportVehicle> It(GetWorld());It;++It)
+        AvailableRS|=It->EquipmentType==EPortSupportType::ReachStacker &&
+            !LoadedAGVRecoveries.ContainsByPredicate([&](const auto& Other){return Other.Stacker.Get()==*It;});
     for(int32 Side:{1,-1})
     {
         R.Target=Old->GetActorLocation()+Old->GetActorForwardVector()*float(Side*900);
@@ -156,6 +171,7 @@ bool APortSiteLogistics::RequestLoadedAGVRecovery(int32 Failed,FString& Error)
             if(V==Failed || Jobs[V].Stage || !Vehicles[V]->CanAcceptWork() || IsLoadedRecoveryVehicle(V)) continue;
             TArray<FVector> Route;
             if(!PlanLoadedRecoveryRoad(Vehicles[V]->GetActorLocation(),R.Target,Axis,V,Route)) continue;
+            AGVRouteFound=true;
             for(TActorIterator<APortSupportVehicle> It(GetWorld());It;++It)
             {
                 if(It->EquipmentType!=EPortSupportType::ReachStacker ||
@@ -170,7 +186,10 @@ bool APortSiteLogistics::RequestLoadedAGVRecovery(int32 Failed,FString& Error)
             }
         }
     }
-    Error=TEXT("가용 AGV·R/S 또는 안전한 현장 접근 경로가 없습니다. 장비와 작업 공간 확보 후 다시 배정하세요.");
+    Error=!AvailableAGV?TEXT("배정 가능한 빈 정상 AGV가 없습니다."):
+        !AvailableRS?TEXT("배정 가능한 R/S가 없습니다. 다른 복구 완료 후 다시 배정하세요."):
+        !AGVRouteFound?TEXT("대체 AGV의 현장 접근 경로를 확보하지 못했습니다."):
+        TEXT("R/S의 현장 접근 경로를 확보하지 못했습니다.");
     return false;
 }
 
@@ -197,7 +216,7 @@ void APortSiteLogistics::AdvanceLoadedAGVRecoveries(float Dt)
                 const FVector Next=FMath::VInterpConstantTo(P,Goal,Dt,200.f);
                 bool Clear=true;
                 for(const auto& V:TrafficVehicles) if(IsValid(V) &&
-                    AGVTrafficGeometry::SweptChassisIntersects(P,Next,V->GetActorLocation(),V->GetActorRightVector(),450,170,50)) {Clear=false;break;}
+                    AGVTrafficGeometry::SweptChassisIntersects(P,Next,V->GetActorLocation(),V->GetActorRightVector(),450,170,50,730,210)) {Clear=false;break;}
                 if(Clear)
                 {
                     RS->SetActorLocation(Next);

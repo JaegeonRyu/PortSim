@@ -88,7 +88,7 @@ export function renderTerminalOverview(state,layout,{selected=null,focus=null,mo
  for(const a of actors.filter(a=>['sts','rmg','agv','rs'].includes(a.type))){
   const p=mapPosition(a);if(!xy(p))continue;const [x,y]=p;
   if(a.type==='rs'){
-   h+=item(a,footprintRect({position_m:p,size_m:[9,3.2],yaw_deg:yaw},'class="map-selection" fill="#dc8d40" stroke="#805020"'));
+   h+=item(a,footprintRect({position_m:p,size_m:[9,3.2],yaw_deg:a.rotation_deg?.[2]||0},'class="map-selection" fill="#dc8d40" stroke="#805020"')+`<text x="${x+5}" y="${y-5}" class="crane-map-label">${esc(a.name)}</text>`);
   }else if(a.type==='agv'){
    const yaw=a.rotation_deg?.[2]||0;
    h+=item(a,`<circle cx="${x}" cy="${y}" r="7" fill="transparent"/>`+footprintRect({position_m:p,size_m:[4.2,14.6],yaw_deg:yaw},`class="map-agv map-selection${a.payload_kg>0?' loaded':''}"`));
@@ -102,5 +102,5 @@ export function renderTerminalOverview(state,layout,{selected=null,focus=null,mo
  }
  const {minX,minY,width,height}=viewport,scale=mode==='depot'?25:100;
  h+=`<g class="map-scale" transform="translate(${minX+width-140} ${minY+height-25})" pointer-events="none"><path d="M0 -5v5h${scale}v-5"/><text x="${scale/2}" y="-9" text-anchor="middle">${scale}m</text></g>`;
- return `<section class="panel terminal-overview" data-map-mode="${esc(mode)}">${head}<div class="terminal-map-wrap"><svg class="terminal-world-map" viewBox="${minX} ${minY} ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="동일 축척의 실제 엔진 터미널 배치 지도"><defs><clipPath id="terminal-plan-clip"><rect x="${minX}" y="${minY}" width="${width}" height="${height}"/></clipPath></defs><g clip-path="url(#terminal-plan-clip)">${h}</g></svg></div><div class="map-caption"><span>X 내륙 → · Y 부두축 ↓ · 가로/세로 동일 축척</span><span>슬롯 구획: 엔진 배치 · 채워진 칸: 실제 적재 화물 · 색상 구역: 대시보드 전용</span></div><div class="map-plan-key"><span><i class="key-road"></i>실제 포장면</span><span><i class="key-yard"></i>야드 슬롯</span><span><i class="key-reefer"></i>냉동</span><span><i class="key-dangerous"></i>위험물</span><span><i class="key-chemical"></i>유해화학물</span><span><i class="key-agv"></i>AGV 실제 차체</span><span>7열 · 빈 공간 · 6열</span></div></section>`;
+ return `<section class="panel terminal-overview" data-map-mode="${esc(mode)}">${head}<div class="terminal-map-wrap"><svg class="terminal-world-map" viewBox="${minX} ${minY} ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="동일 축척의 실제 엔진 터미널 배치 지도"><defs><clipPath id="terminal-plan-clip"><rect x="${minX}" y="${minY}" width="${width}" height="${height}"/></clipPath></defs><g clip-path="url(#terminal-plan-clip)">${h}</g></svg></div><div class="map-caption"><span>X 내륙 → · Y 부두축 ↓ · 가로/세로 동일 축척</span><span>슬롯 구획: 엔진 배치 · 채워진 칸: 실제 적재 화물 · 색상 구역: 대시보드 전용</span></div><div class="map-plan-key"><span><i class="key-road"></i>실제 포장면</span><span><i class="key-yard"></i>야드 슬롯</span><span><i class="key-reefer"></i>냉동</span><span><i class="key-dangerous"></i>위험물</span><span><i class="key-chemical"></i>유해화학물</span><span><i class="key-agv"></i>AGV 실제 차체</span><span><i style="background:#dc8d40"></i>R/S 리치 스태커</span><span>7열 · 빈 공간 · 6열</span></div></section>`;
 }
