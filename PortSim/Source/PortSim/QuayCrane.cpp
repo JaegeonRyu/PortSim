@@ -1,4 +1,5 @@
 #include "QuayCrane.h"
+#include "PortSimulationClock.h"
 #include "TerminalLayout.h"
 #include "PortSiteLogistics.h"
 #include "PortSimTimeStep.h"
@@ -901,6 +902,36 @@ void APortSimHUD::DrawHUD()
     DrawText(CranePawn->bHUDVisible?TEXT("HUD 숨기기"):TEXT("HUD 표시"),FLinearColor(0.4f,1.f,1.f),
         TogglePosition.X+10.f*Scale,TogglePosition.Y+7.f*Scale,GEngine->GetSmallFont(),TextScale);
     AddHitBox(TogglePosition,ToggleSize,TEXT("TogglePortHUD"),true,100);
+    {
+        const double Time=PortSimulationClock::TimeOfDaySeconds(CranePawn->AutoElapsed);
+        const int32 Hour=static_cast<int32>(Time/3600.0);
+        const int32 Minute=static_cast<int32>(Time/60.0)%60;
+        const int32 DisplayHour=Hour%12==0?12:Hour%12;
+        const int32 Digits[4]={DisplayHour/10,DisplayHour%10,Minute/10,Minute%10};
+        const float X=Canvas->SizeX-188.f*Scale,Y=53.f*Scale;
+        const FLinearColor Lit(.26f,1.f,.77f),Dim(.08f,.24f,.21f);
+        DrawRect(FLinearColor(.015f,.04f,.055f,.96f),X,Y,172.f*Scale,92.f*Scale);
+        const uint8 Masks[10]={0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,0x07,0x7f,0x6f};
+        auto Segment=[&](float SX,float SY,float W,float H,bool On)
+        { DrawRect(On?Lit:Dim,X+SX*Scale,Y+SY*Scale,W*Scale,H*Scale); };
+        for(int32 I=0;I<4;++I)
+        {
+            const float DX=9.f+I*32.f+(I>=2?9.f:0.f);
+            const uint8 Mask=Masks[Digits[I]];
+            Segment(DX+4,8,18,3,Mask&1); Segment(DX+23,11,3,17,Mask&2);
+            Segment(DX+23,32,3,17,Mask&4); Segment(DX+4,49,18,3,Mask&8);
+            Segment(DX+1,32,3,17,Mask&16); Segment(DX+1,11,3,17,Mask&32);
+            Segment(DX+4,29,18,3,Mask&64);
+        }
+        Segment(70,20,3,4,true); Segment(70,38,3,4,true);
+        DrawText(Hour<12?TEXT("AM"):TEXT("PM"),Lit,X+142.f*Scale,Y+19.f*Scale,GEngine->GetSmallFont(),.75f*Scale);
+        const auto* Weather=CranePawn->GetEnvironment();
+        const float Temperature=PortSimulationClock::TemperatureCelsius(CranePawn->AutoElapsed,
+            Weather&&Weather->IsSnowEnabled(),Weather?Weather->GetSnowfallMmPerHour():0.f,
+            Weather&&Weather->IsRainEnabled(),Weather?Weather->GetRainfallMmPerHour():0.f);
+        DrawText(FString::Printf(TEXT("%.1f C"),Temperature),
+            Lit,X+12.f*Scale,Y+63.f*Scale,GEngine->GetSmallFont(),Scale);
+    }
     if (!CranePawn->bHUDVisible) return;
     if (const auto* Environment=CranePawn->GetEnvironment())
     { DrawWindCompass(*Environment,Scale); DrawSeaState(*Environment,Scale); }
