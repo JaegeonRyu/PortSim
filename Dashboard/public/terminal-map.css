@@ -1,7 +1,8 @@
 .terminal-overview .panel-head{align-items:flex-start;flex-wrap:wrap}
 .overview-actions{display:flex;align-items:flex-start;justify-content:flex-end;gap:12px;flex-wrap:wrap;margin-left:auto}.terminal-clock{background:#102d33;border:1px solid #245d57;border-radius:7px;padding:5px 9px;color:#6deac1;text-align:right;min-width:135px}.terminal-clock svg{display:block;width:130px;height:45px}.terminal-clock .lit{fill:#63e9b7}.terminal-clock .dim{fill:#22473e}.terminal-clock text{fill:#63e9b7;font:24px monospace}.terminal-clock span{display:block;font:10px monospace;letter-spacing:1px}
 .map-view-controls{display:flex;gap:5px;flex-wrap:wrap}
-.terminal-map-wrap{background:#e5f0f1;padding:12px;overflow:hidden}
+.terminal-map-wrap{position:relative;background:#e5f0f1;padding:12px;overflow:hidden}
+.terminal-map-wrap>.terminal-clock{position:absolute;top:16px;right:16px;z-index:2;pointer-events:none;box-shadow:0 4px 16px #123e3c22}
 .terminal-world-map{display:block;width:100%;height:660px;isolation:isolate}
 .terminal-overview[data-map-mode="gap"] .terminal-world-map{height:420px}
 .terminal-land{fill:#eef1eb;stroke:#b5c9c2;stroke-width:1}

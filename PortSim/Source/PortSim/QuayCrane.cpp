@@ -925,7 +925,11 @@ void APortSimHUD::DrawHUD()
         }
         Segment(70,20,3,4,true); Segment(70,38,3,4,true);
         DrawText(Hour<12?TEXT("AM"):TEXT("PM"),Lit,X+142.f*Scale,Y+19.f*Scale,GEngine->GetSmallFont(),.75f*Scale);
-        DrawText(FString::Printf(TEXT("%.1f C"),PortSimulationClock::TemperatureCelsius(CranePawn->AutoElapsed)),
+        const auto* Weather=CranePawn->GetEnvironment();
+        const float Temperature=PortSimulationClock::TemperatureCelsius(CranePawn->AutoElapsed,
+            Weather&&Weather->IsSnowEnabled(),Weather?Weather->GetSnowfallMmPerHour():0.f,
+            Weather&&Weather->IsRainEnabled(),Weather?Weather->GetRainfallMmPerHour():0.f);
+        DrawText(FString::Printf(TEXT("%.1f C"),Temperature),
             Lit,X+12.f*Scale,Y+63.f*Scale,GEngine->GetSmallFont(),Scale);
     }
     if (!CranePawn->bHUDVisible) return;

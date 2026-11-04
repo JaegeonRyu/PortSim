@@ -13,9 +13,15 @@ namespace PortSimulationClock
         return Wrapped<0?Wrapped+DaySeconds:Wrapped;
     }
 
-    inline float TemperatureCelsius(double Elapsed)
+    inline float TemperatureCelsius(double Elapsed,bool SnowEnabled,float SnowfallMmPerHour,
+        bool RainEnabled,float RainfallMmPerHour)
     {
-        // Assumed daily air temperature: 18 C at 09:00, 24 C at 15:00, 12 C at 03:00.
-        return static_cast<float>(18.0+6.0*FMath::Sin(2.0*UE_DOUBLE_PI*(TimeOfDaySeconds(Elapsed)-StartSeconds)/DaySeconds));
+        // Scenario assumptions, not a forecast: mild dry day 18 C at 09:00,
+        // snow near/below freezing, and heavy rain cooler with a smaller daily range.
+        const double SnowCooling=SnowEnabled?18.0+6.0*FMath::Clamp(double(SnowfallMmPerHour)/50.0,0.0,1.0):0.0;
+        const double RainCooling=RainEnabled?2.0+4.0*FMath::Clamp(double(RainfallMmPerHour)/50.0,0.0,1.0):0.0;
+        const double DailyAmplitude=SnowEnabled?3.0:RainEnabled?4.0:6.0;
+        const double Phase=2.0*UE_DOUBLE_PI*(TimeOfDaySeconds(Elapsed)-StartSeconds)/DaySeconds;
+        return static_cast<float>(18.0-FMath::Max(SnowCooling,RainCooling)+DailyAmplitude*FMath::Sin(Phase));
     }
 }
