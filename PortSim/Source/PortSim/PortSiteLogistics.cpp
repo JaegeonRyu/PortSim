@@ -2784,13 +2784,12 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
 
 void APortSiteLogistics::SynchronizeShipCollision(const FBox& Query,double ControlFraction)
 {
-    if(!bDeferringVisuals && !FTerminalReplay::IsAdvancingPhysics()) return;
     PortSimPerformance::FScope Timing(TEXT("ship_query_sync"));
     auto Sync=[&](APortContainerActor* Box)
     {
         if(!IsValid(Box) || Box->LocationOwner!=ECargoOwner::Ship || Box->GetAttachParentActor()) return;
         UpdateCargoMotion(Box);
-        Box->SetSecuredMotionWindow(ShipWindowStart,ShipWindowEnd);
+        if(CargoSources.Contains(Box)) Box->SetSecuredMotionWindow(ShipWindowStart,ShipWindowEnd);
         // Include old physical locations as well as the analytic sweep.
         if(Box->SecuredMotionCouldIntersect(Query) || Box->GetBody()->Bounds.GetBox().Intersect(Query))
             Box->ApplySecuredMotionFraction(ControlFraction);
@@ -3251,6 +3250,8 @@ void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
 
 void APortSiteLogistics::ResetLogistics()
 {
+    RebuildCargoActivity();
+    PreviousCargoMotions.Reset(); CurrentCargoMotions.Reset();
     if (!bReady) return;
     ResetLoadedAGVRecoveries();
     PairedTrips=0; NextTripID=1;

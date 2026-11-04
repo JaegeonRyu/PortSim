@@ -85,14 +85,19 @@ bool FTerminalReplay::AdvanceLivePhysics(AQuayCrane& Owner)
     // own engine ticks and callbacks and retain the standard world path.
     TSet<const AActor*> CargoActors;
     for(const auto& Cargo:Owner.SiteLogistics->ShipContainers) if(IsValid(Cargo)) CargoActors.Add(Cargo);
+    TArray<UPrimitiveComponent*> RecoveryBodies;
     for(TActorIterator<AActor> It(World);It;++It)
     {
+        if(auto* Cargo=Cast<APortContainerActor>(*It); Cargo && CargoActors.Contains(Cargo))
+            Owner.SiteLogistics->RefreshCargoActivity(Cargo);
         const auto* RS=Cast<APortSupportVehicle>(*It);
         const bool ManagedRS=RS && Owner.SupportFleet.ContainsByPredicate([&](const auto& A){return A.Get()==RS;});
         TInlineComponentArray<UPrimitiveComponent*> Parts(*It);
-        for(auto* Part:Parts) if(Part->IsAnySimulatingPhysics() &&
-            (!CargoActors.Contains(*It) || !Part->IsA<UStaticMeshComponent>()) &&
-            !(ManagedRS && RS->OwnsRecoveryPhysicsBody(Part))) return false;
+        for(auto* Part:Parts) if(Part->IsAnySimulatingPhysics())
+        {
+            if(ManagedRS && RS->OwnsRecoveryPhysicsBody(Part)) RecoveryBodies.Add(Part);
+            else if(!CargoActors.Contains(*It) || Part!=Cast<APortContainerActor>(*It)->GetBody()) return false;
+        }
     }
     PortSimPerformance::FScope Timing(TEXT("live_physics_batch"));
     const FVector Gravity(0,0,World->GetGravityZ());
@@ -114,6 +119,14 @@ bool FTerminalReplay::AdvanceLivePhysics(AQuayCrane& Owner)
         for(int32 I=0;I<Steps;++I)
         {
             Owner.AdvanceTerminalReplayStep(1.f/60.f);
+            Owner.SiteLogistics->SynchronizeFreeCargoCollision(1.f/60.f);
+            for(auto* Part:RecoveryBodies) if(IsValid(Part))
+            {
+                FBox Sweep=Part->Bounds.GetBox();
+                const FVector Travel=Part->GetPhysicsLinearVelocity()/60.;
+                Sweep+=FBox(Sweep.Min+Travel,Sweep.Max+Travel);
+                Owner.SiteLogistics->SynchronizeShipCollision(Sweep.ExpandBy(Part->Bounds.SphereRadius+100.),1.);
+            }
             Scene->SetUpForFrame(&Gravity,1.f/60.f,Settings->MinPhysicsDeltaTime,
                 Settings->MaxPhysicsDeltaTime,Settings->MaxSubstepDeltaTime,Settings->MaxSubsteps,Settings->bSubstepping);
             Scene->StartFrame();
@@ -126,6 +139,7 @@ bool FTerminalReplay::AdvanceLivePhysics(AQuayCrane& Owner)
             if(FPlatformTime::Seconds()-Started>=BudgetSeconds) break;
         }
     }
+    Owner.SiteLogistics->PublishCargoPresentation();
     Owner.SiteLogistics->ExportDashboard(Owner.IsOperationPaused());
     PortSimPerformance::Report(Owner.SiteLogistics->SimulationTime,Owner.SiteLogistics->Delivered,World);
     return true;
