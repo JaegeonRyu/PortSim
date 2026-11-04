@@ -53,6 +53,10 @@ struct FSTSObservation
     FVector SpreaderPosition = FVector::ZeroVector, SpreaderVelocity = FVector::ZeroVector;
     FVector CargoPosition = FVector::ZeroVector, CargoVelocity = FVector::ZeroVector;
     FVector CargoAcceleration = FVector::ZeroVector, CargoJerk = FVector::ZeroVector;
+    FVector CargoSnap=FVector::ZeroVector;
+    FVector2D CargoPitchRoll=FVector2D::ZeroVector,CargoPitchRollRate=FVector2D::ZeroVector;
+    FVector2D SpreaderPitchRoll=FVector2D::ZeroVector,SpreaderPitchRollRate=FVector2D::ZeroVector;
+    double PreviousGeometryTimestamp=-1;
     float SwayDegrees = 0;
     float CornerLoadsN[4] = {0,0,0,0}; // analytic virtual load cells including acceleration; not elastic contact reactions
     float CornerHalfWidthCm=100, CornerHalfLengthCm=520;
@@ -60,6 +64,7 @@ struct FSTSObservation
     bool bLanded = false, bAGVAligned = false, bCargoSupported = false;
     bool bTargetVisible=false, CornerSeated[4]={false,false,false,false};
     FVector CornerError[4]={FVector::ZeroVector,FVector::ZeroVector,FVector::ZeroVector,FVector::ZeroVector};
+    FVector CornerRelativeVelocity[4]={FVector::ZeroVector,FVector::ZeroVector,FVector::ZeroVector,FVector::ZeroVector};
     FVector2D SwayRate=FVector2D::ZeroVector;
     FVector2D SwayAngle=FVector2D::ZeroVector;
     float RelativeYawDegrees=0, TargetTiltDegrees=0, SkewDegrees=0, HoistAcceleration=0;

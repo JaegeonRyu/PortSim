@@ -94,7 +94,8 @@ FVector FSTSDynamicsParameters::WindEquilibriumOffset(double LengthM,double Mass
     return Acceleration*LengthM/FMath::Sqrt(G*G+Acceleration.SizeSquared());
 }
 
-void FSTSSuspension::Step(const FSTSDynamicsParameters& C,double Dt,double L,double Ldot,FVector A,FVector V,double M,FVector CoG,double PowerW)
+void FSTSSuspension::Step(const FSTSDynamicsParameters& C,double Dt,double L,double Ldot,FVector A,FVector V,double M,FVector CoG,double PowerW,
+    FVector2D PitchRollDegrees,FVector2D TrimTorque,FVector2D CornerHalfSpanM)
 {
     if(Dt<=0 || M<=0 || L<.1) return;
     constexpr double G=9.80665;
@@ -119,15 +120,19 @@ void FSTSSuspension::Step(const FSTSDynamicsParameters& C,double Dt,double L,dou
     Offset=FVector(L*FMath::Sin(Angle.X),L*FMath::Sin(Angle.Y),L*(1-FMath::Cos(Angle.X)*FMath::Cos(Angle.Y)));
     OffsetVelocity=(Offset-OldOffset)/Dt;
     const double Vertical=M*FMath::Max(.1,G+A.Z+L*Rate.SizeSquared());
-    // Roll/pitch are constrained. Equal-compliance four-corner force/moment allocation.
+    // Equal-compliance four-corner force/moment allocation includes the trim
+    // drive's moment and actual telescopic corner spans. This is a reduced
+    // force-balance model, not independent elastic rope constraint reactions.
     // With the centre of mass below the support plane, positive horizontal
     // acceleration increases the reaction on the positive-axis corner.
-    const double EX=CoG.X+1.545*A.X/FMath::Max(.1,G+A.Z), EY=CoG.Y+1.545*A.Y/FMath::Max(.1,G+A.Z);
+    const double EX=CoG.X+1.545*A.X/FMath::Max(.1,G+A.Z)+TrimTorque.X/Vertical;
+    const double EY=CoG.Y+1.545*A.Y/FMath::Max(.1,G+A.Z)+TrimTorque.Y/Vertical;
+    const double HalfWidth=FMath::Max(.1,CornerHalfSpanM.X),HalfLength=FMath::Max(.1,CornerHalfSpanM.Y);
     for(int32 I=0;I<4;++I)
     {
-        const double Fraction=(.5+((I&1)?1:-1)*EX/2.)*(.5+((I&2)?1:-1)*EY/10.4);
-        const FVector Corner((I&1)?1:-1,(I&2)?5.2:-5.2,0);
-        const FVector Delta=FRotator(0,FMath::RadiansToDegrees(Yaw),0).RotateVector(Corner)+Offset-Corner-FVector(0,0,L);
+        const double Fraction=(.5+((I&1)?1:-1)*EX/(2*HalfWidth))*(.5+((I&2)?1:-1)*EY/(2*HalfLength));
+        const FVector Corner((I&1)?HalfWidth:-HalfWidth,(I&2)?HalfLength:-HalfLength,0);
+        const FVector Delta=FRotator(PitchRollDegrees.X,FMath::RadiansToDegrees(Yaw),PitchRollDegrees.Y).RotateVector(Corner)+Offset-Corner-FVector(0,0,L);
         const double Cos=FMath::Max(.1,-Delta.Z/Delta.Size());
         Tension[I]=FMath::Max(0.,Vertical*Fraction/(Cos*C.Parts));
         Extension[I]=Tension[I]*Delta.Size()/C.RopeEA;

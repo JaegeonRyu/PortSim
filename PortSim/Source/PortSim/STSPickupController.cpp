@@ -7,6 +7,7 @@ bool FSTSPickupConfig::Load(TSharedPtr<FJsonObject> Root,FString& Error)
     const TSharedPtr<FJsonObject>* Value=nullptr;
     if(!Root || !Root->TryGetObjectField(TEXT("pickup_control"),Value)) {Error=TEXT("Missing pickup_control assumptions");return false;}
     auto O=*Value;
+    Attitude=FSpreaderAttitudeConfig(); RecoveryMaxCycles=0;
     auto N=[&](const TCHAR* Key,double& V,double Scale=1.)
     {double X=0;if(!O->TryGetNumberField(Key,X)||!FMath::IsFinite(X)||X<=0){Error=FString(TEXT("Invalid pickup setting: "))+Key;return false;} V=X*Scale;return true;};
     double Count=0;
@@ -32,7 +33,30 @@ bool FSTSPickupConfig::Load(TSharedPtr<FJsonObject> Root,FString& Error)
         MinimumCornerFraction>=.25||MassStability>=.5||YawTolerance>2||TiltTolerance>2||AcquisitionRadius>200||
         HorizontalRelativeSpeed<RelativeSpeed||HorizontalRelativeSpeed>20)
     {Error=TEXT("Inconsistent pickup assumptions");return false;}
-    MaxAttempts=int32(Count);return true;
+    MaxAttempts=int32(Count);
+    const TSharedPtr<FJsonObject>* Trim=nullptr;
+    if(O->TryGetObjectField(TEXT("attitude_control"),Trim))
+    {
+        if(!(*Trim)->TryGetBoolField(TEXT("enabled"),Attitude.Enabled)) {Error=TEXT("Invalid attitude enable flag");return false;}
+        auto Number=[&](const TCHAR* Key,double& V,double Maximum)
+        {return (*Trim)->TryGetNumberField(Key,V) && FMath::IsFinite(V) && V>0 && V<=Maximum;};
+        if(!Number(TEXT("max_angle_deg"),Attitude.MaxAngle,5) || !Number(TEXT("max_rate_degps"),Attitude.MaxRate,10) ||
+            !Number(TEXT("max_acceleration_degps2"),Attitude.MaxAcceleration,30) || !Number(TEXT("response_per_s"),Attitude.Response,10) ||
+            !Number(TEXT("max_torque_nm"),Attitude.MaxTorque,100000) || !Number(TEXT("cog_depth_m"),Attitude.CoGDepth,3))
+        {Error=TEXT("Invalid bounded spreader attitude assumptions");return false;}
+    }
+    const TSharedPtr<FJsonObject>* Recovery=nullptr;
+    if(O->TryGetObjectField(TEXT("recovery"),Recovery))
+    {
+        double Cycles=0,Clearance=0;
+        if(!(*Recovery)->TryGetNumberField(TEXT("max_cycles"),Cycles) || !FMath::IsFinite(Cycles) || Cycles<0 || Cycles>3 || Cycles!=FMath::FloorToDouble(Cycles) ||
+            !(*Recovery)->TryGetNumberField(TEXT("clearance_m"),Clearance) || !FMath::IsFinite(Clearance) || Clearance<.3 || Clearance>1 ||
+            !(*Recovery)->TryGetNumberField(TEXT("retreat_timeout_s"),RecoveryTimeout) || !FMath::IsFinite(RecoveryTimeout) || RecoveryTimeout<5 || RecoveryTimeout>90 ||
+            !(*Recovery)->TryGetNumberField(TEXT("stable_time_s"),RecoveryStableTime) || !FMath::IsFinite(RecoveryStableTime) || RecoveryStableTime<.5 || RecoveryStableTime>10)
+        {Error=TEXT("Invalid bounded pickup recovery assumptions");return false;}
+        RecoveryMaxCycles=int32(Cycles);RecoveryClearance=Clearance*100;
+    }
+    return true;
 }
 
 void FSTSPickupController::Enter(ESTSPickupPhase Next,const TCHAR* Why)
@@ -41,8 +65,8 @@ void FSTSPickupController::Enter(ESTSPickupPhase Next,const TCHAR* Why)
     if(Next==ESTSPickupPhase::Seat)++SeatEntries;
     else if(Next==ESTSPickupPhase::Lock)++LockEntries;
 }
-void FSTSPickupController::Fail(const TCHAR* Why)
-{Fault=Why;Enter(ESTSPickupPhase::Failed,Why);}
+void FSTSPickupController::Fail(const TCHAR* Why,ESTSPickupFailure Kind)
+{Failure=Kind;Fault=Why;Enter(ESTSPickupPhase::Failed,Why);}
 const TCHAR* FSTSPickupController::PhaseName() const
 {
     switch(Phase){case ESTSPickupPhase::Align:return TEXT("align");case ESTSPickupPhase::Seat:return TEXT("seat");
@@ -70,7 +94,7 @@ void FSTSPickupController::Update(const FSTSPickupConfig& C,const FSTSObservatio
         AlignmentTime+=Dt;
         if(AlignmentTime>C.AlignmentTimeout)
         {
-            if(Attempts>=C.MaxAttempts){Fail(TEXT("Pickup alignment attempts exhausted"));return;}
+            if(Attempts>=C.MaxAttempts){Fail(TEXT("Pickup alignment attempts exhausted"),ESTSPickupFailure::AlignmentExhausted);return;}
             ++Attempts;AlignmentTime=0;
             for(bool& R:RequestLocks)R=false;
             Enter(ESTSPickupPhase::Align,TEXT("Reacquiring target; alignment retry"));
@@ -84,7 +108,8 @@ void FSTSPickupController::Update(const FSTSPickupConfig& C,const FSTSObservatio
         {Fail(TEXT("Pickup target outside acquisition window"));return;}
         bool Seated=O.bTargetVisible&&FMath::Abs(O.RelativeYawDegrees)<=C.YawTolerance&&O.TargetTiltDegrees<=C.TiltTolerance&&
             C.PickupSpeedWithin(O.SpreaderVelocity-O.CargoVelocity);
-        for(int32 I=0;I<4;++I)Seated &= O.CornerSeated[I]&&O.CornerError[I].Size2D()<=C.CornerTolerance&&FMath::Abs(O.CornerError[I].Z)<=C.VerticalTolerance;
+        for(int32 I=0;I<4;++I)Seated &= O.CornerSeated[I]&&O.CornerError[I].Size2D()<=C.CornerTolerance&&
+            FMath::Abs(O.CornerError[I].Z)<=C.VerticalTolerance&&C.PickupSpeedWithin(O.CornerRelativeVelocity[I]);
         if(Phase==ESTSPickupPhase::Align)
         {
             Reason=O.bTargetVisible?TEXT("Correcting measured relative position and velocity"):TEXT("Target pose unavailable; returning to nominal acquisition pose");

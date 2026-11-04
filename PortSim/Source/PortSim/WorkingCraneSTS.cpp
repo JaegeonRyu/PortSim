@@ -1,6 +1,7 @@
 #include "PortWorkingCrane.h"
 #include "SimulationPerformance.h"
 #include "CraneTravelBraking.h"
+#include "HoistDriveLimits.h"
 #include "PortContainerActor.h"
 #include "PortAGVActor.h"
 #include "PortSiteLogistics.h"
@@ -68,6 +69,8 @@ void APortWorkingCrane::ClearSTSState()
     bReverseTransfer=false;
     AxisVelocity=PlantAcceleration=FVector::ZeroVector;
     Pickup=FSTSPickupController();
+    PickupRecoveryCount=PickupRecoveryStep=0; PickupRecoverySeconds=PickupRecoveryStableSeconds=0;
+    PickupRecoveryPhase.Empty(); PickupRecoveryReason.Empty(); bIsolateAfterPickupRetreat=false;
     for(int32 I=0;I<4;++I){LockProgress[I]=0;PhysicalSeating[I]=false;}
     Observation=FSTSObservation(); NextSample=0;
     JobSeconds=PausedSeconds=LastJobSeconds=LastPausedSeconds=0;
@@ -205,7 +208,13 @@ void APortWorkingCrane::SampleSTS(bool Force)
     FlushParts();
     PortSimPerformance::FScope Timing(TEXT("crane_sensors"));
     NextSample=SimulationTime+STSProfile.SensorPeriod;
-    auto& S=Observation; S.Timestamp=SimulationTime; S.bValid=!bSensorFault;
+    auto& S=Observation;
+    const double SampleDt=SimulationTime-S.Timestamp;
+    const bool SameSample=S.Timestamp>=0 && SampleDt<=1.e-6;
+    const bool HasPrevious=S.Timestamp>=0 && SampleDt>1.e-6 && SampleDt<=STSProfile.SensorMaxAge;
+    const FVector PreviousJerk=S.CargoJerk;
+    const FVector2D PreviousAngles=S.CargoPitchRoll;
+    S.Timestamp=SimulationTime; S.bValid=!bSensorFault;
     SensorInvalidReason=bSensorFault?TEXT("Injected sensor fault"):TEXT("");
     auto InvalidSensor=[&](const FString& Reason)
     { S.bValid=false; if(SensorInvalidReason.IsEmpty()) SensorInvalidReason=Reason; };
@@ -218,6 +227,13 @@ void APortWorkingCrane::SampleSTS(bool Force)
     S.CargoVelocity=bCarrying?S.SpreaderVelocity:CargoActor->GetMotionVelocity();
     S.CargoAcceleration=bCarrying?PlantAcceleration:CargoActor->GetMotionAcceleration();
     S.CargoJerk=bCarrying?FVector::ZeroVector:CargoActor->GetMotionJerk();
+    S.CargoSnap=HasPrevious?(S.CargoJerk-PreviousJerk)/SampleDt:(SameSample?S.CargoSnap:FVector::ZeroVector);
+    const auto CargoLocal=(Orientation.Inverse()*CargoActor->GetActorQuat()).Rotator();
+    S.CargoPitchRoll=FVector2D(CargoLocal.Pitch,CargoLocal.Roll);
+    S.CargoPitchRollRate=HasPrevious?FVector2D(
+        FMath::FindDeltaAngleDegrees(PreviousAngles.X,S.CargoPitchRoll.X)/SampleDt,
+        FMath::FindDeltaAngleDegrees(PreviousAngles.Y,S.CargoPitchRoll.Y)/SampleDt):(SameSample?S.CargoPitchRollRate:FVector2D::ZeroVector);
+    S.SpreaderPitchRoll=AttitudeState.Angle; S.SpreaderPitchRollRate=AttitudeState.Rate;
     const FVector Gap=Orientation.UnrotateVector(S.SpreaderPosition-S.CargoPosition);
     S.bLanded=FMath::Abs(Gap.X)<=STSProfile.LandingTolerance && FMath::Abs(Gap.Y)<=STSProfile.LandingTolerance &&
         FMath::Abs(Gap.Z-154.5f)<=STSProfile.SeatingTolerance &&
@@ -294,13 +310,17 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
     // latest 20 Hz wind-sensor observation below, just like the other feedback.
     C.Wind=Orientation.UnrotateVector(WindVelocityMetersPerSecond);
     C.WindProjectedAreasM2=WindProjectedAreasM2();
-    Hoist=FMath::Min(Hoist,float(C.MotorMaxRPM*2*PI/60*C.DrumRadius/(C.Parts*C.GearRatio)*100));
+    // True mass constrains the actuator, independently of the load estimate
+    // used by the controller's reference-speed selection above.
+    const double Payload=bCarrying?CargoActor->MassKg:0, Mass=STSProfile.SpreaderMassKg+Payload;
+    const double PowerSpeed=HoistDriveLimits::SpeedMps(C,Mass,STSProfile.HoistAcceleration*.01,STSProfile.HoistPowerW);
+    if(PowerSpeed<=0) {Stop(TEXT("Hoist motor lacks acceleration/braking torque reserve"));return false;}
+    Hoist=FMath::Min(Hoist,float(PowerSpeed*100));
     const FVector Limits(STSProfile.TrolleySpeed,STSProfile.GantrySpeed,Hoist);
     const FVector Accelerations(RailAccelerationLimit(STSProfile.TrolleyAcceleration),RailAccelerationLimit(STSProfile.GantryAcceleration),STSProfile.HoistAcceleration);
     if(Accelerations.X<=0 || Accelerations.Y<=0)
     { Stop(TEXT("Insufficient wheel/rail adhesion for automatic travel")); return false; }
     // True mass/CoG below belong only to the actuator/suspension plant. Position feedback comes from sensors.
-    const double Payload=bCarrying?CargoActor->MassKg:0, Mass=STSProfile.SpreaderMassKg+Payload;
     const FVector MeasuredPosition=Local(Observation.SpreaderPosition);
     const FVector MeasuredVelocity=Orientation.UnrotateVector(Observation.SpreaderVelocity);
     // During vessel pickup the target is not stationary. Feed the measured
@@ -312,6 +332,8 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
         Orientation.UnrotateVector(Observation.CargoAcceleration):FVector::ZeroVector;
     const FVector TargetJerk=Stage==2 && !bCarrying?
         Orientation.UnrotateVector(Observation.CargoJerk):FVector::ZeroVector;
+    const FVector TargetSnap=Stage==2 && !bCarrying?
+        Orientation.UnrotateVector(Observation.CargoSnap):FVector::ZeroVector;
     const double Age=FMath::Max(0.,SimulationTime-Observation.Timestamp);
     double SensorSwayAngle=PI*.5;
     for(const auto& Mount:STSProfile.Dynamics.Mounts) if(Mount.Key==TEXT("sway_sensor") && Mount.Maximum>0)
@@ -319,7 +341,8 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
     const double BrakingStroke=FMath::Max(FMath::Square(double(Limits.X))/(2*FMath::Max(.001,Accelerations.X)),
         FMath::Square(double(Limits.Y))/(2*FMath::Max(.001,Accelerations.Y)));
     const double SwingStroke=(.5*STSProfile.Pickup.AcquisitionRadius+BrakingStroke)*.01;
-    const FVector CoG=bCarrying?CargoActor->CoGOffsetCm*.01*(Payload/Mass):FVector::ZeroVector;
+    const FVector CoG=bCarrying?Orientation.UnrotateVector(CargoActor->GetActorQuat().RotateVector(
+        CargoActor->CoGOffsetCm))*.01*(Payload/Mass):FVector::ZeroVector;
     // Equal slices avoid a nanosecond remainder from float tick durations.
     // Interpolation can snap on that remainder and amplify acceleration/rope force.
     const int32 Substeps=CraneSimulationSteps::Count(Dt,120.);
@@ -330,6 +353,7 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
         const FVector Previous=AxisVelocity;
         FVector2D TravelAcceleration=FVector2D::ZeroVector;
         const double Length=FMath::Max(.1,(BeamZ-Head.Z)*.01);
+        const double LengthRate=-AxisVelocity.Z*.01;
         auto SensorConfig=C;
         SensorConfig.Wind=Observation.WindVelocityMetersPerSecond;
         const FVector WindOffset=SensorConfig.WindEquilibriumOffset(Length,Mass)*100.;
@@ -338,10 +362,12 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
             const double PredictionTime=Age+Substep*Step;
             const double PredictedTarget=Target[I]+TargetVelocity[I]*PredictionTime+
                 .5*TargetAcceleration[I]*PredictionTime*PredictionTime+
-                TargetJerk[I]*PredictionTime*PredictionTime*PredictionTime/6.;
+                TargetJerk[I]*PredictionTime*PredictionTime*PredictionTime/6.+
+                TargetSnap[I]*FMath::Pow(PredictionTime,4)/24.;
             const double PredictedTargetVelocity=TargetVelocity[I]+TargetAcceleration[I]*PredictionTime+
-                .5*TargetJerk[I]*PredictionTime*PredictionTime;
-            const double PredictedTargetAcceleration=TargetAcceleration[I]+TargetJerk[I]*PredictionTime;
+                .5*TargetJerk[I]*PredictionTime*PredictionTime+TargetSnap[I]*FMath::Pow(PredictionTime,3)/6.;
+            const double PredictedTargetAcceleration=TargetAcceleration[I]+TargetJerk[I]*PredictionTime+.5*TargetSnap[I]*PredictionTime*PredictionTime;
+            const double PredictedTargetJerk=TargetJerk[I]+TargetSnap[I]*PredictionTime;
             // Horizontal position feedback uses the trolley/gantry encoders.
             // Feeding the suspended offset into this error and again through
             // sway-rate feedback makes the trolley chase the pendulum forever.
@@ -356,10 +382,12 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
             const double AccelerationOffset=I<2 && Stage==2 && !bCarrying?
                 -PredictedTargetAcceleration*Length/9.80665:0.;
             const double ControlTarget=I<2?PredictedTarget-WindOffset[I]-AccelerationOffset:PredictedTarget;
-            // The pendulum follows a changing acceleration equilibrium with a
-            // phase lag. Do not differentiate that quasi-static offset into a
-            // trolley velocity command; doing so amplifies wave-frequency lag.
-            const double ControlTargetVelocity=PredictedTargetVelocity;
+            // Follow a moving suspension reference, including its measured
+            // jerk/snap. Treating this as a stationary anti-sway target makes
+            // the drive fight the wave-induced reference angular velocity.
+            const bool TrackingSource=I<2 && Stage==2 && !bCarrying;
+            const double ControlTargetVelocity=PredictedTargetVelocity+(TrackingSource?
+                PredictedTargetJerk*Length/9.80665-LengthRate*(WindOffset[I]+AccelerationOffset)/Length:0.);
             const double Error=ControlTarget-FeedbackPosition;
             double Desired=.8*Error+ControlTargetVelocity-.8*(Observation.DriveVelocity[I]-ControlTargetVelocity);
 
@@ -390,21 +418,21 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
                 const double EquilibriumOffset=WindOffset[I]+AccelerationOffset;
                 const double EquilibriumAngle=FMath::Asin(FMath::Clamp(EquilibriumOffset*.01/Length,-1.,1.));
                 const double ObservedRope=FMath::Max(.1,(BeamZ-Observation.DrivePosition.Z)*.01);
-                // A moving vessel is a tracking problem, not the stationary
-                // transfer used to design the travel poles. Keep its existing
-                // approach/tracking loop through acquisition; switching loops
-                // immediately before seating changes the pendulum phase.
-                const bool MovingSource=!bCarrying && Stage<=2 &&
-                    (!Observation.CargoVelocity.IsNearlyZero(.001) ||
-                     !Observation.CargoAcceleration.IsNearlyZero(.001) || !Observation.CargoJerk.IsNearlyZero(.001));
-                const double Feedback=(C.TravelResponseRatio>0 && !MovingSource)
+                // Use the same damped travel loop through high-level approach
+                // and acquisition. The weak legacy approach loop allowed a long
+                // next-job traverse to overshoot its reserved cargo corridor.
+                // Only acquisition adds the measured moving-reference terms.
+                const double ReferenceSwayRate=TrackingSource?-PredictedTargetJerk*.01/9.80665:0.;
+                const double Feedback=C.TravelResponseRatio>0
                     ? C.TravelAcceleration(Error*.01,(Observation.DriveVelocity[I]-ControlTargetVelocity)*.01,
-                        ObservedRope,-Observation.DriveVelocity.Z*.01,Observation.SwayRate[I],
+                        ObservedRope,-Observation.DriveVelocity.Z*.01,Observation.SwayRate[I]-ReferenceSwayRate,
                         Observation.SwayAngle[I],EquilibriumAngle)
                     : C.HorizontalAcceleration(Error*.01,
                     (Observation.DriveVelocity[I]-ControlTargetVelocity)*.01,FMath::Max(.1,(BeamZ-Observation.DrivePosition.Z)*.01),
                     Observation.SwayRate[I],Observation.SwayAngle[I],EquilibriumAngle,WindTrackingGain);
-                const double Command=Feedback*100+PredictedTargetAcceleration;
+                const double Command=Feedback*100+PredictedTargetAcceleration+(TrackingSource?
+                    (TargetSnap[I]*Length+2*LengthRate*PredictedTargetJerk-
+                        PlantAcceleration.Z*.01*PredictedTargetAcceleration)/9.80665:0.);
                 // Reserve half of the acquisition stroke for drive correction
                 // and the remainder for the suspended motion. The stopping
                 // band limits the anti-sway command without disabling it or
@@ -455,7 +483,17 @@ bool APortWorkingCrane::MoveSTS(FVector Target,float Dt)
             Head[I]+=AxisVelocity[I]*Step;
         }
         PlantAcceleration=(AxisVelocity-Previous)/Step;
-        SuspensionState.Step(C,Step,Length,-AxisVelocity.Z*.01,PlantAcceleration*.01,AxisVelocity*.01,Mass,CoG,STSProfile.HoistPowerW);
+        const bool FollowTilt=Stage==2 && !bCarrying && Observation.bTargetVisible;
+        AttitudeState.Step(STSProfile.Pickup.Attitude,Step,
+            Observation.SpreaderPitchRoll+Observation.SpreaderPitchRollRate*PredictionTime,
+            Observation.SpreaderPitchRollRate,
+            FollowTilt?Observation.CargoPitchRoll+Observation.CargoPitchRollRate*PredictionTime:FVector2D::ZeroVector,
+            FollowTilt?Observation.CargoPitchRollRate:FVector2D::ZeroVector,
+            Mass,PortSpreaderTelescope::TwistlockHalfWidthCm()*.01,
+            PortSpreaderTelescope::TwistlockHalfLengthCm(TelescopeLengthCm)*.01);
+        SuspensionState.Step(C,Step,Length,-AxisVelocity.Z*.01,PlantAcceleration*.01,AxisVelocity*.01,Mass,CoG,STSProfile.HoistPowerW,
+            AttitudeState.Angle,AttitudeState.Torque,FVector2D(PortSpreaderTelescope::TwistlockHalfWidthCm()*.01,
+                PortSpreaderTelescope::TwistlockHalfLengthCm(TelescopeLengthCm)*.01));
         if(!SuspensionState.Fault.IsEmpty()) {Stop(SuspensionState.Fault);return false;}
     }
     SuspendedOffset=SuspensionState.Offset*100;

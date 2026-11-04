@@ -47,25 +47,36 @@ void APortWorkingCrane::SamplePickupGeometry()
         O.CargoAcceleration.Size2D()*.01,O.TargetTiltDegrees,WindN);
     bSeatingFrictionOK=PortFriction::CanSeat(SeatingFrictionDemandN,SeatingFrictionCapacityN,bCarrying);
     bool All=true;
+    const double GeometryDt=O.Timestamp-O.PreviousGeometryTimestamp;
     for(int32 I=0;I<4;++I)
     {
         const FVector SpreaderCorner((I&1)?SpreaderHalfWidth:-SpreaderHalfWidth,(I&2)?SpreaderHalfLength:-SpreaderHalfLength,0);
         const FVector CargoCorner((I&1)?CargoHalfWidth:-CargoHalfWidth,(I&2)?CargoHalfLength:-CargoHalfLength,0);
         const FVector RotationGap=SpreaderRotation.RotateVector(SpreaderCorner)-CornerRotation.RotateVector(CargoCorner)-FVector(0,0,154.5);
         const FVector ActualError=Orientation.UnrotateVector(HeadPosition()-CargoActor->GetActorLocation()+RotationGap);
-        PhysicalSeating[I]=bSeatingFrictionOK && ActualError.Size2D()<=C.CornerTolerance && FMath::Abs(ActualError.Z)<=C.VerticalTolerance && O.TargetTiltDegrees<=C.TiltTolerance;
+        const FVector PreviousError=O.CornerError[I];
         O.CornerError[I]=Orientation.UnrotateVector(O.SpreaderPosition-O.CargoPosition+RotationGap);
+        if(O.PreviousGeometryTimestamp>=0 && GeometryDt>1.e-6 && GeometryDt<=STSProfile.SensorMaxAge)
+            O.CornerRelativeVelocity[I]=(O.CornerError[I]-PreviousError)/GeometryDt;
+        else if(O.PreviousGeometryTimestamp<0 || GeometryDt>STSProfile.SensorMaxAge)
+            O.CornerRelativeVelocity[I]=Orientation.UnrotateVector(O.SpreaderVelocity-O.CargoVelocity);
+        PhysicalSeating[I]=bSeatingFrictionOK && ActualError.Size2D()<=C.CornerTolerance &&
+            FMath::Abs(ActualError.Z)<=C.VerticalTolerance && O.TargetTiltDegrees<=C.TiltTolerance &&
+            C.PickupSpeedWithin(O.CornerRelativeVelocity[I]);
         int32 Missing=INDEX_NONE;FParse::Value(FCommandLine::Get(),bSTS?TEXT("PortSimSTSSeatFault="):TEXT("PortSimRMGSeatFault="),Missing);
         O.CornerSeated[I]=PhysicalSeating[I]&&I!=Missing; All &= O.CornerSeated[I];
     }
+    O.PreviousGeometryTimestamp=O.Timestamp;
     O.bLanded=All&&C.PickupSpeedWithin(O.SpreaderVelocity-O.CargoVelocity);
 }
 
 void APortWorkingCrane::AdvancePickup(float Dt)
 {
+    if(PickupRecoveryStep) {AdvancePickupRecovery(Dt);return;}
     Pickup.Update(STSProfile.Pickup,Observation,SimulationTime,Dt,STSProfile.SensorMaxAge,Slots[SourceSlot],STSProfile.RatedPayloadKg);
     if(!Pickup.Fault.IsEmpty())
     {
+        if(StartPickupRecovery()) return;
         double MaximumCornerHorizontal=0,MaximumCornerVertical=0;
         for(const FVector& Error:Observation.CornerError)
         {
@@ -84,6 +95,8 @@ void APortWorkingCrane::AdvancePickup(float Dt)
     }
     if(Pickup.Phase==ESTSPickupPhase::Complete)
     {
+        PickupRecoveryPhase=TEXT("complete");
+        if(RecoveryStatus.StartsWith(TEXT("pickup_"))) RecoveryStatus=TEXT("pickup_recovered");
         UE_LOG(LogTemp,Display,TEXT("%s_PICKUP_VERIFIED: crane=%d measured_kg=%.2f cog_cm=%s attempts=%d"),bSTS?TEXT("STS"):TEXT("RMG"),CraneID,Pickup.EstimatedMass,*Pickup.EstimatedCoG.ToCompactString(),Pickup.Attempts);
         Stage=3;StageTime=SettleTime=0;return;
     }

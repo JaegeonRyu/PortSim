@@ -1,6 +1,6 @@
 param(
     [string]$Engine = 'C:\Program Files\Epic Games\UE_5.6',
-    [ValidateSet('All','wave','offset','eccentric','bias','yaw','seat','pose','lock','sensor','stack','agv','collision')][string]$Case = 'All',
+    [ValidateSet('All','wave','offset','eccentric','heavy45','bias','yaw','seat','pose','lock','sensor','stack','agv','collision')][string]$Case = 'All',
     [ValidateRange(1,120)][int]$FixedFPS = 10,
     [ValidateRange(0,2)][double]$SimulationFrameSeconds = 0,
     [ValidateSet('STS','RMG')][string]$Crane = 'STS'
@@ -11,8 +11,8 @@ $editor = Join-Path $Engine 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
 $cases = if ($Case -eq 'All') { @('offset','eccentric','bias','yaw','seat','pose','lock') } else { @($Case) }
 if ($Crane -eq 'STS' -and $Case -eq 'All') { $cases += 'wave' }
 if ($Crane -eq 'RMG' -and $Case -eq 'wave') { throw 'The wave case requires -Crane STS' }
-if ($Crane -eq 'RMG' -and $Case -eq 'All') { $cases += @('sensor','stack','agv','collision') }
-if ($Crane -eq 'STS' -and $Case -in @('sensor','stack','agv','collision')) { throw 'This case requires -Crane RMG' }
+if ($Crane -eq 'RMG' -and $Case -eq 'All') { $cases += @('heavy45','sensor','stack','agv','collision') }
+if ($Crane -eq 'STS' -and $Case -in @('heavy45','sensor','stack','agv','collision')) { throw 'This case requires -Crane RMG' }
 foreach ($name in $cases) {
     $log = Join-Path $root "Saved\Logs\Pickup_${Crane}_$name.log"
     $arguments = @("`"$(Join-Path $root 'PortSim.uproject')`"",'/Engine/Maps/Entry','-game','-nullrhi','-nosound','-unattended','-nosplash','-nop4','-benchmark',"-fps=$FixedFPS",'-PortSimPickupTest',"-PortSimPickupCase=$name","`"-abslog=$log`"")
