@@ -15,6 +15,21 @@ function Test-CurrentDashboard {
     param($Health)
     return $Health -and $Health.application -eq 'PortSim Observatory' -and $Health.repository -eq $repository
 }
+function Test-DashboardFresh {
+    param($Health)
+    if(-not $Health.source_hashes) { return $false }
+    $sources=@{'server.mjs'=$server;'commands.mjs'=(Join-Path $repository 'Dashboard\commands.mjs')}
+    foreach($file in Get-ChildItem -LiteralPath (Join-Path $repository 'Dashboard\public') -File) {
+        if($file.Extension -in @('.mjs','.css','.html')) { $sources["public/$($file.Name)"]=$file.FullName }
+    }
+    if($sources.Count -ne @($Health.source_hashes.PSObject.Properties).Count) { return $false }
+    foreach($entry in $sources.GetEnumerator()) {
+        $remote=$Health.source_hashes.PSObject.Properties[$entry.Key]
+        if(-not $remote) { return $false }
+        if(([string]$remote.Value) -ne (Get-FileHash -LiteralPath $entry.Value -Algorithm SHA256).Hash.ToLowerInvariant()) { return $false }
+    }
+    return $true
+}
 function Test-DashboardPortAvailable {
     param([int]$CandidatePort)
     $listener=[System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback,$CandidatePort)
@@ -37,6 +52,24 @@ foreach($candidatePort in $candidatePorts) {
     }
     $candidateHealth=Get-DashboardHealth $candidatePort
     if(Test-CurrentDashboard $candidateHealth) { $Port=$candidatePort; $health=$candidateHealth; break }
+}
+if($health -and -not (Test-DashboardFresh $health)) {
+    $listener=Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
+        Where-Object LocalAddress -eq '127.0.0.1' | Select-Object -First 1
+    $existing=if($listener) { Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" }
+    if(-not $existing -or $existing.Name -ne 'node.exe' -or
+        [string]::IsNullOrEmpty($existing.CommandLine) -or
+        $existing.CommandLine.IndexOf($server,[StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        throw "Port $Port has an outdated dashboard, but its process could not be safely identified. Close that server and retry."
+    }
+    Write-Host "Dashboard source changed; restarting the old server on port $Port."
+    Stop-Process -Id $existing.ProcessId -Force
+    for($attempt=0;$attempt -lt 30 -and -not (Test-DashboardPortAvailable $Port);$attempt++) {
+        Start-Sleep -Milliseconds 100
+    }
+    if(-not (Test-DashboardPortAvailable $Port)) { throw "Port $Port did not become available after stopping the old dashboard." }
+    $freePort=$Port
+    $health=$null
 }
 if(-not $health) {
     if($null -eq $freePort) {
@@ -80,7 +113,7 @@ try {
             if($health) { break }
             Start-Sleep -Milliseconds 250
         }
-        if(-not (Test-CurrentDashboard $health)) {
+        if(-not (Test-CurrentDashboard $health) -or -not (Test-DashboardFresh $health)) {
             if(-not $process.HasExited) { $process.Kill() }
             throw "Dashboard did not start correctly. See $logDir\Dashboard-$Port-error.log"
         }
