@@ -2,17 +2,8 @@
 #include "CoreMinimal.h"
 
 class AQuayCrane;
-class FTerminalCheckpoint;
-struct FTerminalReplayLog
-{
-    FName Category;
-    ELogVerbosity::Type Verbosity;
-    FString Message;
-};
-
-// Checkpoint transactions exclude Chaos history. Supported terminal cargo can
-// instead advance real physics forward in fixed steps, without checkpointing.
-// External bodies and unsupported physics settings retain normal world ticking.
+// Forward-only fixed-step execution. Explicit checkpoint capture/restore lives
+// in FTerminalCheckpoint and is never part of accelerated playback.
 class FTerminalReplay
 {
 public:
@@ -29,14 +20,9 @@ public:
 private:
     friend class FTerminalReplayCheckpointTest;
     bool AdvanceLivePhysics(AQuayCrane& Owner);
-    TArray<TSharedPtr<FTerminalCheckpoint>> Future;
-    TArray<int32> FutureSteps;
-    TArray<TArray<FTerminalReplayLog>> FutureLogs;
-    TSharedPtr<FTerminalCheckpoint> Current;
     const TCHAR* State=TEXT("live");
     uint64 Revision=0,DisplayedSteps=0;
     double Credit=0;
-    bool bBoundary=false;
     double SampleWall=0,SampleSimulation=0;
     float ActualRate=0;
 };

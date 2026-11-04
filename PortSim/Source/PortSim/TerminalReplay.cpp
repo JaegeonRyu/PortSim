@@ -1,5 +1,4 @@
 #include "TerminalReplay.h"
-#include "TerminalCheckpoint.h"
 #include "PortContainerActor.h"
 #include "PortSupportVehicle.h"
 #include "Components/StaticMeshComponent.h"
@@ -27,24 +26,21 @@ namespace
     TAutoConsoleVariable<float> LivePhysicsBudget(TEXT("PortSim.LivePhysicsBudgetMs"),8.f,
         TEXT("Wall-time budget for live cargo physics per presentation (1..33 ms); one step always completes."));
     bool AdvancingPhysics=false;
-    bool Predicting=false; // Game thread only. UObject work never crosses threads.
-    TArray<FTerminalReplayLog> PendingLogs;
     TAutoConsoleVariable<int32> Enabled(TEXT("PortSim.BufferedPlayback"),1,
         TEXT("Forward-only fixed-step terminal playback."));
 }
 
-bool FTerminalReplay::IsPredicting() { return Predicting; }
+bool FTerminalReplay::IsPredicting() { return false; }
 bool FTerminalReplay::IsAdvancingPhysics() { return AdvancingPhysics; }
 void FTerminalReplay::Log(FName Category,ELogVerbosity::Type Verbosity,FString Message)
 {
-    if(Predicting) PendingLogs.Add({Category,Verbosity,MoveTemp(Message)});
-    else if(GLog) GLog->Serialize(*Message,Verbosity,Category);
+    if(GLog) GLog->Serialize(*Message,Verbosity,Category);
 }
 double FTerminalReplay::BufferedSeconds() const
-{ int32 Steps=0; for(int32 N:FutureSteps) Steps+=N; return Steps/60.; }
+{ return 0.; } // Retained for dashboard protocol compatibility.
 void FTerminalReplay::Invalidate()
 {
-    Future.Reset(); FutureSteps.Reset(); FutureLogs.Reset(); Current.Reset(); Credit=0; bBoundary=false; ++Revision; State=TEXT("live_input_hold");
+    Credit=0; ++Revision; State=TEXT("live_input_hold");
 }
 
 // Same model ordering as the live unified-terminal branch, with fixed dt and
@@ -93,10 +89,11 @@ bool FTerminalReplay::AdvanceLivePhysics(AQuayCrane& Owner)
         const auto* RS=Cast<APortSupportVehicle>(*It);
         const bool ManagedRS=RS && Owner.SupportFleet.ContainsByPredicate([&](const auto& A){return A.Get()==RS;});
         TInlineComponentArray<UPrimitiveComponent*> Parts(*It);
-        for(auto* Part:Parts) if(Part->IsAnySimulatingPhysics())
+        for(auto* Part:Parts)
         {
             if(ManagedRS && RS->OwnsRecoveryPhysicsBody(Part)) RecoveryBodies.Add(Part);
-            else if(!CargoActors.Contains(*It) || Part!=Cast<APortContainerActor>(*It)->GetBody()) return false;
+            else if(Part->IsAnySimulatingPhysics() &&
+                (!CargoActors.Contains(*It) || Part!=Cast<APortContainerActor>(*It)->GetBody())) return false;
         }
     }
     PortSimPerformance::FScope Timing(TEXT("live_physics_batch"));
@@ -120,7 +117,7 @@ bool FTerminalReplay::AdvanceLivePhysics(AQuayCrane& Owner)
         {
             Owner.AdvanceTerminalReplayStep(1.f/60.f);
             Owner.SiteLogistics->SynchronizeFreeCargoCollision(1.f/60.f);
-            for(auto* Part:RecoveryBodies) if(IsValid(Part))
+            for(auto* Part:RecoveryBodies) if(IsValid(Part) && Part->IsAnySimulatingPhysics())
             {
                 FBox Sweep=Part->Bounds.GetBox();
                 const FVector Travel=Part->GetPhysicsLinearVelocity()/60.;
@@ -160,8 +157,8 @@ bool FTerminalReplay::Tick(AQuayCrane& Owner,double WallSeconds)
     }
     Clock->SetBufferedPlayback(false);
     Clock->SetLiveFallback(false);
-    Site->ProcessDashboardCommands(); // Accepted commands invalidate before future use.
-    // Test policies must be installed before calculating the first future.
+    Site->ProcessDashboardCommands(); // Accepted commands invalidate accumulated demand.
+    // Install dispatch policies before the first forward step.
     const bool Full=FParse::Param(FCommandLine::Get(),TEXT("PortSimFullUnloadTest"));
     if(Full || FParse::Param(FCommandLine::Get(),TEXT("PortSimSiteTest")))
     {
@@ -180,7 +177,10 @@ bool FTerminalReplay::Tick(AQuayCrane& Owner,double WallSeconds)
         !Owner.bAutoRunning || Owner.bAutoPaused || Owner.bEmergencyStop || !Site->Fault.IsEmpty() ||
         Clock->GetEffectiveRate()<=1.f)
     {
-        Future.Reset(); FutureSteps.Reset(); FutureLogs.Reset(); Current.Reset(); Credit=0; bBoundary=false;
+        Credit=0;
+        // Disabled batching is a safe single-step fallback, not a second
+        // accelerated path with a different budget or catch-up policy.
+        if(Clock->GetEffectiveRate()>1.f) Clock->SetLiveFallback(true);
         State=Clock->GetEffectiveRate()<Owner.SimulationSpeed?TEXT("live_input_hold"):TEXT("live");
         return false;
     }
