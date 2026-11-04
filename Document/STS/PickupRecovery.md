@@ -55,3 +55,14 @@ RMG가 29.3 t 화물을 내릴 때 정격 전력을 정상 하강에 모두 소�
 - `PortSim/Saved/Tests/PickupRecovery_PlaybackRollback_Normal120.json`
 
 배속 시계·컨트롤러·HUD를 포함한 `QuayCrane.cpp/.h`, `PortSimTimeStep.cpp/.h`, `TerminalSite.cpp`, `TerminalSiteOperations.cpp`가 수정 전 HEAD 코드와 동일함을 확인했다.
+
+## PR #18 최신 main 병합 검증 · 2026-11-04
+
+`upstream/main`의 `7a4f21d`를 병합하면서 R/S 이벤트 표시·RMG 인계 상태와 STS 재접근 기능을 함께 유지했다. 팀의 최신 main에 포함된 배속 변경은 유지하며, 앞서 원복한 별도 배속 보정을 다시 추가하지 않았다.
+
+- 최종 병합본 UE 빌드 성공, 웹 테스트 37개 통과.
+- 엔진 자동화는 57개 중 56개 통과, 1개 실패. `PortSim.Recovery.LoadedAGV`에서 대체 AGV의 복구 접근·재합류 도로를 확보하지 못해 작업 승계 확인이 실패했다. 이 R/S 경로 구현과 테스트 파일은 최신 main과 동일하며 이번 STS 수정에서 변경하지 않았다. 전체 자동화가 통과한 상태는 아니다.
+- 이번 변경의 `PortSim.Recovery.UnliftedPickup`, `PortSim.STS.LoggedSeaPickup`은 통과했다. 별도 실행 시험도 파도 속 STS 체결 30.90초, RMG 29.3 t·45ft 최종 착지 184.20초로 통과했다.
+- 위 120개 운반 결과는 main 병합 전 검증이다. 병합 후 전체 120개 운반은 다시 실행하지 않았다.
+
+최신 병합 검증 로그: `PortSim/Saved/Tests/PR18_Merge_Build.log`, `PortSim/Saved/Tests/PR18_Merge_Web.log`, `PortSim/Saved/Logs/PR18_Merge_Units.log`, `PortSim/Saved/Logs/Pickup_STS_wave.log`, `PortSim/Saved/Logs/Pickup_RMG_heavy45.log`.

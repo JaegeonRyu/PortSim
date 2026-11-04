@@ -24,6 +24,9 @@ UCLASS(Blueprintable)
 class PORTSIM_API APortWorkingCrane : public APortEquipmentActor
 {
     GENERATED_BODY()
+    friend class FTerminalReplayCheckpointTest;
+    friend class FTerminalCheckpoint;
+    friend class FTerminalReplay;
 public:
     APortWorkingCrane();
     void Configure(int32 Number, bool bQuayside, FVector Source, FVector Destination, bool bCreateCargo=true);
@@ -53,6 +56,7 @@ public:
     bool IsWaitingForAGV() const;
     APortAGVActor* GetHandoverVehicle() const;
     bool IsBusy() const { return bJobActive; }
+    bool IsAGVHandoverComplete() const { return bAGVHandoverComplete; }
     UFUNCTION(BlueprintCallable,Category="Failures") void SetSensorFailure(bool Failed);
     UFUNCTION(BlueprintCallable,CallInEditor,Category="Failures") void RepairSensors() { SetSensorFailure(false); }
     UFUNCTION(BlueprintCallable,Category="Failures") void SetGantryFailure(bool Failed);
@@ -110,6 +114,9 @@ private:
     friend class FEquipmentRecoveryTest;
     friend class FMovingPickupRecoveryTest;
     friend class FLoggedSeaPickupTest;
+    friend class FRMGAGVHandoverTest;
+    bool SecureRMGToAGV();
+    bool bAGVHandoverComplete=false;
     bool bReverseTransfer=false;
     bool AGVAtDestination() const { return bSTS!=bReverseTransfer; }
     bool bDeferRopeVisuals=false, bRopeVisualsDirty=false;

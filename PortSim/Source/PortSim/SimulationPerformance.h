@@ -15,7 +15,7 @@ namespace PortSimPerformance
         bool Enabled=FParse::Param(FCommandLine::Get(),TEXT("PortSimProfile"));
         double Start=FPlatformTime::Seconds(), Last=Start, SimulationStart=-1, Duration=0;
         TMap<FName,FMetric> Metrics;
-        bool DumpedEngineStats=false;
+        double LastSimulation=0;
         FState() { FParse::Value(FCommandLine::Get(),TEXT("PortSimProfileSeconds="),Duration); }
     };
     inline FState& State() { static FState Value; return Value; }
@@ -37,14 +37,17 @@ namespace PortSimPerformance
     {
         auto& S=State(); if(!S.Enabled) return;
         const double Now=FPlatformTime::Seconds();
-        if(S.SimulationStart<0) { S.Start=S.Last=Now; S.SimulationStart=Simulation; }
+        if(S.SimulationStart<0) { S.Start=S.Last=Now; S.SimulationStart=S.LastSimulation=Simulation; }
         const bool Done=S.Duration>0 && Now-S.Start>=S.Duration;
         if(!Done && Now-S.Last<10.) return;
-        S.Last=Now;
-        if(!S.DumpedEngineStats && GEngine && FParse::Param(FCommandLine::Get(),TEXT("PortSimProfileEngineStats")))
-        { S.DumpedEngineStats=true; GEngine->Exec(World,TEXT("stat dumpframe -ms=1")); }
+
+        if(GEngine && FParse::Param(FCommandLine::Get(),TEXT("PortSimProfileEngineStats")))
+        { GEngine->Exec(World,TEXT("stat dumpframe -ms=1")); }
         UE_LOG(LogTemp,Display,TEXT("PORTSIM_PERF: wall=%.3f processed_sim=%.3f achieved=%.3fx delivered=%d"),
             Now-S.Start,Simulation-S.SimulationStart,(Simulation-S.SimulationStart)/FMath::Max(.001,Now-S.Start),Delivered);
+        UE_LOG(LogTemp,Display,TEXT("PORTSIM_PERF_INTERVAL: seconds=%.3f achieved=%.3fx"),
+            Now-S.Last,(Simulation-S.LastSimulation)/FMath::Max(.001,Now-S.Last));
+        S.Last=Now; S.LastSimulation=Simulation;
         for(const auto& Pair:S.Metrics)
             UE_LOG(LogTemp,Display,TEXT("PORTSIM_PERF_SCOPE: %s total_ms=%.3f calls=%llu mean_ms=%.6f"),
                 *Pair.Key.ToString(),Pair.Value.Seconds*1000,Pair.Value.Calls,
