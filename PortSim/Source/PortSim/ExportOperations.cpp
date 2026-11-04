@@ -1,3 +1,4 @@
+#include "TerminalReplay.h"
 #include "PortSiteLogistics.h"
 #include "PortContainerActor.h"
 #include "PortAGVActor.h"
@@ -101,14 +102,10 @@ void APortSiteLogistics::AdvanceExport(int32 Lane,float Dt)
         Job.Stage=4;
         break;
     case 4:
-        if(RMG->IsBusy()) return;
-        if(!Cargo->GetActorLocation().Equals(Vehicle->CargoPosition(),10.f) || Vehicle->Speed>.1f)
+        if(!RMG->IsAGVHandoverComplete()) return;
+        if(Cargo->GetAttachParentActor()!=Vehicle || Cargo->GetBody()->IsSimulatingPhysics() ||
+            Cargo->LocationOwner!=ECargoOwner::AGV || !Cargo->GetActorLocation().Equals(Vehicle->CargoPosition(),10.f) || Vehicle->Speed>.1f)
         { Stop(TEXT("적하 RMG/AGV 정렬 오류")); return; }
-        Cargo->GetBody()->SetSimulatePhysics(false);
-        Cargo->SetActorLocationAndRotation(Vehicle->CargoPosition(),Vehicle->GetActorRotation(),false,nullptr,ETeleportType::TeleportPhysics);
-        Cargo->AttachToComponent(Vehicle->GetRootComponent(),FAttachmentTransformRules::KeepWorldTransform);
-        Cargo->LocationOwner=ECargoOwner::AGV;
-        Vehicle->SetPayload(Cargo->MassKg);
         Yard[Job.Slot].Occupied=false;
         Booking.HandoverMask|=1;
         Job.Stage=5; Job.ReturnSTS=Job.STS;
@@ -136,7 +133,7 @@ void APortSiteLogistics::AdvanceExport(int32 Lane,float Dt)
         Booking.State=2; Booking.HandoverMask|=4;
         Vehicle->SetPayload(0); ++Vehicle->CompletedJobs;
         Job.Actor=nullptr; Job.Stage=FSiteTransfer::ReturnToStandby;
-        UE_LOG(LogTemp,Display,TEXT("SITE_LOADED: %s vessel=%d bay=%d row=%d tier=%d"),
+        PORTSIM_SIM_LOG(LogTemp,Display,TEXT("SITE_LOADED: %s vessel=%d bay=%d row=%d tier=%d"),
             *Booking.ContainerName.ToString(),Booking.STS/3+1,Booking.ShipSlot.Bay,Booking.ShipSlot.Row,Booking.ShipSlot.Tier);
         if(!PlanRoadRoute(Lane,false)) Stop(TEXT("적하 완료 AGV 대기소 복귀 경로 오류"));
         break;

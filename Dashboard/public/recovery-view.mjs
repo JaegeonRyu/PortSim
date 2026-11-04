@@ -6,6 +6,7 @@ export function faultDialogTitle(state,live){
 }
 export function renderRecoveryDetails(actor){
  let html='';
+ if(actor?.loaded_recovery_active)html+=row('R/S 복구',actor.loaded_recovery_status)+row('인계 진행',`${actor.recovery_transferred_count}/${actor.recovery_cargo_count}개`);
  if(actor?.fault_scope==='equipment'){
   html=`<div class="detail-subhead">${actor.pickup_failure?'체결 정렬 실패':actor.gantry_failure?'갠트리 주행 고장':'센서 고장'} · 장비 격리</div>`;
   const handling=actor.retained_load?'잠금·화물 유지 · 수리 대기':actor.recovery_status==='verification_repair_required'?'안착 검증 미완료 · 수리 대기':'미인양 작업 재배정 · 대체 불가 시 대기';
