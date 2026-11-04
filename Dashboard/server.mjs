@@ -1,4 +1,6 @@
 import http from 'node:http';
+import {readFileSync,readdirSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import {readFile, stat} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
@@ -7,6 +9,8 @@ import {equipmentCommands} from './commands.mjs';
 const root = path.dirname(fileURLToPath(import.meta.url));
 const defaultRepo = path.dirname(root);
 const port = Number(process.env.PORTSIM_DASHBOARD_PORT || 4173);
+const sourceFiles=['server.mjs','commands.mjs',...readdirSync(path.join(root,'public')).filter(name=>/\.(?:mjs|css|html)$/.test(name)).map(name=>`public/${name}`)].sort();
+const sourceHashes=Object.fromEntries(sourceFiles.map(name=>[name,createHash('sha256').update(readFileSync(path.join(root,name))).digest('hex')]));
 const files = new Map([
   ['/', ['index.html', 'text/html']],
   ['/style.css', ['style.css', 'text/css']],
@@ -60,7 +64,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method !== 'GET') { res.writeHead(405).end(); return; }
     if (url.pathname === '/api/health') {
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.end(JSON.stringify({application: 'PortSim Observatory', repository: repo})); return;
+      res.end(JSON.stringify({application: 'PortSim Observatory', repository: repo, source_hashes: sourceHashes})); return;
     }
     if (url.pathname === '/api/state') {
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
