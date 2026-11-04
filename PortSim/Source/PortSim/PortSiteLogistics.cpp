@@ -2920,8 +2920,11 @@ void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
     }
     for (const auto& Crane:Equipment)
     {
+        const int32 PreviousRecoveries=Crane->TotalPickupRecoveryEvents;
         // The central berth advances its reserved RMG in TickRMGTransfer.
         if (CentralReservation==INDEX_NONE || Crane!=CentralCrane(CentralReservation)) Crane->Advance(Dt,false);
+        if(Crane->TotalPickupRecoveryEvents!=PreviousRecoveries)
+            RecordRecoveryEvent(TEXT("pickup_retry"),Crane,Crane,Crane,Crane->CargoActor.Get());
         if (!Crane->Fault.IsEmpty() && !Crane->IsEquipmentUnavailable()) { Stop(Crane->Fault); return; }
     }
     ManageEquipmentFailures();
@@ -3767,7 +3770,7 @@ bool APortSiteLogistics::SaveReports() const
     if(FTerminalReplay::IsPredicting()) return true;
     if(ReportBase.IsEmpty()) return false;
     IFileManager::Get().MakeDirectory(*FPaths::GetPath(ReportBase),true);
-    const FString Snapshot=TEXT("{\"site_suspension_model\":\"reduced-order sway/yaw; assumed mounts; taut-rope tension; hoist shaft torque\",\"sts_profile\":")+
+    const FString Snapshot=TEXT("{\"site_suspension_model\":\"reduced-order sway/yaw; bounded equivalent pitch/roll trim; assumed mounts; taut-rope force/moment allocation; hoist shaft torque\",\"sts_profile\":")+
         (STSProfile.SnapshotJson.IsEmpty()?TEXT("{}"):STSProfile.SnapshotJson)+
         TEXT(",\"ship_loading_assumptions\":")+(ShipStowageAssumptions.SnapshotJson.IsEmpty()?TEXT("{}"):ShipStowageAssumptions.SnapshotJson)+
         TEXT(",\"ship_arrival_layout\":\"")+(LaneCount==9?TEXT("applied_bay_row_tier"):TEXT("legacy_grid"))+TEXT("\"")+

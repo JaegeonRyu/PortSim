@@ -152,7 +152,7 @@ bool FSTSOperatingProfile::Load(const FString& ReferenceFile, const FString& Set
     for(const auto& Mount:Dynamics.Mounts) if(!SensorKeys.Contains(Mount.Key)) {Error=TEXT("Unknown configured sensor mount");return false;}
     auto Snapshot=MakeShared<FJsonObject>();
     Snapshot->SetObjectField(TEXT("reference"),Ref); Snapshot->SetObjectField(TEXT("simulation_assumptions"),Settings);
-    Snapshot->SetStringField(TEXT("load_model"),TEXT("Site STS: reduced-order variable-length sway/yaw, taut four-corner tension allocation, hoist shaft torque. Assumed mounts/drive data; constrained roll/pitch. Legacy central path unchanged."));
+    Snapshot->SetStringField(TEXT("load_model"),TEXT("Site STS: variable-length sway/yaw, bounded equivalent pitch/roll trim, four-corner force/moment allocation and hoist shaft torque. Mount/trim/drive data are simulation assumptions; no independent elastic rope constraints. Legacy central path unchanged."));
     Snapshot->SetNumberField(TEXT("resolved_payload_limit_kg"),RatedPayloadKg);
     FJsonSerializer::Serialize(Snapshot,TJsonWriterFactory<>::Create(&SnapshotJson));
     bReady=true;

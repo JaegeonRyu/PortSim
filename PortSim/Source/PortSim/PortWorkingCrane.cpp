@@ -151,7 +151,8 @@ void APortWorkingCrane::ResetOperation()
     SensorRepairElapsed=0; SensorRepairPhase.Empty();
     if(!bFatalSensorTest) bSensorFault=bAppliedSensorFault=false;
     ClearSTSState();
-    SuspensionState=FSTSSuspension(); SuspendedOffset=FVector::ZeroVector;
+    SuspensionState=FSTSSuspension(); AttitudeState=FSpreaderAttitude(); SuspendedOffset=FVector::ZeroVector;
+    TotalPickupRecoveryEvents=0;
     if (bExternalJobs)
     {
         if (IsValid(CargoActor)) CargoActor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
@@ -213,7 +214,7 @@ void APortWorkingCrane::FlushParts()
     SetActorLocation(Home+Orientation.RotateVector(FVector(0,Head.Y,0)));
     Trolley->SetRelativeLocation(FVector(Head.X,0,BeamZ));
     Spreader->SetRelativeLocationAndRotation(FVector(Head.X,0,Head.Z)+SuspendedOffset,
-        FRotator(0,FMath::RadiansToDegrees(SuspensionState.Yaw),0));
+        AttitudeState.Rotation(SuspensionState.Yaw));
     // Telescope geometry is refreshed by AdvanceTelescope only when its length
     // changes. Moving the parent already carries all sensors and lock corners.
     bRopeVisualsDirty=true;
@@ -262,7 +263,9 @@ bool APortWorkingCrane::DestinationClear() const
 void APortWorkingCrane::Stop(const FString& Reason,EPortCraneFault Kind)
 {
     Fault=Reason; FaultType=Kind; SetOperationPaused(true);
-    if(Kind==EPortCraneFault::SensorUnavailable || Kind==EPortCraneFault::GantryUnavailable)
+    if(Kind==EPortCraneFault::PickupUnavailable)
+    {PORTSIM_SIM_LOG(LogTemp,Warning,TEXT("EQUIPMENT_PICKUP_ISOLATED: crane=%d %s"),CraneID,*Reason);}
+    else if(Kind==EPortCraneFault::SensorUnavailable || Kind==EPortCraneFault::GantryUnavailable)
     { PORTSIM_SIM_LOG(LogTemp,Warning,TEXT("EQUIPMENT_SENSOR_FAULT: crane=%d %s"),CraneID,*Reason); }
     else { PORTSIM_SIM_LOG(LogTemp,Error,TEXT("WORKING_CRANE_%d: %s"),CraneID,*Reason); }
 }
@@ -430,7 +433,8 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
     // above the dock until the returning AGV is stopped beneath the spreader.
     if (Stage==5 && !bDestinationReady) { MoveSTS(StageHoldTarget,Dt); return; }
     if(!bRailSafetyHold) StageTime+=Dt;
-    if (StageTime>STSProfile.StageTimeout) { Stop(TEXT("Job stage timed out")); return; }
+    const double StageBudget=STSProfile.StageTimeout*(Stage==2?1+PickupRecoveryCount:1);
+    if (StageTime>StageBudget) { Stop(TEXT("Job stage timed out")); return; }
     const FVector Source=Stage==3?Local(Pickup.TrialOrigin):Local(Slots[SourceSlot]);
     const FVector Destination=Local(Slots[1-SourceSlot]);
     if(Stage==2)

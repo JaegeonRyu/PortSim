@@ -5,6 +5,7 @@
 #include "PortSiteLogistics.h"
 #include "Async/Async.h"
 #include "PortWorkingCrane.h"
+#include "HoistDriveLimits.h"
 #include "PortContainerActor.h"
 #include "PortAGVActor.h"
 #include "PortSupportVehicle.h"
@@ -124,6 +125,10 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
     O->SetStringField(TEXT("recovery_status"),RecoveryStatus);
     O->SetBoolField(TEXT("sensor_failure"),bSensorFault);
     O->SetBoolField(TEXT("gantry_failure"),bGantryFault);
+    O->SetBoolField(TEXT("pickup_failure"),IsPickupUnavailable());
+    O->SetNumberField(TEXT("pickup_recovery_count"),PickupRecoveryCount);
+    O->SetNumberField(TEXT("pickup_recovery_events"),TotalPickupRecoveryEvents);
+    O->SetStringField(TEXT("pickup_recovery_phase"),PickupRecoveryPhase);
     O->SetBoolField(TEXT("auto_sensor_recovery"),bAutoSensorRecovery);
     O->SetStringField(TEXT("sensor_repair_method"),SensorRepairMethod==EPortSensorRepairMethod::Reboot?TEXT("reboot"):TEXT("technician"));
     O->SetStringField(TEXT("sensor_repair_phase"),SensorRepairPhase);
@@ -186,7 +191,8 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
     O->SetStringField(TEXT("model"),TEXT("kinematic_level_spreader"));
     if(STSProfile.bReady)
     {
-        O->SetStringField(TEXT("model"),TEXT("reduced_order_taut_rope_sway_yaw"));
+        O->SetStringField(TEXT("model"),STSProfile.Pickup.Attitude.Enabled?
+            TEXT("reduced_order_taut_rope_with_bounded_trim"):TEXT("reduced_order_taut_rope_sway_yaw"));
         if(!bSTS)
         {
             TSharedPtr<FJsonObject> Profile;
@@ -203,6 +209,17 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
         Physics->SetNumberField(TEXT("skew_deg"),FMath::RadiansToDegrees(D.Yaw));
         Physics->SetNumberField(TEXT("skew_rate_deg_s"),FMath::RadiansToDegrees(D.YawRate));
         Physics->SetNumberField(TEXT("skew_control_torque_nm"),D.ControlTorque);
+        auto Trim=Object();
+        Trim->SetBoolField(TEXT("enabled"),STSProfile.Pickup.Attitude.Enabled);
+        Trim->SetStringField(TEXT("provenance"),TEXT("equivalent_trim_drive_simulation_assumptions"));
+        Vector(Trim,TEXT("pitch_roll_deg"),FVector(AttitudeState.Angle.X,AttitudeState.Angle.Y,0));
+        Vector(Trim,TEXT("rate_deg_s"),FVector(AttitudeState.Rate.X,AttitudeState.Rate.Y,0));
+        Vector(Trim,TEXT("torque_nm"),FVector(AttitudeState.Torque.X,AttitudeState.Torque.Y,0));
+        Trim->SetBoolField(TEXT("saturated"),AttitudeState.Saturated);
+        Trim->SetNumberField(TEXT("max_angle_deg"),STSProfile.Pickup.Attitude.MaxAngle);
+        Trim->SetNumberField(TEXT("max_rate_deg_s"),STSProfile.Pickup.Attitude.MaxRate);
+        Trim->SetNumberField(TEXT("max_torque_nm"),STSProfile.Pickup.Attitude.MaxTorque);
+        O->SetObjectField(TEXT("spreader_attitude"),Trim);
         Physics->SetNumberField(TEXT("motor_torque_each_nm"),D.MotorTorque);
         Physics->SetNumberField(TEXT("motor_rpm"),D.MotorRPM);
         Physics->SetNumberField(TEXT("motor_power_w"),D.MotorPower);
@@ -298,6 +315,9 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
         O->SetNumberField(TEXT("rope_length_m"),(BeamZ-Head.Z)*.01);
         const double ControlMass=bCarrying?(Pickup.EstimateValid?Pickup.EstimatedMass:STSProfile.ContainerMassKg):0;
         O->SetNumberField(TEXT("hoist_limit_mps"),STSProfile.HoistLimit(ControlMass,bCarrying)*.01);
+        O->SetNumberField(TEXT("hoist_power_speed_limit_mps"),HoistDriveLimits::SpeedMps(C,
+            STSProfile.SpreaderMassKg+(bCarrying && IsValid(CargoActor)?CargoActor->MassKg:0),
+            STSProfile.HoistAcceleration*.01,STSProfile.HoistPowerW));
         O->SetNumberField(TEXT("rated_payload_kg"),STSProfile.RatedPayloadKg);
         O->SetNumberField(TEXT("trolley_limit_mps"),STSProfile.TrolleySpeed*.01);
         O->SetNumberField(TEXT("gantry_limit_mps"),STSProfile.GantrySpeed*.01);
@@ -323,7 +343,8 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
         S->SetNumberField(TEXT("sway_deg"),Observation.SwayDegrees);
         S->SetNumberField(TEXT("hoist_acceleration_mps2"),Observation.HoistAcceleration*.01);
         auto Pick=Object();
-        Pick->SetStringField(TEXT("phase"),Stage<2?TEXT("approach"):(Stage==2&&!TelescopeReady()?TEXT("telescope"):Pickup.PhaseName()));
+        Pick->SetStringField(TEXT("phase"),PickupRecoveryStep?PickupRecoveryPhase:
+            FString(Stage<2?TEXT("approach"):(Stage==2&&!TelescopeReady()?TEXT("telescope"):Pickup.PhaseName())));
         Pick->SetStringField(TEXT("reason"),Pickup.Reason);
         Pick->SetBoolField(TEXT("target_visible"),Observation.bTargetVisible);
         Pick->SetBoolField(TEXT("verified"),Pickup.EstimateValid);
@@ -341,7 +362,8 @@ TSharedRef<FJsonObject> APortWorkingCrane::DashboardState() const
             Corner->SetBoolField(TEXT("seated"),Observation.CornerSeated[I]);
             Corner->SetBoolField(TEXT("lock_requested"),Pickup.RequestLocks[I]);
             Corner->SetBoolField(TEXT("locked"),Observation.Locked[I]);
-            Vector(Corner,TEXT("error_m"),Observation.CornerError[I],.01);Corners.Add(Value(Corner));
+            Vector(Corner,TEXT("error_m"),Observation.CornerError[I],.01);
+            Vector(Corner,TEXT("relative_velocity_mps"),Observation.CornerRelativeVelocity[I],.01);Corners.Add(Value(Corner));
         }
         Pick->SetArrayField(TEXT("corners"),Corners);O->SetObjectField(TEXT("pickup"),Pick);
         TArray<TSharedPtr<FJsonValue>> Loads,Locks;

@@ -1,6 +1,7 @@
 #include "TerminalReplay.h"
 #include "PortWorkingCrane.h"
 #include "PortSiteLogistics.h"
+#include "PortContainerActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 
@@ -22,6 +23,12 @@ void APortWorkingCrane::SetGantryFailure(bool Failed)
 
 void APortWorkingCrane::RepairEquipment()
 {
+    if(IsPickupUnavailable())
+    {
+        if(RetainsLoad() || (IsValid(CargoActor) && CargoActor->GetBody()->IsSimulatingPhysics())) return;
+        Fault.Empty();FaultType=EPortCraneFault::None;Pickup=FSTSPickupController();
+        PickupRecoveryStep=PickupRecoveryCount=0;PickupRecoveryPhase=TEXT("repaired");RecoveryStatus=TEXT("repaired");NextSample=0;
+    }
     // Never use an equipment repair to clear an overload/collision/lock fault.
     if(!Fault.IsEmpty() && !IsEquipmentUnavailable()) return;
     if(bGantryFault) SetGantryFailure(false);

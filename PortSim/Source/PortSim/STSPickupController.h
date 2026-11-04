@@ -1,5 +1,6 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "SpreaderAttitude.h"
 
 struct FSTSObservation;
 class FJsonObject;
@@ -12,6 +13,9 @@ struct FSTSPickupConfig
     double TrialHeight=30, TrialHorizontalTolerance=10, TrialHold=1, TrialTimeout=60, MinimumCornerFraction=.03, MassStability=.02;
     double TrialLiftTimeout=0; // zero preserves the legacy/programmatic trial timeout
     int32 MaxAttempts=2;
+    FSpreaderAttitudeConfig Attitude;
+    int32 RecoveryMaxCycles=0;
+    double RecoveryClearance=50,RecoveryTimeout=45,RecoveryStableTime=2;
     FVector PoseBias=FVector::ZeroVector;
     bool Load(TSharedPtr<FJsonObject> Root,FString& Error);
     bool PickupSpeedWithin(const FVector& RelativeVelocity) const
@@ -19,11 +23,13 @@ struct FSTSPickupConfig
 };
 
 enum class ESTSPickupPhase : uint8 { Align, Seat, Lock, Attach, TrialLift, TrialHold, Complete, Failed };
+enum class ESTSPickupFailure : uint8 { None, AlignmentExhausted, Safety };
 
 /** Receives measurements only: deliberately has no actor, world, or true mass/CoG access. */
 struct FSTSPickupController
 {
     ESTSPickupPhase Phase=ESTSPickupPhase::Align;
+    ESTSPickupFailure Failure=ESTSPickupFailure::None;
     FVector Target=FVector::ZeroVector, TrialOrigin=FVector::ZeroVector, EstimatedCoG=FVector::ZeroVector;
     double EstimatedMass=0, StableTime=0, PhaseTime=0, LastSample=-1, AlignmentTime=0;
     double MaximumSeatStableTime=0;
@@ -37,5 +43,5 @@ struct FSTSPickupController
     const TCHAR* PhaseName() const;
 private:
     void Enter(ESTSPickupPhase Next,const TCHAR* Why);
-    void Fail(const TCHAR* Why);
+    void Fail(const TCHAR* Why,ESTSPickupFailure Kind=ESTSPickupFailure::Safety);
 };

@@ -6,7 +6,7 @@
     "Below 25 LT use the slowest-boundary loaded condition (87 m/min); interpolate linearly between documented loaded points.",
     "Sensors are synthetic observations. Four corner loads use a quasi-static bilinear load split, not independent constraint reactions.",
     "Positions, accelerations, sensor tolerances, masses and CoG below are simulation assumptions.",
-    "Site STS uses a reduced-order taut-rope suspension; roll/pitch constrained. Cable elasticity is diagnostic only. Motor and mount data are assumptions, not verified installation data.",
+    "Site STS uses reduced-order taut-rope sway/yaw plus a bounded equivalent pitch/roll trim drive. Cable elasticity is diagnostic only. Motor, trim drive and mount data are simulation assumptions, not verified installation data.",
     "Spreader mass is an 8,000 kg simulation assumption. Wind uses the visible telescopic-frame silhouette when empty and adds the active 20/40/45 ft container dimensions when loaded; wind_area_m2 remains a legacy fallback for isolated dynamics.",
     "Sensor metadata identifies manufacturer specifications separately from derived/assumed installation geometry. Source CSV IDs are mapped by function, not by number."
   ],
@@ -537,6 +537,21 @@
   "sensor_reference_revision": "DGT-public-sensors-2026-09-24",
   "sensor_reference_scope": "센서 제품 사양·설치 원칙을 기존 ZPMC 형상에 적용. DGT 실장 모델·절대 XYZ는 미확인. 현대 DGT의 크레인 치수와 Bromma 스프레더 질량은 적용하지 않음.",
   "pickup_control": {
+    "attitude_control": {
+      "enabled": true,
+      "max_angle_deg": 2,
+      "max_rate_degps": 2,
+      "max_acceleration_degps2": 6,
+      "response_per_s": 4,
+      "max_torque_nm": 30000,
+      "cog_depth_m": 1.5
+    },
+    "recovery": {
+      "max_cycles": 2,
+      "clearance_m": 0.5,
+      "retreat_timeout_s": 45,
+      "stable_time_s": 2
+    },
     "kind": "unvalidated_simulation_assumptions",
     "corner_tolerance_m": 0.03,
     "vertical_tolerance_m": 0.02,
