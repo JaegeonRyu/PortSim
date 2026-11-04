@@ -163,7 +163,8 @@ void APortContainerActor::ApplySecuredMotionFraction(double Fraction)
         Velocity=FMath::Lerp(PreviousSecuredVelocity,CurrentSecuredVelocity,Alpha);
     }
     const FQuat Rotation=FQuat::Slerp(PreviousSecuredTransform.GetRotation(),CurrentSecuredTransform.GetRotation(),Alpha).GetNormalized();
-    SetActorLocationAndRotation(Position,Rotation,false,nullptr,ETeleportType::TeleportPhysics);
+    if(!GetActorLocation().Equals(Position,0.) || !GetActorQuat().Equals(Rotation,0.))
+        SetActorLocationAndRotation(Position,Rotation,false,nullptr,ETeleportType::TeleportPhysics);
     KinematicVelocityCentimetersPerSecond=Velocity;
     KinematicAccelerationCentimetersPerSecondSquared=FMath::Lerp(PreviousSecuredAcceleration,CurrentSecuredAcceleration,Alpha);
     KinematicJerkCentimetersPerSecondCubed=FMath::Lerp(PreviousSecuredJerk,CurrentSecuredJerk,Alpha);

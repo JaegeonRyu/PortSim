@@ -151,7 +151,7 @@ public:
     struct FCargoBay
     {
         int32 Vessel=0;
-        FBox LocalBounds=FBox(ForceInit), SweptBounds=FBox(ForceInit);
+        FBox LocalBounds=FBox(ForceInit), SweptBounds=FBox(ForceInit), FrameBounds=FBox(ForceInit);
         TArray<FSiteShipCargo> Cargo;
     };
     TArray<FCargoBay> CargoBays;

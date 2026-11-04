@@ -326,7 +326,8 @@ void APortSiteLogistics::ApplyVesselMotions(float FrameDurationSeconds)
         const double Margin=Radius*(1.+FMath::Max(Previous.AngularVelocityRadiansPerSecond.Size(),
             Current.AngularVelocityRadiansPerSecond.Size())*FrameDurationSeconds/3.);
         // Retain old query poses too, so stale geometry can never cause false hits.
-        Bay.SweptBounds+=Sweep.ExpandBy(Margin);
+        Bay.FrameBounds=Sweep.ExpandBy(Margin);
+        Bay.SweptBounds+=Bay.FrameBounds;
         CargoBayIndex.Set(I,{Bay.SweptBounds});
     }
     for(const auto& Crane:Equipment) if(IsValid(Crane) && IsValid(Crane->CargoActor))
@@ -2753,7 +2754,8 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
             if(!FTerminalReplay::IsAdvancingPhysics() && Box->LocationOwner==ECargoOwner::Ship && !Box->GetAttachParentActor()) { UpdateCargoMotion(Box); Box->ApplySecuredMotionFraction(1.); }
             if(DeferArtwork) Box->EndVisualFrame();
         }
-        for(const auto& Crane:Equipment) Crane->DeferRopeVisuals(false);
+        if(!FTerminalReplay::IsAdvancingPhysics())
+            for(const auto& Crane:Equipment) Crane->DeferRopeVisuals(false);
         bDeferringVisuals=false;
         ExportDashboard(false);
         if(Fault.IsEmpty()) ApplyFreeCargoWind();

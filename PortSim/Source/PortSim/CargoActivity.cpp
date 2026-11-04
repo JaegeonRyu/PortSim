@@ -14,6 +14,7 @@ void APortSiteLogistics::RemoveCargoActivity(APortContainerActor* Cargo)
 void APortSiteLogistics::RefreshCargoActivity(APortContainerActor* Cargo)
 {
     if(!IsValid(Cargo) || !Cargo->GetBody()) return;
+    CargoMotionVersions.Remove(Cargo);
     FreeCargo.Remove(Cargo); MovingCargo.Remove(Cargo); FixedCargo.Remove(Cargo);
     if(Cargo->GetBody()->IsSimulatingPhysics()) FreeCargo.Add(Cargo);
     else if(Cargo->GetAttachParentActor()) MovingCargo.Add(Cargo);
@@ -56,6 +57,13 @@ void APortSiteLogistics::PublishCargoPresentation()
         UpdateCargoMotion(Box);
         if(Box->LocationOwner==ECargoOwner::Ship) Box->ApplySecuredMotionFraction(1.);
     }
+    for(int32 I=0;I<CargoBays.Num();++I)
+    {
+        auto& Bay=CargoBays[I];
+        if(Bay.FrameBounds.IsValid)
+        { Bay.SweptBounds=Bay.FrameBounds; CargoBayIndex.Set(I,{Bay.SweptBounds}); }
+    }
+    for(const auto& Crane:Equipment) if(IsValid(Crane)) Crane->DeferRopeVisuals(false);
 }
 
 void APortSiteLogistics::SynchronizeFreeCargoCollision(float Dt)
