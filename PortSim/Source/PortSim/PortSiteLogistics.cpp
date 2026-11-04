@@ -286,18 +286,56 @@ bool APortSiteLogistics::ResolveVesselTransform(const FSiteShipCargo& Cargo,FVec
 
 void APortSiteLogistics::ApplyVesselMotions(float FrameDurationSeconds)
 {
-    for(auto* Records:{&Manifest,&RetainedCargo,&ExportCargo}) for(auto& Cargo:*Records)
+    const int32 Count=Manifest.Num()+RetainedCargo.Num()+ExportCargo.Num();
+    if(IndexedCargoCount!=Count)
     {
-        auto* Actor=Cargo.Actor.Get();
-        if(!IsValid(Actor) || Actor->LocationOwner!=ECargoOwner::Ship || Actor->GetAttachParentActor()) continue;
-        FVector Position,Velocity,Acceleration,Jerk;FQuat Rotation;
-        if(!ResolveVesselTransform(Cargo,Position,Rotation,Velocity,Acceleration,Jerk)) continue;
-        Actor->SetSecuredVesselMotion(Position,Rotation,Velocity,Acceleration,Jerk,FrameDurationSeconds,!bDeferringVisuals);
-        if(Equipment.IsValidIndex(YardCraneCount+Cargo.STS))
-            Equipment[YardCraneCount+Cargo.STS]->UpdateMovingShipSource(Actor,Actor->GetActorLocation());
+        CargoBays.Reset(); CargoSources.Reset(); CargoBayIndex.Reset(); CargoMotionVersions.Reset();
+        TMap<FIntVector,int32> Groups;
+        for(const auto* Records:{&Manifest,&RetainedCargo,&ExportCargo}) for(const auto& Cargo:*Records)
+        {
+            auto* Box=Cargo.Actor.Get(); if(!IsValid(Box)) continue;
+            const FVector Base=Cargo.Transform.GetLocation();
+            const FIntVector Key(Cargo.STS/3,FMath::FloorToInt(Base.X/2000.),FMath::FloorToInt(Base.Y/2000.));
+            int32* Found=Groups.Find(Key);
+            const int32 Index=Found?*Found:CargoBays.AddDefaulted();
+            if(!Found) Groups.Add(Key,Index);
+            auto& Bay=CargoBays[Index]; Bay.Vessel=Cargo.STS/3; Bay.Cargo.Add(Cargo);
+            const double Radius=Box->ExternalDimensionsCm.Size()*.5+2.;
+            Bay.LocalBounds+=FBox(Base-FVector(Radius),Base+FVector(Radius));
+            Bay.SweptBounds+=Box->GetBody()->Bounds.GetBox();
+            CargoSources.Add(Box,Cargo);
+        }
+        IndexedCargoCount=Count;
+    }
+    PreviousCargoMotions=CurrentCargoMotions;
+    CurrentCargoMotions=VesselMotions;
+    CargoMotionDuration=FrameDurationSeconds; ++CargoMotionVersion;
+    ShipWindowStart=0; ShipWindowEnd=1;
+    for(int32 I=0;I<CargoBays.Num();++I)
+    {
+        auto& Bay=CargoBays[I]; const int32 V=Bay.Vessel;
+        if(!CurrentCargoMotions.IsValidIndex(V) || !VesselBasePivots.IsValidIndex(V)) continue;
+        const auto& Current=CurrentCargoMotions[V];
+        const auto& Previous=PreviousCargoMotions.IsValidIndex(V)?PreviousCargoMotions[V]:Current;
+        const FVector Center=Bay.LocalBounds.GetCenter(), Pivot=VesselBasePivots[V];
+        const double Radius=Bay.LocalBounds.GetExtent().Size();
+        const FVector P0=Previous.TransformPosition(Center,Pivot),P1=Current.TransformPosition(Center,Pivot);
+        FBox Sweep(ForceInit); Sweep+=P0; Sweep+=P1;
+        Sweep+=P0+Previous.VelocityAtPosition(Center,Pivot)*FrameDurationSeconds/3.;
+        Sweep+=P1-Current.VelocityAtPosition(Center,Pivot)*FrameDurationSeconds/3.;
+        const double Margin=Radius*(1.+FMath::Max(Previous.AngularVelocityRadiansPerSecond.Size(),
+            Current.AngularVelocityRadiansPerSecond.Size())*FrameDurationSeconds/3.);
+        // Retain old query poses too, so stale geometry can never cause false hits.
+        Bay.SweptBounds+=Sweep.ExpandBy(Margin);
+        CargoBayIndex.Set(I,{Bay.SweptBounds});
+    }
+    for(const auto& Crane:Equipment) if(IsValid(Crane) && IsValid(Crane->CargoActor))
+    {
+        auto* Box=Crane->CargoActor.Get(); UpdateCargoMotion(Box);
+        if(Box->LocationOwner==ECargoOwner::Ship && !Box->GetAttachParentActor())
+        { Box->ApplySecuredMotionFraction(0.); Crane->UpdateMovingShipSource(Box,Box->GetActorLocation()); }
     }
 }
-
 void APortSiteLogistics::AddShipCargo(FVector Position,int32 STS,int32 Wave,FName ContainerName,bool bLoadFromYard,
     bool bRetainAboard,FIntVector ImportedSlot)
 {
@@ -2695,7 +2733,7 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
         // AddForce accumulates for the next Chaos frame; it is not a traffic-
         // step impulse. Adding it at every 50 ms step multiplied wind by up to
         // 40 on a two-second accelerated frame and displaced released loads.
-        for(const auto& Cargo:ShipContainers) if(IsValid(Cargo))
+        for(const auto& Cargo:FreeCargo) if(Cargo.IsValid())
             Cargo->ApplyWind(WindVelocityMetersPerSecond,STSProfile.Dynamics.WindDrag);
     };
     PendingSimulationSeconds+=Dt;
@@ -2710,9 +2748,9 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
     for(const auto& Crane:Equipment) Crane->DeferRopeVisuals(true);
     ON_SCOPE_EXIT
     {
-        for(const auto& Box:ShipContainers) if(IsValid(Box))
+        if(!FTerminalReplay::IsAdvancingPhysics() || DeferArtwork) for(const auto& Box:ShipContainers) if(IsValid(Box))
         {
-            if(Box->LocationOwner==ECargoOwner::Ship && !Box->GetAttachParentActor()) Box->ApplySecuredMotionFraction(1.);
+            if(!FTerminalReplay::IsAdvancingPhysics() && Box->LocationOwner==ECargoOwner::Ship && !Box->GetAttachParentActor()) { UpdateCargoMotion(Box); Box->ApplySecuredMotionFraction(1.); }
             if(DeferArtwork) Box->EndVisualFrame();
         }
         for(const auto& Crane:Equipment) Crane->DeferRopeVisuals(false);
@@ -2731,11 +2769,11 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
         ShipWindowStart=double(Step)/Steps; ShipWindowEnd=double(Step+1)/Steps;
         {
         PortSimPerformance::FScope VesselTiming(TEXT("secured_cargo_motion"));
-        for(const auto* Records:{&Manifest,&RetainedCargo,&ExportCargo}) for(const auto& C:*Records)
+        for(const auto& Crane:Equipment) if(IsValid(Crane) && IsValid(Crane->CargoActor))
         {
-            auto* Box=C.Actor.Get();
-            if(!Box || Box->LocationOwner!=ECargoOwner::Ship || Box->GetAttachParentActor()) continue;
-            Box->SetSecuredMotionWindow(ShipWindowStart,ShipWindowEnd);
+            auto* Box=Crane->CargoActor.Get(); UpdateCargoMotion(Box);
+            if(Box->LocationOwner==ECargoOwner::Ship && !Box->GetAttachParentActor())
+                Box->SetSecuredMotionWindow(ShipWindowStart,ShipWindowEnd);
         }
         }
         BeginTrafficFrame();
@@ -2746,14 +2784,26 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
 
 void APortSiteLogistics::SynchronizeShipCollision(const FBox& Query,double ControlFraction)
 {
-    if(!bDeferringVisuals) return;
+    if(!bDeferringVisuals && !FTerminalReplay::IsAdvancingPhysics()) return;
     PortSimPerformance::FScope Timing(TEXT("ship_query_sync"));
-    for(const auto& Box:ShipContainers)
-        if(IsValid(Box) && Box->LocationOwner==ECargoOwner::Ship && !Box->GetAttachParentActor() &&
-            Box->SecuredMotionCouldIntersect(Query))
+    auto Sync=[&](APortContainerActor* Box)
+    {
+        if(!IsValid(Box) || Box->LocationOwner!=ECargoOwner::Ship || Box->GetAttachParentActor()) return;
+        UpdateCargoMotion(Box);
+        Box->SetSecuredMotionWindow(ShipWindowStart,ShipWindowEnd);
+        // Include old physical locations as well as the analytic sweep.
+        if(Box->SecuredMotionCouldIntersect(Query) || Box->GetBody()->Bounds.GetBox().Intersect(Query))
             Box->ApplySecuredMotionFraction(ControlFraction);
+    };
+    if(CargoBays.IsEmpty())
+    {
+        // Standalone query tests / pre-initialization have no manifest index.
+        for(const auto& Box:ShipContainers) Sync(Box);
+        return;
+    }
+    for(int32 Index:CargoBayIndex.Query({Query}))
+        for(const auto& Cargo:CargoBays[Index].Cargo) Sync(Cargo.Actor.Get());
 }
-
 bool APortSiteLogistics::PrepareKinematicPhysicsFrame() const
 {
     if(FTerminalReplay::IsPredicting()) return false;
@@ -2880,7 +2930,7 @@ void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
     // A box held by the RMG no longer contributes to vehicle load/CoG.
     TMap<APortAGVActor*,double> DeckMass;
     TMap<APortAGVActor*,FVector> DeckMoment;
-    for(const auto& Box:ShipContainers) if(IsValid(Box) && Box->LocationOwner==ECargoOwner::AGV)
+    for(const auto& Box:MovingCargo) if(Box.IsValid() && Box->LocationOwner==ECargoOwner::AGV)
     {
         auto* Carrier=Cast<APortAGVActor>(Box->GetAttachParentActor());
         if(!Carrier) continue;

@@ -142,6 +142,27 @@ public:
     void Advance(float Dt,bool Paused);
     // Called immediately before every crane scene query inside a traffic step.
     void SynchronizeShipCollision(const FBox& Query,double ControlFraction);
+    void RefreshCargoActivity(APortContainerActor* Cargo);
+    void RemoveCargoActivity(APortContainerActor* Cargo);
+    void RebuildCargoActivity();
+    void PublishCargoPresentation();
+    void SynchronizeFreeCargoCollision(float Dt);
+    TSet<TWeakObjectPtr<APortContainerActor>> FreeCargo, MovingCargo, FixedCargo;
+    struct FCargoBay
+    {
+        int32 Vessel=0;
+        FBox LocalBounds=FBox(ForceInit), SweptBounds=FBox(ForceInit);
+        TArray<FSiteShipCargo> Cargo;
+    };
+    TArray<FCargoBay> CargoBays;
+    FTrafficSpatialIndex CargoBayIndex;
+    TMap<TWeakObjectPtr<APortContainerActor>,FSiteShipCargo> CargoSources;
+    TMap<TWeakObjectPtr<APortContainerActor>,uint64> CargoMotionVersions;
+    TArray<FPortVesselMotion> PreviousCargoMotions, CurrentCargoMotions;
+    uint64 CargoMotionVersion=0;
+    float CargoMotionDuration=0;
+    int32 IndexedCargoCount=-1;
+    void UpdateCargoMotion(APortContainerActor* Cargo);
     bool IsDeferringVisuals() const { return bDeferringVisuals; }
     void ResetLogistics();
     void ExportDashboard(bool Paused, bool Force=false);

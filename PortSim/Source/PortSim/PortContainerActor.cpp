@@ -1,4 +1,6 @@
 #include "PortContainerActor.h"
+#include "PortCargoBody.h"
+#include "PortSiteLogistics.h"
 #include "PortAGVActor.h"
 #include "PortEnvironmentComponent.h"
 #include "PortAGVActor.h"
@@ -14,7 +16,7 @@ APortContainerActor::APortContainerActor()
 {
     PrimaryActorTick.bCanEverTick=false;
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
-    Body=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ContainerBody"));
+    Body=CreateDefaultSubobject<UPortCargoBody>(TEXT("ContainerBody"));
     SetRootComponent(Body);
     Body->SetStaticMesh(Cube.Object);
     Body->SetWorldScale3D(ExternalDimensionsCm/100.f);
@@ -42,6 +44,13 @@ void APortContainerActor::BeginPlay()
     Super::BeginPlay();
     SetPhysicalParameters(MassKg,CoGOffsetCm);
     ApplyContainerAppearance();
+    if(auto* Site=Cast<APortSiteLogistics>(GetOwner())) Site->RefreshCargoActivity(this);
+}
+
+void APortContainerActor::EndPlay(const EEndPlayReason::Type Reason)
+{
+    if(auto* Site=Cast<APortSiteLogistics>(GetOwner())) Site->RemoveCargoActivity(this);
+    Super::EndPlay(Reason);
 }
 
 void APortContainerActor::SetPhysicalParameters(float Mass,FVector CoGOffset)
