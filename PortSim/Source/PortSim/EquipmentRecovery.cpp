@@ -108,7 +108,8 @@ void APortSiteLogistics::ManageEquipmentFailures()
         auto* Crane=Equipment[I].Get();
         if(Crane->IsEquipmentUnavailable())
         {
-            Crane->RecoveryStatus=Crane->bGantryFault?TEXT("gantry_blocked_repair_required"):
+            Crane->RecoveryStatus=Crane->IsPickupUnavailable()?TEXT("pickup_alignment_isolated"):
+                Crane->bGantryFault?TEXT("gantry_blocked_repair_required"):
                 Crane->bFaultEvacuating?TEXT("evacuating_with_independent_safety"):
                 Crane->bFaultEvacuationComplete?TEXT("relocated_wait_repair"):Crane->RetainsLoad()?TEXT("load_retained_repair_required"):
                 Crane->IsBusy()?TEXT("verification_repair_required"):TEXT("isolated_reassigning");

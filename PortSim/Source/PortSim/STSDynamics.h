@@ -77,7 +77,7 @@ struct FSTSDynamicsConfig : FSTSDynamicsParameters
     bool Load(TSharedPtr<FJsonObject> Root,FString& Error);
 };
 
-/** Two sway coordinates + yaw. Roll/pitch constrained; no elastic/slack-rope FEM. */
+/** Two sway coordinates + yaw, with an optional bounded trim-drive pose/moment. No slack-rope FEM. */
 struct FSTSSuspension
 {
     FVector2D Angle=FVector2D::ZeroVector,Rate=FVector2D::ZeroVector;
@@ -87,6 +87,8 @@ struct FSTSSuspension
     bool Saturated=false;
     FString Fault;
     void Step(const FSTSDynamicsParameters& C,double Dt,double Length,double LengthRate,
-        FVector Acceleration,FVector DriveVelocity,double Mass,FVector CoG,double PowerW);
+        FVector Acceleration,FVector DriveVelocity,double Mass,FVector CoG,double PowerW,
+        FVector2D PitchRollDegrees=FVector2D::ZeroVector,FVector2D TrimTorque=FVector2D::ZeroVector,
+        FVector2D CornerHalfSpanM=FVector2D(1,5.2));
     double SwayDegrees() const { return FMath::RadiansToDegrees(Angle.Size()); }
 };

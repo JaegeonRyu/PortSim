@@ -28,7 +28,13 @@ void AQuayCrane::BeginPickupTest()
     const FRotator Rotation(0,PickupTestCase==TEXT("yaw")?1.5:0,0);
     auto* Box=GetWorld()->SpawnActor<APortContainerActor>(Source+FVector(30,-20,0),Rotation,Spawn);
     Box->InitializeContainer(9000);ContainerActors.Add(Box);
-    Box->SetPhysicalParameters(PickupTestCase==TEXT("eccentric")?24000:12000,PickupTestCase==TEXT("eccentric")?FVector(25,-80,0):FVector::ZeroVector);
+    if(PickupTestCase==TEXT("heavy45"))
+    {
+        FPortContainerSpecification Spec;Spec.Size=EPortContainerSize::Ft45;Spec.LengthFt=45;Spec.LengthCm=1371.6;
+        Box->ConfigureSpecification(Spec);
+    }
+    Box->SetPhysicalParameters(PickupTestCase==TEXT("heavy45")?29300:PickupTestCase==TEXT("eccentric")?24000:12000,
+        PickupTestCase==TEXT("eccentric")?FVector(25,-80,0):FVector::ZeroVector);
     if(!Box->GetBody()->GetCenterOfMass().Equals(Box->GetActorLocation()+Box->GetActorQuat().RotateVector(Box->CoGOffsetCm),.1))
     {UE_LOG(LogTemp,Error,TEXT("PORTSIM_PICKUP_FAIL: physical CoG does not match centimetre input"));FPlatformMisc::RequestExitWithStatus(false,1);return;}
     Box->GetBody()->SetSimulatePhysics(false);Box->LocationOwner=ECargoOwner::Ship;
@@ -94,7 +100,7 @@ void AQuayCrane::TickPickupTest(float Dt)
         FPlatformMisc::RequestExitWithStatus(false,Pass?0:1);
     };
     const bool RMG=!C->bSTS;
-    const bool Negative=PickupTestCase!=TEXT("offset")&&PickupTestCase!=TEXT("eccentric")&&PickupTestCase!=TEXT("wave");
+    const bool Negative=PickupTestCase!=TEXT("offset")&&PickupTestCase!=TEXT("eccentric")&&PickupTestCase!=TEXT("wave")&&PickupTestCase!=TEXT("heavy45");
     // Attachment's instantaneous position is checked in the runtime. The cargo
     // may legitimately move during later control steps of the same render frame.
     if(!WasAttached&&C->bCarrying && !C->Observation.AllLocked())

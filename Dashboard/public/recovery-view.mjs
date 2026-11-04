@@ -8,10 +8,18 @@ export function renderRecoveryDetails(actor){
  let html='';
  if(actor?.loaded_recovery_active)html+=row('R/S 복구',actor.loaded_recovery_status)+row('인계 진행',`${actor.recovery_transferred_count}/${actor.recovery_cargo_count}개`);
  if(actor?.fault_scope==='equipment'){
-  html=`<div class="detail-subhead">${actor.gantry_failure?'갠트리 주행 고장':'센서 고장'} · 장비 격리</div>`;
+  html=`<div class="detail-subhead">${actor.pickup_failure?'체결 정렬 실패':actor.gantry_failure?'갠트리 주행 고장':'센서 고장'} · 장비 격리</div>`;
   const handling=actor.retained_load?'잠금·화물 유지 · 수리 대기':actor.recovery_status==='verification_repair_required'?'안착 검증 미완료 · 수리 대기':'미인양 작업 재배정 · 대체 불가 시 대기';
   html+=row('화물 처리',handling);
   html+=row('운영 범위','관련 장비·작업만 격리');
+ }
+ const retryPhases={unlocking:'잠금 해제 확인',retreating:'안전 간격으로 후퇴',stabilizing:'후퇴 위치 안정화',reacquiring:'센서로 재접근',isolated:'안전 후퇴 후 장비 격리',complete:'체결·시험 인양 완료',repaired:'수동 복구 완료'};
+ if(actor?.pickup_recovery_events>0)html+=row('체결 재접근',`${retryPhases[actor.pickup_recovery_phase]||actor.recovery_status||'기록 유지'} · 누적 ${actor.pickup_recovery_events}회`);
+ const trim=actor?.spreader_attitude;
+ if(trim?.enabled){
+  const number=n=>Number.isFinite(n)?n.toFixed(3):'—';
+  html+=row('스프레더 Pitch / Roll',`${number(trim.pitch_roll_deg?.[0])}° / ${number(trim.pitch_roll_deg?.[1])}°`);
+  html+=row('자세 보정 토크',`${number(trim.torque_nm?.[0])} / ${number(trim.torque_nm?.[1])} N·m${trim.saturated?' · 한도 도달':''}`);
  }
  if(actor?.rail_safety_hold)html+=row('레일 이동','인접 크레인 간격 확보 대기');
  if(actor?.gantry_failure)html+=row('갠트리 고장','주행 불가 · 현재 레일 위치 유지 · 수동 수리 필요');

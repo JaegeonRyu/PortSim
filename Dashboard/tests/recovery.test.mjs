@@ -14,3 +14,10 @@ test('reassigned container and unavailable alternatives are explicit and escaped
  assert.match(renderRecoveryDetails({recovery_hold:'<script>'}),/&lt;script&gt;/);
  assert.equal(renderRecoveryDetails({}), '');
 });
+test('pickup isolation and measured trim are shown without claiming a sensor failure',()=>{
+ const html=renderRecoveryDetails({fault_scope:'equipment',pickup_failure:true,pickup_recovery_events:3,pickup_recovery_phase:'isolated',
+  spreader_attitude:{enabled:true,pitch_roll_deg:[.12,-.15],torque_nm:[123,456],saturated:true}});
+ assert.match(html,/체결 정렬 실패/);assert.doesNotMatch(html,/센서 고장/);
+ assert.match(html,/안전 후퇴 후 장비 격리/);assert.match(html,/0.120° \/ -0.150°/);assert.match(html,/123.000 \/ 456.000 N·m/);
+ assert.match(html,/한도 도달/);
+});

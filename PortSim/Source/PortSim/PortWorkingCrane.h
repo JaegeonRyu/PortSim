@@ -13,7 +13,7 @@ class FJsonObject;
 class APortSiteLogistics;
 
 UENUM(BlueprintType)
-enum class EPortCraneFault : uint8 { None, SensorUnavailable, Safety, GantryUnavailable };
+enum class EPortCraneFault : uint8 { None, SensorUnavailable, Safety, GantryUnavailable, PickupUnavailable };
 
 UENUM(BlueprintType)
 enum class EPortSensorRepairMethod : uint8 { Reboot, Technician };
@@ -62,7 +62,10 @@ public:
     UFUNCTION(BlueprintCallable,Category="Failures") void SetGantryFailure(bool Failed);
     UFUNCTION(BlueprintCallable,CallInEditor,Category="Failures") void RepairEquipment();
     bool IsSensorUnavailable() const { return FaultType==EPortCraneFault::SensorUnavailable && !Fault.IsEmpty(); }
-    bool IsEquipmentUnavailable() const { return IsSensorUnavailable() || (FaultType==EPortCraneFault::GantryUnavailable && !Fault.IsEmpty()); }
+    bool IsPickupUnavailable() const { return FaultType==EPortCraneFault::PickupUnavailable && !Fault.IsEmpty(); }
+    bool IsEquipmentUnavailable() const { return IsSensorUnavailable() || IsPickupUnavailable() || (FaultType==EPortCraneFault::GantryUnavailable && !Fault.IsEmpty()); }
+    int32 PickupRecoveryCount=0,TotalPickupRecoveryEvents=0;
+    FString PickupRecoveryPhase;
     bool CanFaultEvacuate() const;
     bool RequestFaultEvacuation(float WorldY,APortSiteLogistics* Coordinator);
     double SensorRepairRemaining() const;
@@ -109,6 +112,8 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Operation") TObjectPtr<APortContainerActor> CargoActor;
 private:
     friend class FEquipmentRecoveryTest;
+    friend class FMovingPickupRecoveryTest;
+    friend class FLoggedSeaPickupTest;
     friend class FRMGAGVHandoverTest;
     bool SecureRMGToAGV();
     bool bAGVHandoverComplete=false;
@@ -122,6 +127,7 @@ private:
     void SynchronizeShipQuery(const FBox& Query) const;
     void AdvanceStep(float Dt, bool bGlobalPaused);
     FSTSSuspension SuspensionState;
+    FSpreaderAttitude AttitudeState;
     FSTSPickupController Pickup;
     double LockProgress[4]={0,0,0,0};
     bool PhysicalSeating[4]={false,false,false,false};
@@ -129,6 +135,14 @@ private:
     FTransform LockedCargoTransform;
     void AdvancePickup(float Dt);
     void SamplePickupGeometry();
+    bool CanRecoverPickup() const;
+    bool StartPickupRecovery();
+    void AdvancePickupRecovery(float Dt);
+    int32 PickupRecoveryStep=0;
+    double PickupRecoverySeconds=0,PickupRecoveryStableSeconds=0,PickupRecoveryLastSample=-1;
+    double PickupRecoveryStartGap=154.5;
+    FString PickupRecoveryReason;
+    bool bIsolateAfterPickupRetreat=false;
     void SampleRMGEnvironment();
 
     FVector SuspendedOffset=FVector::ZeroVector;

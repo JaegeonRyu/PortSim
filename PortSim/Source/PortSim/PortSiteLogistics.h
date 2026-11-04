@@ -200,6 +200,7 @@ private:
     friend class FDashboardEnvironmentTest;
     friend class FBlockedPickupDispatchTest;
     friend class FAGVLeasedEntryDockTest;
+    friend class FMovingPickupRecoveryTest;
     FString DashboardControlSession=FGuid::NewGuid().ToString(EGuidFormats::Digits);
     double NextControlPoll=0;
     TArray<TSharedPtr<FJsonObject>> DashboardCommandResults, RecoveryEvents;
