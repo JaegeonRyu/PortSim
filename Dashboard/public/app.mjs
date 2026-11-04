@@ -6,6 +6,7 @@ let physicsActor=null,physicsHistory=[];
 import {renderRecoveryDetails, faultDialogTitle} from './recovery-view.mjs';
 import {controlPanel,impactFeed,workerImpactDetails} from './control-view.mjs';
 import {renderTerminalOverview} from './terminal-map.mjs';
+import {renderEnvironment,renderWeatherOverview} from './environment-view.mjs';
 import {renderSTSWind} from './sts-wind-view.mjs';
 let terminalLayout=null,layoutFetched=0,mapMode='all';
 
@@ -95,7 +96,7 @@ function heading(){
   $('#page-description').textContent='장비 고장·작업자 진입을 제어하고 센서·하중·슬립·제동을 확인합니다. 날씨는 언리얼 설정을 관측합니다.';
   document.querySelectorAll('[data-view]').forEach(e=>e.classList.toggle('active',e.dataset.view===view));return;
  }
- const info={overview:['항만 모니터링','항만의 움직임을, 한눈에.','선박에서 야드까지. 장비와 화물, 자동 운반의 모든 연결을 살펴보세요.'],equipment:['장비 탐색기','장비 하나하나, 더 깊이.','실행 중인 액터의 변수와 구성 부품, 연결된 화물을 찾아보세요.'],sensors:['센서 레퍼런스','작은 관측이 만드는 자동화.','STS·AGV·RMG 센서의 부착 부위와 관측값, 제어 판단의 연결을 확인하세요.'],performance:['시간 절감 분석','자동화로 확보한 시간.','같은 선박 물량·STS 대수·완료 기준으로 기존 작업과 비교합니다.']}[view];
+ const info={overview:['항만 모니터링','항만의 움직임을, 한눈에.','선박에서 야드까지. 장비와 화물, 자동 운반의 모든 연결을 살펴보세요.'],equipment:['장비 탐색기','장비 하나하나, 더 깊이.','실행 중인 액터의 변수와 구성 부품, 연결된 화물을 찾아보세요.'],sensors:['센서 레퍼런스','작은 관측이 만드는 자동화.','STS·AGV·RMG 센서의 부착 부위와 관측값, 제어 판단의 연결을 확인하세요.'],environment:['환경 변수','항만의 환경을 살펴보세요.','날씨 · 기온 · 가시거리 · 풍향 · 풍속 · 파도 · 너울'],performance:['시간 절감 분석','자동화로 확보한 시간.','같은 선박 물량·STS 대수·완료 기준으로 기존 작업과 비교합니다.']}[view];
  $('#breadcrumb').textContent=info[0];$('#page-title').textContent=info[1];$('#page-description').textContent=info[2];
  document.querySelectorAll('[data-view]').forEach(e=>e.classList.toggle('active',e.dataset.view===view));
 }
@@ -103,6 +104,7 @@ function renderChrome(){
  const counts=Object.fromEntries(Object.keys(types).map(t=>[t,actors().filter(a=>a.type===t).length]));
  $('#sidebar-types').innerHTML=Object.entries(types).filter(([t])=>t!=='other').map(([t,[name,,color]])=>`<button class="type-nav" data-type="${t}"><span class="type-dot" style="background:${color}"></span>${name}<span class="count">${state?counts[t]:'—'}</span></button>`).join('');
  $('#sidebar-status').textContent=live?'실행 데이터 수신 중':state?'마지막 기록 조회 중':'시뮬레이터 실행 대기';
+ $('#kpis').className=view==='environment'?'weather-kpis':'kpis';
  const status=live?'엔진 연결됨':state?'저장된 실행 기록':'엔진 연결 대기';
  const playbackMode={replay:'사전 계산 재생',preparing:'재생 버퍼 준비',live_input_hold:'입력 반영 · 1배속',live_physics_batch:'자유 강체 · 고정 간격 배속',live_chaos:'자유 강체 · 실시간',live:'실시간'}[state?.playback_mode]||'실시간';
  $('#connection').className=`connection ${live?'live':''}`;
@@ -112,7 +114,7 @@ function renderChrome(){
  const completed=state?.delivered||0,total=state?.initial_ship||0;
  const loaded=state?.loaded??0,loadTotal=state?.load_total??0;
  const loadProgress=loadTotal?loaded/loadTotal*100:0;
- $('#kpis').innerHTML=kpi('운영 장비',state?num(fleet.length,0):'—','대',`STS ${counts.sts} · AGV ${counts.agv} · RMG ${counts.rmg} · R/S ${counts.rs}`,'crane')+kpi('현재 작업 중',state?num(running,0):'—','대',`${state?.paused?'운전 일시정지':live?'엔진 상태 기준':'최근 기록 기준'} · 오류 ${fleet.filter(a=>a.state==='fault').length}대`,'sensor')+kpi('야드 적재 완료',state?num(completed,0):'—',`/ ${num(total,0)}개`,`${total?num(completed/total*100):'0'}% 완료 · 선행 인양 ${state?.prefetched_jobs||0}건`,'box',total?completed/total*100:0)+kpi('선적 완료',state?num(loaded,0):'—','/ '+num(loadTotal,0)+'개',loadTotal?num(loadProgress)+'% 완료':'선적 작업 없음','box',loadProgress)+kpi('실행시간',formatDuration(state?.elapsed_seconds??state?.simulation_seconds),'', `${playbackMode} · 설정 ${state?.playback_rate??1}배 / 실제 ${num(state?.actual_playback_rate??state?.effective_playback_rate??1)}배 · 버퍼 ${num(state?.playback_buffer_seconds??0,2)}초`,'clock');
+ $('#kpis').innerHTML=view==='environment'?renderWeatherOverview(state,{live}):kpi('운영 장비',state?num(fleet.length,0):'—','대',`STS ${counts.sts} · AGV ${counts.agv} · RMG ${counts.rmg} · R/S ${counts.rs}`,'crane')+kpi('현재 작업 중',state?num(running,0):'—','대',`${state?.paused?'운전 일시정지':live?'엔진 상태 기준':'최근 기록 기준'} · 오류 ${fleet.filter(a=>a.state==='fault').length}대`,'sensor')+kpi('야드 적재 완료',state?num(completed,0):'—',`/ ${num(total,0)}개`,`${total?num(completed/total*100):'0'}% 완료 · 선행 인양 ${state?.prefetched_jobs||0}건`,'box',total?completed/total*100:0)+kpi('선적 완료',state?num(loaded,0):'—','/ '+num(loadTotal,0)+'개',loadTotal?num(loadProgress)+'% 완료':'선적 작업 없음','box',loadProgress)+kpi('실행시간',formatDuration(state?.elapsed_seconds??state?.simulation_seconds),'', `${playbackMode} · 설정 ${state?.playback_rate??1}배 / 실제 ${num(state?.actual_playback_rate??state?.effective_playback_rate??1)}배 · 버퍼 ${num(state?.playback_buffer_seconds??0,2)}초`,'clock');
  const mix=state?.container_size_counts;
  $('#footer-time').textContent=state?`기록 시각 ${new Date(state.generated_at).toLocaleString('ko-KR')}${mix?` · 20ft ${num(mix['20'],0)}개 / 40ft ${num(mix['40'],0)}개 / 45ft ${num(mix['45'],0)}개`:''}`:'시뮬레이션 데이터 대기';
 }
@@ -366,6 +368,7 @@ function renderContent(){
  lastRendered=`${state?.generated_at}|${live}`;
  heading();
  if(view==='sensors')$('#view-content').innerHTML=sensorsPage();
+ else if(view==='environment')$('#view-content').innerHTML=renderEnvironment(state,{live,age});
  else if(view==='performance')$('#view-content').innerHTML=performancePage();
  else if(view==='agv-physics')$('#view-content').innerHTML=scenarioPage();
  else $('#view-content').innerHTML=`<div class="${view==='equipment'?'full-equipment':''}"><div class="monitor-grid"><div>${view==='overview'?map()+impactFeed(state,impactFocus,live)+stowagePlans():''}${equipmentTable()}</div>${inspector()}</div></div>`;

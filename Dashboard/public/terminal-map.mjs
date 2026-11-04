@@ -70,8 +70,14 @@ function background(layout){
 }
 
 export function renderTerminalOverview(state,layout,{selected=null,focus=null,mode='all'}={}){
+ const clockSeconds=state?.environment?.time_of_day_seconds;
+ const clockTemp=state?.environment?.temperature_celsius;
+ const clockDigits=Number.isFinite(clockSeconds)?(()=>{const hour=Math.floor(clockSeconds/3600)%24,minute=Math.floor(clockSeconds/60)%60;return {text:`${String(hour%12||12).padStart(2,'0')}${String(minute).padStart(2,'0')}`,period:hour<12?'AM':'PM'};})():null;
+ const masks=[63,6,91,79,102,109,125,7,127,111];
+ const segment=(digit,index)=>{const x=5+index*28+(index>=2?9:0),mask=masks[Number(digit)];const parts=[[4,2,17,3],[21,5,3,15],[21,25,3,15],[4,40,17,3],[1,25,3,15],[1,5,3,15],[4,21,17,3]];return parts.map(([dx,y,w,h],i)=>`<rect x="${x+dx}" y="${y}" width="${w}" height="${h}" class="${mask&(1<<i)?'lit':'dim'}"/>`).join('');};
+ const clock=`<div class="terminal-clock" aria-label="시뮬레이션 시각 ${clockDigits?`${clockDigits.period} ${clockDigits.text.slice(0,2)}:${clockDigits.text.slice(2)}`:'기록 대기'}">${clockDigits?`<svg viewBox="0 0 130 45" aria-hidden="true">${[...clockDigits.text].map(segment).join('')}<rect x="62" y="13" width="3" height="4" class="lit"/><rect x="62" y="29" width="3" height="4" class="lit"/></svg>`:'<div class="clock-wait">--:--</div>'}<span>${clockDigits?.period||'--'} · ${Number.isFinite(clockTemp)?clockTemp.toFixed(1)+'°C':'기온 대기'}</span></div>`;
  const controls=`<div class="map-view-controls" aria-label="지도 보기">${[['all','전체'],['yard','야드'],['gap','중앙 공간'],['quay','선석'],['depot','주차장']].map(([key,name])=>`<button class="chip ${key===mode?'selected':''}" data-map-view="${key}" aria-pressed="${key===mode}">${name}</button>`).join('')}</div>`;
- const head=`<div class="panel-head"><div><h2>터미널 오버뷰 <span class="number">ENGINE PLAN</span></h2><p>엔진의 실제 배치 · 장비를 클릭하면 상세 정보가 열립니다.</p></div>${controls}</div>`;
+ const head=`<div class="panel-head"><div><h2>터미널 오버뷰 <span class="number">ENGINE PLAN</span></h2><p>엔진의 실제 배치 · 장비를 클릭하면 상세 정보가 열립니다.</p></div><div class="overview-actions">${controls}${clock}</div></div>`;
  const viewport=mapViewport(layout,mode);
  if(!viewport||!state?.run_id||layout?.run_id!==state.run_id)return `<section class="panel terminal-overview">${head}<div class="map-unavailable"><strong>엔진 배치 데이터 대기</strong><p>새 빌드로 시뮬레이션을 실행하면 실제 도로·야드 배치를 불러옵니다.</p><small>다른 실행의 배경에 현재 장비 위치를 겹쳐 표시하지 않습니다.</small></div></section>`;
  const actors=state.actors||[];

@@ -1,5 +1,7 @@
 #include "PortSiteLogistics.h"
 #include "PortEnvironmentComponent.h"
+#include "PortSimulationClock.h"
+#include "QuayCrane.h"
 #include "Dom/JsonObject.h"
 
 TSharedPtr<FJsonObject> APortSiteLogistics::CaptureEnvironment() const
@@ -7,6 +9,10 @@ TSharedPtr<FJsonObject> APortSiteLogistics::CaptureEnvironment() const
     const auto* E=GetOwner()?GetOwner()->FindComponentByClass<UPortEnvironmentComponent>():nullptr;
     if(!E) return nullptr;
     auto O=MakeShared<FJsonObject>();
+    const auto* Crane=Cast<AQuayCrane>(GetOwner());
+    const double Elapsed=Crane?Crane->AutoElapsed:0.0;
+    O->SetNumberField(TEXT("time_of_day_seconds"),PortSimulationClock::TimeOfDaySeconds(Elapsed));
+    O->SetNumberField(TEXT("temperature_celsius"),PortSimulationClock::TemperatureCelsius(Elapsed));
     O->SetBoolField(TEXT("wind_enabled"),E->IsWindEnabled());
     O->SetNumberField(TEXT("wind_mps"),E->IsWindEnabled()?E->GetWindSpeedMetersPerSecond():0);
     O->SetNumberField(TEXT("effective_wind_mps"),E->GetEffectiveWindSpeedMetersPerSecond());

@@ -19,6 +19,8 @@ const files = new Map([
   ['/recovery-view.mjs', ['recovery-view.mjs', 'text/javascript']],
   ['/control-view.mjs', ['control-view.mjs', 'text/javascript']],
   ['/terminal-map.mjs', ['terminal-map.mjs', 'text/javascript']],
+  ['/environment-view.mjs', ['environment-view.mjs', 'text/javascript']],
+  ['/environment.css', ['environment.css', 'text/css']],
   ['/sts-wind-view.mjs', ['sts-wind-view.mjs', 'text/javascript']],
   ['/terminal-map.css', ['terminal-map.css', 'text/css']]
 ]);
