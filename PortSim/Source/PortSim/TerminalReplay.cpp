@@ -1,6 +1,7 @@
 #include "TerminalReplay.h"
 #include "TerminalCheckpoint.h"
 #include "PortContainerActor.h"
+#include "PortSupportVehicle.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -82,15 +83,18 @@ bool FTerminalReplay::AdvanceLivePhysics(AQuayCrane& Owner)
     const auto* Settings=UPhysicsSettings::Get();
     if(!Scene || World->GetNetMode()!=NM_Standalone || Settings->bTickPhysicsAsync ||
         Settings->PhysicsPrediction.bEnablePhysicsPrediction || !Scene->IsCompletionEventComplete()) return false;
-    // Only this terminal's cargo may be dynamic. External actors require their
+    // Terminal cargo and explicitly managed R/S bodies may be dynamic. External actors require their
     // own engine ticks and callbacks and retain the standard world path.
     TSet<const AActor*> CargoActors;
     for(const auto& Cargo:Owner.SiteLogistics->ShipContainers) if(IsValid(Cargo)) CargoActors.Add(Cargo);
     for(TActorIterator<AActor> It(World);It;++It)
     {
+        const auto* RS=Cast<APortSupportVehicle>(*It);
+        const bool ManagedRS=RS && Owner.SupportFleet.ContainsByPredicate([&](const auto& A){return A.Get()==RS;});
         TInlineComponentArray<UPrimitiveComponent*> Parts(*It);
         for(auto* Part:Parts) if(Part->IsAnySimulatingPhysics() &&
-            (!CargoActors.Contains(*It) || !Part->IsA<UStaticMeshComponent>())) return false;
+            (!CargoActors.Contains(*It) || !Part->IsA<UStaticMeshComponent>()) &&
+            !(ManagedRS && RS->OwnsRecoveryPhysicsBody(Part))) return false;
     }
     PortSimPerformance::FScope Timing(TEXT("live_physics_batch"));
     const FVector Gravity(0,0,World->GetGravityZ());

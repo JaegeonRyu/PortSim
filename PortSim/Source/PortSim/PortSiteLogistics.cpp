@@ -6,6 +6,7 @@
 #include "YardReservation.h"
 #include "PortWorkingCrane.h"
 #include "PortAGVActor.h"
+#include "PortSupportVehicle.h"
 #include "PortContainerActor.h"
 #include "ContainerSpecification.h"
 #include "AGVDispatchPolicy.h"
@@ -2660,6 +2661,7 @@ void APortSiteLogistics::RecoverTrafficCycle()
 
 void APortSiteLogistics::Freeze(bool Paused)
 {
+    for(auto& R:LoadedAGVRecoveries) if(R.Stacker.IsValid()) R.Stacker->SetRecoveryPhysicsPaused(Paused);
     for (const auto& Crane:Equipment) Crane->SetOperationPaused(Paused);
     if (Paused==bWasPaused) return;
     bWasPaused=Paused;
@@ -2680,6 +2682,10 @@ void APortSiteLogistics::Advance(float Dt,bool Paused)
     if(!bReady) return;
     if(Paused || !Fault.IsEmpty() || Dt<=0.f)
     { AdvanceStep(Dt,Paused); ExportDashboard(Paused); PrepareKinematicPhysicsFrame(); return; }
+    // R/S control follows the physics clock, independently of the 50 ms
+    // logistics scheduler. Never group three R/S steps before one Chaos step.
+    Freeze(false);
+    AdvanceLoadedAGVRecoveries(Dt);
     // One traffic clock for editor playback and headless tests. Render-frame
     // deltas up to two seconds must not move an AGV across several reservation
     // gates before the other vehicles and LiDAR have been updated.
@@ -2868,7 +2874,6 @@ void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
         if (!Crane->Fault.IsEmpty() && !Crane->IsEquipmentUnavailable()) { Stop(Crane->Fault); return; }
     }
     ManageEquipmentFailures();
-    AdvanceLoadedAGVRecoveries(Dt);
     if(!Fault.IsEmpty()) return;
     int32 Moving=0;
     // Use the actual individually attached cargo, including both 20ft boxes.

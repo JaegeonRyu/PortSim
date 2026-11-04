@@ -5,7 +5,7 @@
 namespace TerminalLayout
 {
     constexpr int VesselCount = 3;
-    constexpr int VesselRows = 10, VesselBays = 10, VesselTiers = 2;
+    constexpr int VesselRows = 10, VesselBays = 10, VesselTiers = 3;
     constexpr int ContainersPerVessel = VesselRows * VesselBays * VesselTiers;
     constexpr int TotalVesselContainers = VesselCount * ContainersPerVessel;
     // Three 210 m vessels stop before the worker-rest building (Y=247..333 m).

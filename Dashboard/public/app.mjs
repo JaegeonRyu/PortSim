@@ -1,5 +1,6 @@
 import {compareOperation, vesselDuration, formatDuration} from './metrics.mjs';
 import {renderFrictionDetails} from './friction-view.mjs';
+import {renderRSPhysics} from './rs-physics-view.mjs';
 import {renderAGVPhysics,renderAGVSensors} from './agv-physics-view.mjs';
 import {weatherHoldStatus,environmentLive,recordLiveSample,livePhysicsResults} from './scenario-view.mjs';
 let physicsActor=null,physicsHistory=[];
@@ -194,7 +195,7 @@ function pickupDetails(a){
 }
 function overviewDetails(a){
  let html=illustration(a)+renderRecoveryDetails(a)+(['sts','rmg','agv'].includes(a.type)?'<button class="button fault-shortcut" data-tab="failures">장비 오류 발생 · 복구 →</button>':'');
- if(a.type==='rs')html+=kv('복구 상태',a.loaded_recovery_status||'복구 배정 대기')+kv('인양 한도 (모델 가정)',`${num(a.recovery_capacity_kg/1000)} t`)+(a.failed_agv?`<div class="kv-row"><span>고장 AGV</span>${actorLink(a.failed_agv)}</div>`:'')+(a.replacement_agv?`<div class="kv-row"><span>대체 AGV</span>${actorLink(a.replacement_agv)}</div>`:'');
+ if(a.type==='rs')html+=kv('복구 상태',a.loaded_recovery_status||'복구 배정 대기')+kv('남은 이동 경로',num(a.route_remaining_m??0)+' m')+kv('현재 속도',num(a.speed_mps??0,2)+' m/s')+kv('인양 한도 (모델 가정)',`${num(a.recovery_capacity_kg/1000)} t`)+(a.failed_agv?`<div class="kv-row"><span>고장 AGV</span>${actorLink(a.failed_agv)}</div>`:'')+(a.replacement_agv?`<div class="kv-row"><span>대체 AGV</span>${actorLink(a.replacement_agv)}</div>`:'');
  const p=a.payload_kg??a.mass_kg;
  html+=`<div class="key-values">${tile(a.type==='container'?'화물 질량':'운반 하중',Number.isFinite(p)?num(p/1000):'—','t')}${tile('높이 Z',num(a.head_position_m?.[2]??a.position_m?.[2]),'m')}${tile('완료 작업',num(a.completed??a.placed,0),'건')}${tile('작업 경과',formatDuration(a.job_seconds))}</div>`;
  if(a.fault)html=`<div class="fault-message">${esc(a.fault)}</div>`+html;
@@ -278,6 +279,7 @@ function sensorDetails(a){
 }
 function physicsDetails(a){return renderFrictionDetails(a)+physicsDetailsBase(a);}
 function physicsDetailsBase(a){
+ if(a.type==='rs')return renderRSPhysics(a);
  if(a.type==='agv')return renderAGVPhysics(a);
  if(a.dynamics)return dynamicsDetails(a);
  if(!['sts','rmg'].includes(a.type))return `<div class="detail-subhead">${esc(types[a.type]?.[0]||'액터')} 물리 상태</div>${a.type==='container'?kv('질량',`${num(a.mass_kg)} kg`)+kv('무게중심 편차',`${vector(a.cog_m)} m`)+kv('강체 시뮬레이션',a.simulating_physics?'활성':'고정 또는 장비에 부착')+kv('소유 단계',labels[a.state]||a.state):a.type==='agv'?kv('운반 모델','종축 전진/후진 + 조향 운동학')+kv('횡이동','비활성')+kv('최소 내측 회전반경','5.8 m')+kv('최고 속도',`${num(a.speed_limit_mps)} m/s`)+kv('가속도',`${num(a.acceleration_mps2)} m/s²`):kv('표현 방식',a.type==='vessel'?'매니페스트 기반 선박 그룹':a.type==='yard'?'컨테이너 인스턴스 블록':'엔진 액터')}<div class="note">${a.type==='agv'?'차체의 긴 축을 따라서만 이동하며, 조향 곡률은 5.8 m 회전반경으로 제한합니다. 차륜 토크·타이어 접촉·주행 모터의 상세 동역학은 아직 모델링하지 않았습니다.':a.type==='container'?'운반 중 장비에 부착되며 착지 과정에서 강체 물리를 사용합니다. 현재 상태에 따라 활성 여부가 달라집니다.':'이 그룹 자체의 별도 물리 관측값은 없습니다.'}</div>`;

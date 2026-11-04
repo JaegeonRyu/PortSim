@@ -6,6 +6,7 @@
 
 void APortSupportVehicle::PositionRecoverySpreader(FVector Position,FRotator Rotation,float LengthCm)
 {
+    if(RecoveryGrip) RecoveryGrip->SetWorldLocationAndRotation(Position,Rotation);
     TInlineComponentArray<UStaticMeshComponent*> Parts(this);
     for(auto* Part:Parts)
     {
@@ -13,8 +14,8 @@ void APortSupportVehicle::PositionRecoverySpreader(FVector Position,FRotator Rot
         {Part->SetWorldLocationAndRotation(Position,Rotation);Part->SetWorldScale3D(FVector(2.4f,LengthCm/100.f,.5f));}
         if(Part->GetName()==TEXT("TelescopicBoom"))
         {
-            const FVector Base=GetActorLocation()+FVector(0,0,350),D=Position-Base;
-            Part->SetWorldLocation((Base+Position)*.5f);Part->SetWorldRotation(D.Rotation());
+            const FVector Base=GetActorLocation()+FVector(0,0,350),BoomEnd=Position-GetActorRightVector()*SideShiftM*100,D=BoomEnd-Base;
+            Part->SetWorldLocation((Base+BoomEnd)*.5f);Part->SetWorldRotation(D.Rotation());
             Part->SetWorldScale3D(FVector(D.Size()/100.f,1,1));
         }
     }
@@ -40,12 +41,25 @@ void APortSupportVehicle::Configure(EPortSupportType Type,int32 Number)
         Mesh->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube.Cube")));
         Mesh->SetRelativeLocation(P); Mesh->SetRelativeScale3D(S/100.f);
         Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        // Recovery moves every part at 60 Hz, including in accelerated batches.
+        // Sensors query collision explicitly; no support part consumes overlap callbacks.
+        Mesh->SetGenerateOverlapEvents(false);
         Mesh->SetMaterial(0,Dark?Steel:Paint);
         Mesh->RegisterComponent();
         return Mesh;
     };
-    Part(TEXT("Frame"),FVector(0,0,110),FVector(Length,Width,Chassis?35:100));
-    for (int32 Side:{-1,1}) for (int32 Axle:{-1,1})
+    auto* Frame=Part(TEXT("Frame"),FVector(0,0,110),FVector(Length,Width,Chassis?35:100));
+    if(Type==EPortSupportType::ReachStacker)
+    {
+        RecoveryBody=Frame; RecoverySceneRoot=RootComponent; RecoveryBodyRelative=Frame->GetRelativeTransform();
+        RecoveryGrip=NewObject<USceneComponent>(this,TEXT("RecoveryTwistlockAnchor"));
+        AddInstanceComponent(RecoveryGrip);RecoveryGrip->SetupAttachment(RootComponent);
+        RecoveryGrip->SetRelativeLocation(HydraulicPositionM*100);RecoveryGrip->RegisterComponent();
+        TireSettings.WheelbaseM=5.76f;TireSettings.TrackM=3.0f;TireSettings.WheelRadiusM=.6f;
+        TireSettings.EmptyCoGM=FVector(-.8,0,1.3);TireDynamics.Reset(0,TireSettings);
+    }
+    const TArray<int32> Axles=Type==EPortSupportType::ReachStacker?TArray<int32>{-1,0,1}:TArray<int32>{-1,1};
+    for (int32 Side:{-1,1}) for (int32 Axle:Axles)
         Part(*FString::Printf(TEXT("Wheel_%d_%d"),Side,Axle),FVector(Axle*Length*.32f,Side*Width*.48f,65),FVector(110,60,120),true);
     if (Chassis)
     {

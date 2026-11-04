@@ -793,7 +793,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             O->SetBoolField(TEXT("can_replace_loaded_agv"),CanRecoverLoadedAGV(Lane,RecoveryReason));
             O->SetStringField(TEXT("loaded_recovery_reason"),RecoveryReason);
             O->SetBoolField(TEXT("loaded_recovery_active"),IsLoadedRecoveryVehicle(Lane));
-            for(const auto& R:LoadedAGVRecoveries) if(R.Failed==Lane || R.Replacement==Lane)
+            for(const auto& R:LoadedAGVRecoveries) if(!R.bReturning && (R.Failed==Lane || R.Replacement==Lane))
             {
                 O->SetStringField(TEXT("loaded_recovery_status"),R.Status);
                 O->SetStringField(TEXT("replacement_agv"),Vehicles[R.Replacement]->GetName());
@@ -818,16 +818,53 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             {Load+=Cargo->MassKg;O->SetStringField(TEXT("cargo"),Cargo->GetName());}
             O->SetNumberField(TEXT("payload_kg"),Load);
             O->SetNumberField(TEXT("recovery_capacity_kg"),45000);
+            O->SetNumberField(TEXT("speed_mps"),RS->IsRecoveryFreePhysics()?RS->GetVelocity().Size()*.01:FMath::Abs(RS->TireDynamics.U));
+            auto Physics=Object();
+            Physics->SetStringField(TEXT("model"),TEXT("equivalent_six_contact_tires_three_hydraulic_actuators"));
+            Physics->SetBoolField(TEXT("free_body"),RS->IsRecoveryFreePhysics());
+            Physics->SetNumberField(TEXT("step_seconds"),1./60.);
+            Physics->SetNumberField(TEXT("mass_kg"),RS->TireDynamics.TotalMassKg);
+            Physics->SetNumberField(TEXT("roll_deg"),FMath::RadiansToDegrees(RS->TireDynamics.Roll));
+            Physics->SetNumberField(TEXT("pitch_deg"),FMath::RadiansToDegrees(RS->TireDynamics.Pitch));
+            Physics->SetNumberField(TEXT("load_transfer_ratio"),RS->TireDynamics.LoadTransferRatio);
+            Physics->SetBoolField(TEXT("wheel_lift"),RS->TireDynamics.WheelLift);
+            Physics->SetNumberField(TEXT("peak_slip"),RS->TireDynamics.PeakSlip);
+            Vector(Physics,TEXT("combined_cog_m"),RS->TireDynamics.CombinedCoGM);
+            Vector(Physics,TEXT("hydraulic_pressure_mpa"),RS->HydraulicPressurePa,1.e-6);
+            Vector(Physics,TEXT("hydraulic_velocity_mps"),RS->HydraulicVelocityMps);
+            Physics->SetNumberField(TEXT("hydraulic_flow_lpm"),RS->HydraulicFlowM3ps*60000.);
+            Physics->SetNumberField(TEXT("relief_pressure_mpa"),RS->ReliefPressureMPa);
+            Physics->SetBoolField(TEXT("hydraulic_limited"),RS->bHydraulicLimited);
+            TArray<TSharedPtr<FJsonValue>> Wheels;
+            for(const auto& W:RS->TireDynamics.Wheels)
+            {
+                auto Wheel=Object();Wheel->SetNumberField(TEXT("normal_n"),W.NormalN);
+                Wheel->SetNumberField(TEXT("slip_ratio"),W.SlipRatio);Wheel->SetNumberField(TEXT("torque_nm"),W.TorqueNm);
+                Wheel->SetNumberField(TEXT("omega_rad_s"),W.Omega);Wheels.Add(Value(Wheel));
+            }
+            Physics->SetArrayField(TEXT("wheels"),Wheels);O->SetObjectField(TEXT("rs_physics"),Physics);
+            Vector(O,TEXT("head_position_m"),RS->RecoveryHeadPosition(),.01);
+            O->SetStringField(TEXT("fault"),RS->PhysicsFault);
             for(const auto& R:LoadedAGVRecoveries) if(R.Stacker.Get()==RS)
             {
-                O->SetStringField(TEXT("state"),Paused?TEXT("paused"):TEXT("working"));
-                O->SetBoolField(TEXT("loaded_recovery_active"),true);
+                O->SetStringField(TEXT("state"),Paused?TEXT("paused"):R.bReturning?TEXT("returning"):TEXT("working"));
+                O->SetBoolField(TEXT("loaded_recovery_active"),!R.bReturning);
                 O->SetStringField(TEXT("loaded_recovery_status"),R.Status);
                 O->SetStringField(TEXT("failed_agv"),Vehicles[R.Failed]->GetName());
                 O->SetStringField(TEXT("replacement_agv"),Vehicles[R.Replacement]->GetName());
                 O->SetNumberField(TEXT("recovery_transferred_count"),R.Box);
                 O->SetNumberField(TEXT("recovery_cargo_count"),R.Cargo.Num());
+                TArray<TSharedPtr<FJsonValue>> Route;
+                FVector Previous=RS->GetActorLocation();double Remaining=0;
+                for(int32 N=R.Waypoint;N<R.StackerRoute.Num();++N)
+                {
+                    auto Point=Object();Vector(Point,TEXT("position_m"),R.StackerRoute[N],.01);
+                    Route.Add(Value(Point));Remaining+=FVector::Dist2D(Previous,R.StackerRoute[N])*.01;Previous=R.StackerRoute[N];
+                }
+                O->SetArrayField(TEXT("route"),Route);O->SetNumberField(TEXT("route_remaining_m"),Remaining);
+                Vector(O,TEXT("recovery_target_m"),R.StackerTarget,.01);
             }
+            if(!RS->PhysicsFault.IsEmpty()) O->SetStringField(TEXT("state"),TEXT("fault"));
         }
         else if(auto* C=Cast<APortContainerActor>(A))
         {

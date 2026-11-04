@@ -97,6 +97,7 @@ struct FLoadedAGVRecovery
     TArray<FVector> StackerRoute;
     FVector Target=FVector::ZeroVector, StackerTarget=FVector::ZeroVector;
     FTransform StackerHome;
+    bool bCancelRequested=false, bReturning=false;
     double HoldSeconds=0;
     FString Status;
 };
@@ -192,8 +193,10 @@ private:
     bool IsLoadedRecoveryVehicle(int32 Vehicle) const;
     bool ValidateLoadedAGVRecoveries(FString& Error) const;
     void AdvanceLoadedAGVRecoveries(float Dt);
+    void StepLoadedAGVRecoveries(float Dt);
+    double LoadedRecoveryPendingSeconds=0;
     void ResetLoadedAGVRecoveries();
-    bool PlanLoadedRecoveryRoad(FVector Start,FVector Goal,FVector Axis,int32 Depot,TArray<FVector>& Route) const;
+    bool PlanLoadedRecoveryRoad(FVector Start,FVector Goal,FVector Axis,int32 Depot,TArray<FVector>& Route,bool ReturnHome=false) const;
     friend class FDashboardControlTest;
     friend class FWorkerImpactTest;
     friend class FAdvanceYardBookingTest;
