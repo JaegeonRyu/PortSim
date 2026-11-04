@@ -8,6 +8,18 @@ test('environment displays observed wind, visibility, wave and swell with units 
  for(const text of ['6.2','30 m','25 mm/h','0.25 m','0.4 m','5.5 s','10.5 s','270 °','돌풍 발생','서풍','50 %','0.25 mm','작업 진행 중'])assert.ok(html.includes(text),text);
  assert.ok(html.includes("rotate(270deg)"));assert.equal(direction(-90),'서풍');assert.equal(direction(360),'북풍');
 });
+test('current compact engine telemetry reports rain instead of waiting for old field names',()=>{
+ const state={running:true,environment:{time_of_day_seconds:32400,temperature_celsius:13,
+  wind_enabled:true,wind_mps:3,effective_wind_mps:3,wind_from_deg:90,
+  rain_mm_h:25,snow_mm_h:0,fog_m:0,water_film_mm:.4,snow_depth_mm:0,
+  wetness:.2,snow_coverage:0,ice_coverage:0,water_change_mm_h:1,snow_change_mm_h:0}};
+ const summary=renderWeatherOverview(state,{live:true});
+ assert.match(summary,/현재 날씨 · 실시간/);assert.match(summary,/>비</);
+ assert.match(summary,/25 mm\/h/);assert.match(summary,/13 °C/);
+ assert.doesNotMatch(summary,/수신 대기|맑음/);
+ const details=renderEnvironment(state,{live:true});
+ assert.match(details,/25 mm\/h/);assert.match(details,/0.4 mm/);
+});
 test('disabled effects retain settings without claiming applied wind, unlimited real visibility or a live snapshot',()=>{
  const s=snapshot();s.environment.wind_enabled=false;s.environment.fog_enabled=false;s.environment.sea_enabled=false;
  const html=renderEnvironment(s,{live:false,age:42});

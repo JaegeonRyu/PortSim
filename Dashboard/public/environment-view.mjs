@@ -5,6 +5,30 @@ const row=(label,value)=>'<div class="env-row"><span>'+label+'</span><strong>'+e
 const dirs=['북','북북동','북동','동북동','동','동남동','남동','남남동','남','남남서','남서','서남서','서','서북서','북서','북북서'];
 export const direction=deg=>Number.isFinite(deg)?dirs[Math.round(((deg%360+360)%360)/22.5)%16]+'풍':'—';
 const reasons={'Strong wind':'강풍','Low visibility':'가시거리 부족','Heavy rain':'폭우','Heavy snow':'폭설','Icy surface':'노면 결빙','Insufficient tire grip':'타이어 접지력 부족','High waves':'높은 파랑'};
+// The current engine publishes compact environment fields. Older snapshots use
+// the expanded field names; normalize both before rendering weather status.
+export function normalizeEnvironment(raw,state){
+ if(!raw)return null;
+ if(!('rain_mm_h' in raw))return raw;
+ const surface={wetness:raw.wetness,snow:raw.snow_coverage,ice:raw.ice_coverage,
+  water_film_mm:raw.water_film_mm,snow_depth_mm:raw.snow_depth_mm,
+  water_change_mm_per_hour:raw.water_change_mm_h,snow_change_mm_per_hour:raw.snow_change_mm_h};
+ const hold=state?.weather_hold;
+ return {...raw,wind_speed_mps:raw.effective_wind_mps,mean_wind_mps:raw.wind_mps,
+  rain_enabled:Number.isFinite(raw.rain_mm_h)?raw.rain_mm_h>0:undefined,
+  rainfall_mm_per_hour:raw.rain_mm_h,
+  snow_enabled:Number.isFinite(raw.snow_mm_h)?raw.snow_mm_h>0:undefined,
+  snowfall_mm_per_hour:raw.snow_mm_h,
+  fog_enabled:Number.isFinite(raw.fog_m)?raw.fog_m>0:undefined,
+  fog_visibility_m:raw.fog_m,
+  gust_increment_mps:raw.gust_active?Math.max(0,(raw.effective_wind_mps??0)-(raw.wind_mps??0)):0,
+  daily_temperature_cycle:Number.isFinite(raw.time_of_day_seconds)?true:undefined,
+  surface,weather_hold:hold?.active??raw.weather_hold,hold_reason:hold?.reason??raw.hold_reason,
+  recovery_elapsed_s:hold?.recovery_elapsed_seconds??raw.recovery_elapsed_s,
+  recovery_required_s:hold?.recovery_required_seconds??raw.recovery_required_s,
+  manual_paused:state?.manual_paused??raw.manual_paused,
+  emergency_stop:state?.emergency_stop??raw.emergency_stop};
+}
 function panel(title,sub,body,tag=''){return '<section class="panel env-panel"><div class="panel-head"><div><h2>'+title+'</h2><p>'+sub+'</p></div>'+tag+'</div><div class="env-body">'+body+'</div></section>';}
 function badge(value){return '<span class="env-pill">'+esc(value)+'</span>';}
 const weatherPaths={
@@ -17,6 +41,7 @@ const weatherPaths={
  unknown:'M9 8a3 3 0 1 1 5 2.2c-1.2.7-2 1.3-2 2.8M12 17v.1M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20'
 };
 export function weatherConditions(e){
+ e=normalizeEnvironment(e);
  if(!e)return [{key:'unknown',label:'수신 대기'}];
  const conditions=[];
  if(e.rain_enabled===true)conditions.push({key:'rain',label:e.rainfall_mm_per_hour>=50?'폭우':'비'});
@@ -31,13 +56,13 @@ export function weatherConditions(e){
  return conditions;
 }
 export function renderWeatherOverview(state,{live=false}={}){
- const e=state?.environment,conditions=weatherConditions(e),primary=conditions[0];
+ const e=normalizeEnvironment(state?.environment,state),conditions=weatherConditions(e),primary=conditions[0];
  const glyph=k=>'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="'+weatherPaths[k]+'"/></svg>';
  const speed=e?.wind_enabled===false?0:e?.wind_speed_mps;
- return '<section class="weather-overview weather-'+primary.key+'" aria-label="현재 날씨"><div class="weather-primary"><div class="weather-symbol">'+glyph(primary.key)+'</div><div><small>현재 날씨 · '+(live?'실시간':'최근 기록')+'</small><strong>'+primary.label+'</strong><div class="weather-conditions">'+conditions.slice(1).map(c=>'<span>'+glyph(c.key)+c.label+'</span>').join('')+'</div></div></div><div class="weather-facts"><div><small>기온</small><strong>'+n(e?.temperature_celsius,'°C')+'</strong><span>'+(e?.daily_temperature_cycle===true?'일변화':e?.daily_temperature_cycle===false?'고정 기온':'수신 대기')+'</span></div><div><small>풍속</small><strong>'+n(speed,'m/s')+'</strong><span>'+(e?.wind_enabled===true&&Number.isFinite(speed)&&speed>0?direction(e.wind_from_deg):'—')+'</span></div><div><small>강수량</small><strong>'+n(e?.rainfall_mm_per_hour,'mm/h')+'</strong><span>강설 '+n(e?.snowfall_mm_per_hour,'mm/h')+'</span></div><div><small>가시거리</small><strong>'+(e?.fog_enabled===false?'제한 없음':e?.fog_enabled===true&&e.fog_visibility_m>=0?n(e.fog_visibility_m,'m'):'—')+'</strong><span>안개 기준</span></div></div><div class="weather-source">시뮬레이션 날씨 · '+(Number.isFinite(e?.cloud_cover)?'구름량 '+n(e.cloud_cover*100,'%',0):'구름량 미측정 · 맑음: 비·눈·안개·강풍 없음')+'</div></section>';
+ return '<section class="weather-overview weather-'+primary.key+'" aria-label="현재 날씨"><div class="weather-primary"><div class="weather-symbol">'+glyph(primary.key)+'</div><div><small>현재 날씨 · '+(live?'실시간':'최근 기록')+'</small><strong>'+primary.label+'</strong><div class="weather-conditions">'+conditions.slice(1).map(c=>'<span>'+glyph(c.key)+c.label+'</span>').join('')+'</div></div></div><div class="weather-facts"><div><small>기온</small><strong>'+n(e?.temperature_celsius,'°C')+'</strong><span>'+(e?.daily_temperature_cycle===true?'일변화':e?.daily_temperature_cycle===false?'고정 기온':'수신 대기')+'</span></div><div><small>풍속</small><strong>'+n(speed,'m/s')+'</strong><span>'+(e?.wind_enabled===true&&Number.isFinite(speed)&&speed>0?direction(e.wind_from_deg):'—')+'</span></div><div><small>강수량</small><strong>'+n(e?.rainfall_mm_per_hour,'mm/h')+'</strong><span>강설 '+n(e?.snowfall_mm_per_hour,'mm/h')+'</span></div><div><small>가시거리</small><strong>'+(e?.fog_enabled===false?'제한 없음':e?.fog_enabled===true&&e.fog_visibility_m>=0?n(e.fog_visibility_m,'m'):'—')+'</strong><span>안개 기준</span></div></div><div class="weather-source">시뮬레이션 날씨 · '+(Number.isFinite(e?.cloud_cover)?'구름량 '+n(e.cloud_cover*100,'%',0):'구름량 미측정')+'</div></section>';
 }
 export function renderEnvironment(state,{live=false,age=null}={}){
- const full=!!state?.environment,e=state?.environment||{fog_enabled:state?.fog_enabled,fog_visibility_m:state?.fog_visibility_m,rain_enabled:state?.rain_enabled,rainfall_mm_per_hour:state?.rainfall_mm_per_hour},s=e.surface||state?.surface_conditions||{};
+ const full=!!state?.environment,e=normalizeEnvironment(state?.environment,state)||{fog_enabled:state?.fog_enabled,fog_visibility_m:state?.fog_visibility_m,rain_enabled:state?.rain_enabled,rainfall_mm_per_hour:state?.rainfall_mm_per_hour},s=e.surface||state?.surface_conditions||{};
  const status=!state?'엔진 연결 대기':!live?'저장된 환경 기록':e.emergency_stop?'비상 정지':e.manual_paused?'수동 일시정지':e.weather_hold?'기상 회복 대기':state.fault?'운용 오류':!state.running?'실행 대기':full?'작업 진행 중':'환경 데이터 일부 수신';
  const alert=e.weather_hold||e.emergency_stop||state?.fault;
  const freshness=live?'LIVE · 1초 간격 갱신':state?'SNAPSHOT · '+(Number.isFinite(age)?n(age,'초 전',0):'최근 저장 기록'):'NO DATA';
