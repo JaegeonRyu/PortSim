@@ -13,6 +13,7 @@ class FJsonObject;
 class APortWorkingCrane;
 class APortAGVActor;
 class APortContainerActor;
+class APortSupportVehicle;
 class UHierarchicalInstancedStaticMeshComponent;
 
 struct FSiteYardSlot
@@ -52,7 +53,7 @@ struct FSiteTransfer
 {
     int32 ExportIndex=INDEX_NONE;
     // Stage 10 is the second STS pickup of a paired 20 ft trip.
-    static constexpr int32 ToCharge=11, ReturnToStandby=12, Charging=13;
+    static constexpr int32 ToCharge=11, ReturnToStandby=12, Charging=13, ToRecovery=14;
     int32 Cargo=INDEX_NONE, Slot=INDEX_NONE, RMG=INDEX_NONE, STS=INDEX_NONE, Stage=0, Waypoint=0;
     int32 ExtraCargo=INDEX_NONE;
     bool bLoadingExtra=false;
@@ -70,7 +71,9 @@ struct FSiteTransfer
     FVector RouteStart=FVector::ZeroVector;
     bool bRouteStartValid=false;
     bool bYardReleased=false, bRMGReserved=false, bParkingDeparture=false;
+    bool bYardAdvanceBooking=false; // next service only; cannot enter the road to the RMG
     double TrafficWaitSeconds=0, YardWaitSeconds=0, LastRerouteAt=-10;
+    double DispatchRetryAfter=0;
     int32 Reroutes=0;
     int32 ReturnSTS=INDEX_NONE, ReturnCargo=INDEX_NONE;
     int32 YardEntryWaypoint=INDEX_NONE;
@@ -80,6 +83,22 @@ struct FSiteTransfer
     double EquipmentDowntimeSeconds=0;
     int32 RecoveryOriginSlot=INDEX_NONE;
     FVector RecoveryAnchor=FVector::ZeroVector;
+    bool IsDockingWaypoint() const
+    { return Waypoint==Route.Num()-1 || (Stage==3 && !bRMGReserved && Waypoint==YardEntryWaypoint); }
+};
+
+// The transport job stays on the failed vehicle until every box is seated.
+struct FLoadedAGVRecovery
+{
+    int32 Failed=INDEX_NONE, Replacement=INDEX_NONE, Phase=0, Box=0, Waypoint=0;
+    TWeakObjectPtr<APortSupportVehicle> Stacker;
+    TArray<TWeakObjectPtr<APortContainerActor>> Cargo;
+    TArray<FTransform> DeckTransforms;
+    TArray<FVector> StackerRoute;
+    FVector Target=FVector::ZeroVector, StackerTarget=FVector::ZeroVector;
+    FTransform StackerHome;
+    double HoldSeconds=0;
+    FString Status;
 };
 
 /** One manifest, conserved cargo IDs and reserved yard slots across STS -> AGV -> RMG. */
@@ -87,7 +106,11 @@ UCLASS()
 class PORTSIM_API APortSiteLogistics : public AActor
 {
     GENERATED_BODY()
+    friend class FTerminalReplayCheckpointTest;
+    friend class FTerminalCheckpoint;
+    friend class FTerminalReplay;
 public:
+    bool HasLoadedAGVRecovery() const { return !LoadedAGVRecoveries.IsEmpty(); }
     APortSiteLogistics();
     void SetSTSProfile(const FSTSOperatingProfile& Profile) { STSProfile=Profile; }
     bool CanSTSGantryMove(const APortWorkingCrane* Crane,float WorldY) const;
@@ -162,14 +185,31 @@ private:
     friend class FInlandRoadTrafficTest;
     friend class FTrafficJunctionTest;
     friend class FEquipmentRecoveryTest;
+    friend class FLoadedAGVRecoveryTest;
+    TArray<FLoadedAGVRecovery> LoadedAGVRecoveries;
+    bool RequestLoadedAGVRecovery(int32 Failed,FString& Error);
+    bool CanRecoverLoadedAGV(int32 Failed,FString& Error) const;
+    bool IsLoadedRecoveryVehicle(int32 Vehicle) const;
+    bool ValidateLoadedAGVRecoveries(FString& Error) const;
+    void AdvanceLoadedAGVRecoveries(float Dt);
+    void ResetLoadedAGVRecoveries();
+    bool PlanLoadedRecoveryRoad(FVector Start,FVector Goal,FVector Axis,int32 Depot,TArray<FVector>& Route) const;
     friend class FDashboardControlTest;
+    friend class FWorkerImpactTest;
+    friend class FAdvanceYardBookingTest;
+    friend class FDashboardEnvironmentTest;
+    friend class FBlockedPickupDispatchTest;
+    friend class FAGVLeasedEntryDockTest;
     FString DashboardControlSession=FGuid::NewGuid().ToString(EGuidFormats::Digits);
     double NextControlPoll=0;
     TArray<TSharedPtr<FJsonObject>> DashboardCommandResults, RecoveryEvents;
+    TArray<TSharedPtr<FJsonObject>> WorkerImpacts;
+    void UpdateWorkerImpacts();
     TSet<FString> SeenDashboardCommands;
     int32 RecoverySequence=0;
     void ProcessDashboardCommands();
     bool ApplyDashboardCommand(const FJsonObject& Command,FString& Error);
+    TSharedPtr<FJsonObject> CaptureEnvironment() const;
     void RecordRecoveryEvent(const FString& Kind,AActor* Cause,AActor* From,AActor* To,
         AActor* Cargo=nullptr,const FVector& OldPosition=FVector::ZeroVector,const FVector& NewPosition=FVector::ZeroVector);
     FSTSOperatingProfile STSProfile;
@@ -273,6 +313,10 @@ private:
     void ApplyVesselMotions(float FrameDurationSeconds=0);
     void Dispatch(int32 Lane);
     void ScheduleFleet();
+    bool ParkingDepartureAvailable(int32 Vehicle) const;
+    bool CanReleaseParkedStandby(int32 Vehicle) const;
+    void ReleaseUnenteredParkingMission(int32 Vehicle);
+    void ReassignBlockedParkingVehicles();
     void AdvanceFleetBatteries(float Dt);
     FVector ChargingBayPosition(int32 Bay) const;
     void ActivateVehicle(int32 Vehicle,int32 STS,bool FromQueue);
@@ -281,9 +325,11 @@ private:
     bool SourceAccessible(int32 Cargo) const;
     void PrepareExecutableCargo(int32 Lane);
     FString YardAdmissionReason(int32 Cargo,int32 Vehicle=INDEX_NONE) const;
-    bool ReserveYardApproach(int32 Lane);
+    bool ReserveYardApproach(int32 Lane,bool AllowAdvanceBooking=false);
     void ReleaseYardApproachIfClear(int32 Lane);
     bool YardApproachAvailable(int32 Cargo) const;
+    bool YardDispatchReady(int32 Cargo) const;
+    bool CanBookNextYardService(int32 Cargo,int32 Vehicle=INDEX_NONE) const;
     void AdvanceStep(float Dt,bool Paused);
     bool PrepareKinematicPhysicsFrame() const;
     void RecoverTrafficCycle();

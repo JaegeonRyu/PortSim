@@ -1,3 +1,4 @@
+#include "TerminalReplay.h"
 #include "PortSiteLogistics.h"
 #include "PortContainerActor.h"
 #include "PortAGVActor.h"
@@ -18,14 +19,34 @@ FVector APortSiteLogistics::TransferQuay(const FSiteTransfer& Job) const
 
 void APortSiteLogistics::ScheduleExport()
 {
-    // Discharge first, then load bottom-up. One export transfer reserves both
-    // cranes, so reversing the flow cannot deadlock an incoming discharge job.
-    if(Delivered!=Manifest.Num() || ExportCargo.IsEmpty() ||
-        Jobs.ContainsByPredicate([](const FSiteTransfer& J){return J.Stage!=0 && J.Stage!=FSiteTransfer::Charging;})) return;
+    if(ExportCargo.IsEmpty()) return;
     int32 Next=INDEX_NONE;
     for(int32 I=0;I<ExportCargo.Num();++I)
-        if(ExportCargo[I].State==0 && (Next==INDEX_NONE ||
-            ExportCargo[I].ShipSlot.Tier<ExportCargo[Next].ShipSlot.Tier)) Next=I;
+    {
+        const auto& Candidate=ExportCargo[I];
+        if(Candidate.State!=0 || !Yard.IsValidIndex(Candidate.PlannedSlot)) continue;
+        const auto& Slot=Yard[Candidate.PlannedSlot];
+        const int32 STS=Candidate.STS, RMG=Slot.Crane;
+        if(STSOwners[STS]!=INDEX_NONE || PreparedCargo[STS]!=INDEX_NONE || NextVehicles[STS]!=INDEX_NONE ||
+            !CraneAvailable(YardCraneCount+STS) || Equipment[YardCraneCount+STS]->IsBusy() ||
+            !CraneAvailable(RMG) || Equipment[RMG]->IsBusy() || RMGBusy[RMG] || BlocksBusy[Slot.Block] ||
+            YardApproachOwners[YardApproachKey(Slot)]!=INDEX_NONE) continue;
+        auto SameColumn=[&](const FSiteShipCargo& C)
+        {
+            return C.STS/3==STS/3 && C.ShipSlot.Bay==Candidate.ShipSlot.Bay &&
+                C.ShipSlot.Row==Candidate.ShipSlot.Row;
+        };
+        // Clear this column before loading; other columns can discharge concurrently.
+        if(Manifest.ContainsByPredicate([&](const FSiteShipCargo& C){return SameColumn(C) && C.State!=2;})) continue;
+        if(Candidate.ShipSlot.Tier>1)
+        {
+            auto Supports=[&](const FSiteShipCargo& C)
+            { return SameColumn(C) && C.ShipSlot.Tier==Candidate.ShipSlot.Tier-1; };
+            if(!RetainedCargo.ContainsByPredicate(Supports) &&
+                !ExportCargo.ContainsByPredicate([&](const FSiteShipCargo& C){return C.State==2 && Supports(C);})) continue;
+        }
+        if(Next==INDEX_NONE || Candidate.ShipSlot.Tier<ExportCargo[Next].ShipSlot.Tier) Next=I;
+    }
     if(Next==INDEX_NONE) return;
     const int32 Lane=Jobs.IndexOfByPredicate([this](const FSiteTransfer& J)
     {
@@ -81,14 +102,10 @@ void APortSiteLogistics::AdvanceExport(int32 Lane,float Dt)
         Job.Stage=4;
         break;
     case 4:
-        if(RMG->IsBusy()) return;
-        if(!Cargo->GetActorLocation().Equals(Vehicle->CargoPosition(),10.f) || Vehicle->Speed>.1f)
+        if(!RMG->IsAGVHandoverComplete()) return;
+        if(Cargo->GetAttachParentActor()!=Vehicle || Cargo->GetBody()->IsSimulatingPhysics() ||
+            Cargo->LocationOwner!=ECargoOwner::AGV || !Cargo->GetActorLocation().Equals(Vehicle->CargoPosition(),10.f) || Vehicle->Speed>.1f)
         { Stop(TEXT("적하 RMG/AGV 정렬 오류")); return; }
-        Cargo->GetBody()->SetSimulatePhysics(false);
-        Cargo->SetActorLocationAndRotation(Vehicle->CargoPosition(),Vehicle->GetActorRotation(),false,nullptr,ETeleportType::TeleportPhysics);
-        Cargo->AttachToComponent(Vehicle->GetRootComponent(),FAttachmentTransformRules::KeepWorldTransform);
-        Cargo->LocationOwner=ECargoOwner::AGV;
-        Vehicle->SetPayload(Cargo->MassKg);
         Yard[Job.Slot].Occupied=false;
         Booking.HandoverMask|=1;
         Job.Stage=5; Job.ReturnSTS=Job.STS;
@@ -116,7 +133,7 @@ void APortSiteLogistics::AdvanceExport(int32 Lane,float Dt)
         Booking.State=2; Booking.HandoverMask|=4;
         Vehicle->SetPayload(0); ++Vehicle->CompletedJobs;
         Job.Actor=nullptr; Job.Stage=FSiteTransfer::ReturnToStandby;
-        UE_LOG(LogTemp,Display,TEXT("SITE_LOADED: %s vessel=%d bay=%d row=%d tier=%d"),
+        PORTSIM_SIM_LOG(LogTemp,Display,TEXT("SITE_LOADED: %s vessel=%d bay=%d row=%d tier=%d"),
             *Booking.ContainerName.ToString(),Booking.STS/3+1,Booking.ShipSlot.Bay,Booking.ShipSlot.Row,Booking.ShipSlot.Tier);
         if(!PlanRoadRoute(Lane,false)) Stop(TEXT("적하 완료 AGV 대기소 복귀 경로 오류"));
         break;

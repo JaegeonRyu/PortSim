@@ -1,9 +1,10 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "Engine/EngineCustomTimeStep.h"
+#include "PlaybackInputGate.h"
 #include "PortSimTimeStep.generated.h"
 
-/** Wall-clock playback shared by world timers, equipment control and substepped physics. */
+/** Fixed world interval; playback rate controls wall-clock tick pacing only. */
 UCLASS()
 class PORTSIM_API UPortSimTimeStep : public UEngineCustomTimeStep
 {
@@ -16,12 +17,20 @@ public:
     virtual bool UpdateTimeStep(UEngine* InEngine) override;
     virtual ECustomTimeStepSynchronizationState GetSynchronizationState() const override;
     void SetPlaybackRate(float Rate);
+    void NotifyExternalInput();
+    float GetEffectiveRate() const;
+    bool IsBufferedPlayback() const { return bBufferedPlayback; }
+    void SetBufferedPlayback(bool Enabled) { bBufferedPlayback=Enabled; }
+    void SetLiveFallback(bool Enabled) { bLiveFallback=Enabled; }
+    uint64 GetInputRevision() const { return InputGate.Revision; }
     float GetAchievedRate() const { return AchievedRate; }
 private:
     bool bInitialized=false;
     float PlaybackRate=1.f;
     float AchievedRate=1.f;
-    double LastFrameWall=0;
+    double NextFrameWall=0;
     double SampleStart=0;
     double SampleSimulation=0;
+    FPlaybackInputGate InputGate;
+    bool bBufferedPlayback=false,bLiveFallback=false;
 };

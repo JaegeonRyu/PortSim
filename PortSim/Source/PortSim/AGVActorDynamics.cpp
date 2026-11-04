@@ -12,7 +12,8 @@ FAGVDynamicsInput APortAGVActor::DynamicsInput() const
     I.RollingResistance=Friction.TireRollingResistance; I.DrivenFraction=Friction.DrivenWeightFraction;
     if(Emergency.Active)
     {
-        FPortSurfaceState TestSurface=Surface; TestSurface.Wetness=EmergencySettings.Wetness; TestSurface.Ice=EmergencySettings.Ice;
+        FPortSurfaceState TestSurface=Surface;
+        if(bEmergencyTestOverrides) { TestSurface.Wetness=ActiveEmergencySettings.Wetness; TestSurface.Ice=ActiveEmergencySettings.Ice; }
         I.StaticMu=Friction.Tire.Static(TestSurface); I.KineticMu=Friction.Tire.Kinetic(TestSurface);
         I.DeckStaticMu=Friction.Steel.Static(TestSurface); I.DeckKineticMu=Friction.Steel.Kinetic(TestSurface);
         I.CargoContactEnabled=true; I.CargoSecured=Emergency.CargoSecured;
@@ -52,9 +53,9 @@ void APortAGVActor::AdvanceDynamics(double TargetSpeedMps,double CurvaturePerM,d
         const FVector Delta=(EmergencyWorkerPosition-Previous)*.01;
         const double Along=FVector::DotProduct(Delta,EmergencyDirection);
         const double Side=FVector::CrossProduct(EmergencyDirection,Delta).Z;
-        const double Gap=Along-AGVReference::PhysicalHalfLengthCm*.01-EmergencySettings.WorkerRadiusM;
+        const double Gap=Along-AGVReference::PhysicalHalfLengthCm*.01-ActiveEmergencySettings.WorkerRadiusM;
         const double Range=Sensors.LiDARDetectionRangeCm>=0?Sensors.LiDARDetectionRangeCm*.01:100;
-        Emergency.Step(EmergencySettings,DynamicsSettings,Input,Dynamics,Gap,Side,Range,Seconds);
+        Emergency.Step(ActiveEmergencySettings,DynamicsSettings,Input,Dynamics,Gap,Side,Range,Seconds);
     }
     else Dynamics.Step(DynamicsSettings,Input,Seconds);
     SetActorLocationAndRotation(Previous+(Forward*Dynamics.PositionM.X+Left*Dynamics.PositionM.Y)*100,

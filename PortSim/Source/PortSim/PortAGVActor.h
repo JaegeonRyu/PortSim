@@ -47,6 +47,9 @@ UCLASS(Blueprintable)
 class PORTSIM_API APortAGVActor : public APortEquipmentActor
 {
     GENERATED_BODY()
+    friend class FTerminalReplayCheckpointTest;
+    friend class FTerminalCheckpoint;
+    friend class FTerminalReplay;
 public:
     APortAGVActor();
     void InitializeVehicle(int32 Number);
@@ -78,11 +81,14 @@ public:
     void ConstrainDynamicsStop();
     TSharedRef<FJsonObject> DynamicsSnapshot() const;
     bool StartEmergencyScenario(bool Secured,FString& Error);
+    bool StartWorkerIntrusion(double DistanceM,FString& Error);
     bool ClearEmergencyScenario(FString& Error);
     bool HasValidEmergencyCoG(const APortContainerActor* Cargo,FVector Baseline) const;
     void AdvanceEmergencyScenario(double Seconds);
     TSharedRef<FJsonObject> EmergencySnapshot() const;
     UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="AGV|Emergency Test") FAGVEmergencySettings EmergencySettings;
+    FAGVEmergencySettings ActiveEmergencySettings;
+    bool bEmergencyTestOverrides=false;
     FAGVEmergencyState Emergency;
     FVector EmergencyWorkerPosition=FVector::ZeroVector;
     FVector EmergencyDirection=FVector::ZeroVector;
@@ -110,6 +116,7 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV") FVector DeckCoGOffsetCm=FVector::ZeroVector;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV") FAGVSensorState Sensors;
 private:
+    bool BeginWorkerScenario(bool Secured,bool TestOverrides,double DistanceM,FString& Error);
     TWeakObjectPtr<APortContainerActor> EmergencyCargo;
     FVector OriginalEmergencyCoG=FVector::ZeroVector;
     FVector AppliedEmergencyCoG=FVector::ZeroVector;

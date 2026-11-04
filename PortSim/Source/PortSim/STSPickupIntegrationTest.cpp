@@ -45,12 +45,14 @@ void AQuayCrane::BeginPickupTest()
             !Box->GetMotionJerk().IsNearlyZero())
         {UE_LOG(LogTemp,Error,TEXT("PORTSIM_PICKUP_FAIL: stopped AGV inherited vessel motion"));FPlatformMisc::RequestExitWithStatus(false,1);return;}
         Vehicle->Speed=100;
+        Vehicle->Dynamics.U=1; // actual signed body velocity now drives cargo observations
         if(!Box->GetMotionVelocity().Equals(Vehicle->GetActorRightVector()*100,.01))
         {UE_LOG(LogTemp,Error,TEXT("PORTSIM_PICKUP_FAIL: cargo did not follow AGV velocity"));FPlatformMisc::RequestExitWithStatus(false,1);return;}
         Vehicle->Sensors.bReversing=true;
+        Vehicle->Dynamics.U=-1;
         if(!Box->GetMotionVelocity().Equals(-Vehicle->GetActorRightVector()*100,.01))
         {UE_LOG(LogTemp,Error,TEXT("PORTSIM_PICKUP_FAIL: cargo did not follow reversing AGV"));FPlatformMisc::RequestExitWithStatus(false,1);return;}
-        Vehicle->Speed=0;Vehicle->Sensors.bReversing=false;
+        Vehicle->Speed=0;Vehicle->Sensors.bReversing=false;Vehicle->Dynamics.ConstrainStop();
         if(PickupTestCase==TEXT("agv"))Vehicle->Speed=100;
         if(PickupTestCase==TEXT("collision"))
         {
@@ -107,7 +109,10 @@ void AQuayCrane::TickPickupTest(float Dt)
             PickupTestCase==TEXT("collision")?TEXT("RMG crane collision clearance violated"):
             PickupTestCase==TEXT("stack")?TEXT("RMG stack profile invalid or destination height mismatch"):TEXT("Pickup alignment attempts exhausted");
         if(PickupTestCase==TEXT("stack") && (!C->bCarrying||C->CompletedJobs!=0)){Finish(false,TEXT("Stack fault released cargo"));return;}
-        Finish(Negative&&C->Fault==Expected,C->Fault);return;
+        // Runtime errors append measured diagnostics after the stable reason.
+        // Check that reason boundary, not an exact match that rejects a valid
+        // safety stop merely because it now reports pose/sensor evidence.
+        Finish(Negative&&(C->Fault==Expected || C->Fault.StartsWith(Expected+TEXT(":"))),C->Fault);return;
     }
     if((!RMG && C->Stage>=3) || (RMG && C->CompletedJobs==1))
     {

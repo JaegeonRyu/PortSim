@@ -84,8 +84,11 @@ namespace AGVTrafficGeometry
     // block a vehicle in an adjacent parking bay.
     inline bool SweptChassisIntersects(FVector From,FVector To,FVector OtherPosition,
         FVector OtherLongitudinal,float HalfLength=AGVReference::PhysicalHalfLengthCm,
-        float HalfWidth=AGVReference::PhysicalHalfWidthCm,float TurnMargin=0.f)
+        float HalfWidth=AGVReference::PhysicalHalfWidthCm,float TurnMargin=0.f,
+        float OtherHalfLength=-1.f,float OtherHalfWidth=-1.f)
     {
+        if(OtherHalfLength<0) OtherHalfLength=HalfLength;
+        if(OtherHalfWidth<0) OtherHalfWidth=HalfWidth;
         FVector Long=(To-From).GetSafeNormal2D();
         if(Long.IsNearlyZero()) Long=OtherLongitudinal.GetSafeNormal2D();
         const FVector Side(-Long.Y,Long.X,0);
@@ -98,8 +101,8 @@ namespace AGVTrafficGeometry
         {
             const double Own=FMath::Abs(FVector::DotProduct(Long,Axis))*SweepHalfLength+
                 FMath::Abs(FVector::DotProduct(Side,Axis))*(HalfWidth+TurnMargin);
-            const double Other=FMath::Abs(FVector::DotProduct(OtherLong,Axis))*HalfLength+
-                FMath::Abs(FVector::DotProduct(OtherSide,Axis))*HalfWidth;
+            const double Other=FMath::Abs(FVector::DotProduct(OtherLong,Axis))*OtherHalfLength+
+                FMath::Abs(FVector::DotProduct(OtherSide,Axis))*OtherHalfWidth;
             if(FMath::Abs(FVector::DotProduct(Delta,Axis))>Own+Other) return false;
         }
         return true;

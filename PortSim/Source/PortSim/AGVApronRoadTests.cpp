@@ -1,5 +1,6 @@
 #if WITH_DEV_AUTOMATION_TESTS
 #include "AGVApronRoads.h"
+#include "AGVTrafficGeometry.h"
 #include "PortSiteLogistics.h"
 #include "PortAGVActor.h"
 #include "Engine/World.h"
@@ -26,6 +27,7 @@ bool FAGVApronRoadTest::RunTest(const FString& Parameters)
     for(int STS=0;STS<9;++STS) for(int Block=0;Block<YardBlockCount;++Block)
     {
         const FVector Quay=AGVApronRoads::P(AGVQuayHandoverX,(STSCenterY(STS)+8.f)*100.f);
+        const FVector Waiting=AGVApronRoads::P(AGVQuayWaitingBayX,(STSCenterY(STS)+28.f)*100.f);
         const float TargetY=RMGHandoverY(Block)*100.f;
         FAGVRoadNetwork Network; AGVApronRoads::Add(Network);
         const float Spine=AGVApronRoads::AddDeparture(Network,Quay,TargetY);
@@ -36,6 +38,14 @@ bool FAGVApronRoadTest::RunTest(const FString& Parameters)
         TestTrue(TEXT("Every STS reaches every near-yard aisle through the freed area"),Network.Find(Quay,Via,To,Clear));
         TestTrue(TEXT("Apron connects directly to legal near-yard entry"),Network.Find(Via,Entry,From,Clear));
         const float Depart=AGVApronRoads::DepartureY(Quay.Y,TargetY);
+        const FVector Departure(Quay.X,Depart,0);
+        TestFalse(TEXT("A staged AGV clears the loaded departure, including turn bow allowance"),
+            AGVTrafficGeometry::SweptChassisIntersects(Departure,AGVApronRoads::P(Spine,Depart),
+                Waiting,FVector(0,1,0),730,210,340));
+        TestFalse(TEXT("Standby arrival crossing clears the current stopped STS handover"),
+            AGVTrafficGeometry::SweptChassisIntersects(
+                AGVApronRoads::P(AGVQuayInboundLaneX,Waiting.Y+1600),FVector(Waiting.X,Waiting.Y+1600,0),
+                Quay,FVector(0,1,0),730,210,340));
         TestTrue(TEXT("Consecutive corner tangents do not overlap"),
             FMath::Abs(TargetY-Depart)>=2*AGVReference::MinimumInnerTurnRadiusCm+100.f);
         TestTrue(TEXT("Departure remains clear of the south boundary"),Depart>=AGVSouthLoadedY);

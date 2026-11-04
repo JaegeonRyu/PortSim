@@ -1,4 +1,5 @@
 #include "PortWorkingCrane.h"
+#include "TerminalReplay.h"
 #include "SimulationPerformance.h"
 #include "PortContainerActor.h"
 #include "PortSiteLogistics.h"
@@ -143,6 +144,8 @@ FVector APortWorkingCrane::HeadPosition() const { return Home+Orientation.Rotate
 void APortWorkingCrane::ResetOperation()
 {
     if (!bConfigured) return;
+    for(double& Seconds:CompletedStageSeconds) Seconds=0;
+    CompletedAGVWaitSeconds=0;
     FaultType=EPortCraneFault::None; RecoveryStatus.Empty(); bRailSafetyHold=false;
     bGantryFault=bAppliedGantryFault=bFaultEvacuating=bFaultEvacuationComplete=false;
     SensorRepairElapsed=0; SensorRepairPhase.Empty();
@@ -260,8 +263,8 @@ void APortWorkingCrane::Stop(const FString& Reason,EPortCraneFault Kind)
 {
     Fault=Reason; FaultType=Kind; SetOperationPaused(true);
     if(Kind==EPortCraneFault::SensorUnavailable || Kind==EPortCraneFault::GantryUnavailable)
-    { UE_LOG(LogTemp,Warning,TEXT("EQUIPMENT_SENSOR_FAULT: crane=%d %s"),CraneID,*Reason); }
-    else { UE_LOG(LogTemp,Error,TEXT("WORKING_CRANE_%d: %s"),CraneID,*Reason); }
+    { PORTSIM_SIM_LOG(LogTemp,Warning,TEXT("EQUIPMENT_SENSOR_FAULT: crane=%d %s"),CraneID,*Reason); }
+    else { PORTSIM_SIM_LOG(LogTemp,Error,TEXT("WORKING_CRANE_%d: %s"),CraneID,*Reason); }
 }
 
 void APortWorkingCrane::SetSensorFailure(bool Failed)
@@ -284,7 +287,7 @@ void APortWorkingCrane::SetSensorFailure(bool Failed)
     {
         bFaultEvacuating=false; AxisVelocity=FVector::ZeroVector; SensorRepairPhase=TEXT("repaired");
         Fault.Empty(); FaultType=EPortCraneFault::None; RecoveryStatus=TEXT("repaired"); NextSample=0;
-        UE_LOG(LogTemp,Display,TEXT("EQUIPMENT_SENSOR_REPAIRED: crane=%d retained_load=%d"),CraneID,RetainsLoad());
+        PORTSIM_SIM_LOG(LogTemp,Display,TEXT("EQUIPMENT_SENSOR_REPAIRED: crane=%d retained_load=%d"),CraneID,RetainsLoad());
     }
 }
 
@@ -367,6 +370,8 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
     if(bJobActive) { JobSeconds+=Dt; if(bGlobalPaused || !bEnabled || !Fault.IsEmpty()) PausedSeconds+=Dt; }
     SetOperationPaused(bGlobalPaused || !bEnabled || !Fault.IsEmpty());
     if (bPaused || !bJobActive) return;
+    if(Stage>=0 && Stage<8) JobStageSeconds[Stage]+=Dt;
+    if(IsWaitingForAGV()) JobAGVWaitSeconds+=Dt;
     AdvanceTelescope(Dt);
     {
         SampleSTS();
@@ -381,7 +386,7 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
         if(bCarrying && (!Observation.AllLocked() || Observation.DynamicPayloadEstimateKg()>STSProfile.RatedPayloadKg))
         { Stop(TEXT("Loaded hoist interlock: locks/load observation invalid")); return; }
     }
-    const bool bSTSNeedsAGV=AGVAtDestination() && ((Stage==5 && bDestinationReady) || Stage==6 || Stage==7);
+    const bool bSTSNeedsAGV=AGVAtDestination() && !bAGVHandoverComplete && ((Stage==5 && bDestinationReady) || Stage==6 || Stage==7);
     const bool bRMGNeedsAGV=!AGVAtDestination() && Stage<=2 && IsValid(HandoverAGV);
     if((bSTSNeedsAGV || bRMGNeedsAGV) && !Observation.bAGVAligned)
     {
@@ -402,10 +407,10 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
             const bool bInLidar=bValidAGV&&STSSensorContains(TEXT("agv_position_lidar"),AGVCargo);
             const bool bDockingFix=bValidAGV&&HandoverAGV->Sensors.bFMSConnected&&
                 HandoverAGV->Sensors.bDockingNode&&HandoverAGV->Sensors.bTransponderLocked;
-            UE_LOG(LogTemp,Error,TEXT("STS_ALIGNMENT_DETAIL: crane=%d stage=%d ready=%d agv=%s observed=%d speed_cmps=%.3f position_error_cm=%.3f position_limit_cm=%.3f axial_heading_error_deg=%.3f heading_limit_deg=%.3f lidar=%d docking_fix=%d destination=%s cargo_position=%s"),
+            PORTSIM_SIM_LOG(LogTemp,Error,TEXT("STS_ALIGNMENT_DETAIL: crane=%d stage=%d ready=%d agv=%s observed=%d speed_cmps=%.3f position_error_cm=%.3f position_limit_cm=%.3f axial_heading_error_deg=%.3f heading_limit_deg=%.3f lidar=%d docking_fix=%d destination=%s cargo_position=%s"),
                 CraneID,Stage,bDestinationReady,*GetNameSafe(HandoverAGV),Observation.bAGVAligned,AGVSpeed,PositionError,STSProfile.AGVTolerance,
                 HeadingError,STSProfile.AGVHeadingTolerance,bInLidar,bDockingFix,*Slots[1-SourceSlot].ToString(),*AGVCargo.ToString());
-            UE_LOG(LogTemp,Error,TEXT("CRANE_ALIGNMENT_TIMEOUT: crane=%d kind=%s stage=%d ready=%d agv=%s observed=%d destination=%s wait=%.2f"),
+            PORTSIM_SIM_LOG(LogTemp,Error,TEXT("CRANE_ALIGNMENT_TIMEOUT: crane=%d kind=%s stage=%d ready=%d agv=%s observed=%d destination=%s wait=%.2f"),
                 CraneID,bSTS?TEXT("STS"):TEXT("RMG"),Stage,bDestinationReady,*GetNameSafe(HandoverAGV),
                 Observation.bAGVAligned,*Slots[bSTS?1-SourceSlot:SourceSlot].ToString(),AGVAlignmentWait);
             Stop(bSTS?TEXT("AGV alignment recovery timed out during STS handover"):
@@ -454,11 +459,11 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
     case 6: Target=FVector(Destination.X,Destination.Y,SafeZ); break;
     case 7:
         SettleTime+=Dt;
-        if (SettleTime<1.5f) return;
-        if (FVector::Dist(CargoActor->GetActorLocation(),Slots[1-SourceSlot])>10.f ||
-            CargoActor->GetBody()->GetPhysicsLinearVelocity().Size()>5.f || CargoActor->GetActorUpVector().Z<.99f)
+        if (!bAGVHandoverComplete && SettleTime<1.5f) return;
+        if (!bAGVHandoverComplete && (FVector::Dist(CargoActor->GetActorLocation(),Slots[1-SourceSlot])>10.f ||
+            CargoActor->GetBody()->GetPhysicsLinearVelocity().Size()>5.f || CargoActor->GetActorUpVector().Z<.99f))
         {
-            UE_LOG(LogTemp,Error,TEXT("CRANE_SETTLING_DETAIL: crane=%d cargo=%s position=%s destination=%s error_cm=%.3f speed_cmps=%.3f up_z=%.6f physics=%d"),
+            PORTSIM_SIM_LOG(LogTemp,Error,TEXT("CRANE_SETTLING_DETAIL: crane=%d cargo=%s position=%s destination=%s error_cm=%.3f speed_cmps=%.3f up_z=%.6f physics=%d"),
                 CraneID,*GetNameSafe(CargoActor),*CargoActor->GetActorLocation().ToString(),
                 *Slots[1-SourceSlot].ToString(),FVector::Dist(CargoActor->GetActorLocation(),Slots[1-SourceSlot]),
                 CargoActor->GetBody()->GetPhysicsLinearVelocity().Size(),CargoActor->GetActorUpVector().Z,
@@ -467,6 +472,15 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
         }
         ++CompletedJobs;
         LastJobSeconds=JobSeconds; LastPausedSeconds=PausedSeconds;
+        for(int32 I=0;I<8;++I)
+        { LastJobStageSeconds[I]=JobStageSeconds[I]; CompletedStageSeconds[I]+=JobStageSeconds[I]; }
+        CompletedAGVWaitSeconds+=JobAGVWaitSeconds;
+        PORTSIM_SIM_LOG(LogTemp,Display,TEXT("CRANE_CYCLE: kind=%s id=%d cargo=%s elapsed=%.2f agv_wait=%.2f stages=%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f"),
+            bSTS?TEXT("STS"):TEXT("RMG"),CraneID,*GetNameSafe(CargoActor),JobSeconds,JobAGVWaitSeconds,
+            JobStageSeconds[0],JobStageSeconds[1],JobStageSeconds[2],JobStageSeconds[3],
+            JobStageSeconds[4],JobStageSeconds[5],JobStageSeconds[6],JobStageSeconds[7]);
+        for(double& Seconds:JobStageSeconds) Seconds=0;
+        JobAGVWaitSeconds=0;
         if (bExternalJobs) { bJobActive=false; CargoActor=nullptr; Stage=0; StageTime=SettleTime=0; return; }
         SourceSlot=1-SourceSlot; Stage=0; StageTime=SettleTime=0;
         {Pickup=FSTSPickupController();for(double& Progress:LockProgress)Progress=0;}
@@ -481,9 +495,15 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
                 !Observation.CargoPosition.Equals(Slots[1-SourceSlot],STSProfile.LandingTolerance)) { SettleTime=0; return; }
             SettleTime+=Dt;
             if(SettleTime<STSProfile.SettleTime) return;
+            // Finish the receiving-side coupling before unlocking or lifting
+            // the spreader. Failure leaves the load retained by this crane.
+            if(!bSTS && bExternalJobs && AGVAtDestination() && !SecureRMGToAGV())
+            { SettleTime=0; return; }
             for(bool& Locked:CornerLocked) Locked=false;
             for(bool& Requested:Pickup.RequestLocks) Requested=false;
         }
+        if (!bAGVHandoverComplete)
+        {
         if (!DestinationClear()) { Stop(TEXT("Destination became occupied")); return; }
         CargoActor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
         auto* Body=CargoActor->GetBody();
@@ -498,6 +518,7 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
         Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
         Body->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
         CargoActor->LocationOwner=bSTS && (bReverseTransfer || (1-SourceSlot)==0)?ECargoOwner::Ship:ECargoOwner::Yard;
+        }
         bCarrying=false;
     }
     StageHoldTarget=Head+SuspendedOffset;
@@ -559,7 +580,7 @@ bool APortWorkingCrane::ValidateOperation(FString& Error) const
     if (bCarrying && (CargoActor->GetAttachParentActor()!=this || CargoActor->GetBody()->IsSimulatingPhysics() ||
         !CargoActor->GetActorTransform().Equals(LockedCargoTransform*Spreader->GetComponentTransform(),1.f)))
     { Error=TEXT("Locked cargo is detached or out of alignment"); return false; }
-    if (!bCarrying && CargoActor->GetAttachParentActor() &&
+    if (!bCarrying && !bAGVHandoverComplete && CargoActor->GetAttachParentActor() &&
         !(Stage<=2 && CargoActor->LocationOwner==ECargoOwner::AGV && !CargoActor->GetBody()->IsSimulatingPhysics()))
     { Error=TEXT("Released cargo remains attached"); return false; }
     return true;

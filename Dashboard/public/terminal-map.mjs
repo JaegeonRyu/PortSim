@@ -3,6 +3,29 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const xy=p=>Array.isArray(p)&&p.length>=2&&p.slice(0,2).every(Number.isFinite);
 const fmt=v=>Number(v.toFixed(3));
 const backgroundCache=new WeakMap();
+// Presentation only: quay at left, inland at right. Reference proportions
+// are snapped to existing slots, not surveyed boundaries or engine rules.
+const yardZones=[
+ {key:'reefer',name:'냉동',minBlock:13,maxBlock:17,minBay:22,maxBay:28},
+ {key:'dangerous',name:'위험물',minBlock:4,maxBlock:8,minBay:26,maxBay:28},
+ {key:'chemical',name:'유해화학물',minBlock:2,maxBlock:3,minBay:24,maxBay:28},
+];
+function yardZoneMarkup(layout){
+ let markup='';
+ for(const zone of yardZones){
+   const blockIds=new Set((layout.yard_blocks||[]).filter(b=>b.number>=zone.minBlock&&b.number<=zone.maxBlock).map(b=>b.id));
+   const bays=(layout.yard_bays||[]).filter(b=>blockIds.has(b.yard_id)&&b.bay>=zone.minBay&&b.bay<=zone.maxBay&&validFootprint(b));
+   if(!bays.length)continue;
+   const corners=bays.flatMap(b=>{
+    const angle=(b.yaw_deg||0)*Math.PI/180,c=Math.cos(angle),s=Math.sin(angle);
+    return [[-1,-1],[1,-1],[1,1],[-1,1]].map(([i,j])=>[b.position_m[0]+i*b.size_m[0]*c/2-j*b.size_m[1]*s/2,b.position_m[1]+i*b.size_m[0]*s/2+j*b.size_m[1]*c/2]);
+   });
+   const x=Math.min(...corners.map(p=>p[0]))-2,y=Math.min(...corners.map(p=>p[1]))-2;
+   const w=Math.max(...corners.map(p=>p[0]))-x+2,h=Math.max(...corners.map(p=>p[1]))-y+2;
+   markup+=`<g class="yard-zone zone-${zone.key}" data-display-zone="${zone.key}" pointer-events="none"><title>${zone.name} · 야드 ${zone.minBlock}~${zone.maxBlock} · 대시보드 표시 구역</title><rect x="${fmt(x)}" y="${fmt(y)}" width="${fmt(w)}" height="${fmt(h)}"/><text x="${fmt(x+w/2)}" y="${fmt(y-3)}" text-anchor="middle">${zone.name}</text></g>`;
+ }
+ return `<g class="yard-display-zones" pointer-events="none">${markup}</g>`;
+}
 export function validFootprint(r){return xy(r?.position_m)&&xy(r?.size_m)&&r.size_m.every(v=>v>0)&&Number.isFinite(r.yaw_deg??0);}
 export function footprintRect(r,attributes=''){
  if(!validFootprint(r))return '';
@@ -39,6 +62,7 @@ function background(layout){
  h+=`<g class="terminal-markings" pointer-events="none"><path d="${paths((layout.markings||[]).filter(r=>r.material!=='yellow'))}"/><path class="paint-yellow" d="${paths((layout.markings||[]).filter(r=>r.material==='yellow'))}"/></g>`;
  h+='<g class="terminal-buildings" pointer-events="none">'+(layout.buildings||[]).map(r=>footprintRect(r)).join('')+'</g>';
  h+='<g class="terminal-yard-bays">'+(layout.yard_bays||[]).map(bayMarkup).join('')+'</g>';
+ h+=yardZoneMarkup(layout);
  for(const b of layout.yard_blocks||[])if(xy(b.label_position_m))h+=`<text x="${b.label_position_m[0]-5}" y="${b.label_position_m[1]+3}" class="yard-block-label" text-anchor="end" pointer-events="none">${String(b.number).padStart(2,'0')}</text>`;
  const road=layout.central_road_m;
  if(road?.length===4)h+=`<text x="${(road[0]+road[2])/2}" y="${road[1]+2.5}" class="central-road-label" text-anchor="middle" pointer-events="none">중앙도로 · ${road[3]}m</text>`;
@@ -61,9 +85,11 @@ export function renderTerminalOverview(state,layout,{selected=null,focus=null,mo
  for(const a of actors.filter(a=>a.type==='container'&&a.state==='Yard'&&xy(a.position_m)&&xy(a.dimensions_m)))
   h+=item(a,footprintRect({position_m:a.position_m,size_m:a.dimensions_m.slice(0,2),yaw_deg:a.rotation_deg?.[2]||0},'class="map-yard-cargo map-selection"'));
  h+=impactOverlay(state,focus,x=>x,y=>y,selected);
- for(const a of actors.filter(a=>['sts','rmg','agv'].includes(a.type))){
+ for(const a of actors.filter(a=>['sts','rmg','agv','rs'].includes(a.type))){
   const p=mapPosition(a);if(!xy(p))continue;const [x,y]=p;
-  if(a.type==='agv'){
+  if(a.type==='rs'){
+   h+=item(a,footprintRect({position_m:p,size_m:[9,3.2],yaw_deg:a.rotation_deg?.[2]||0},'class="map-selection" fill="#dc8d40" stroke="#805020"')+`<text x="${x+5}" y="${y-5}" class="crane-map-label">${esc(a.name)}</text>`);
+  }else if(a.type==='agv'){
    const yaw=a.rotation_deg?.[2]||0;
    h+=item(a,`<circle cx="${x}" cy="${y}" r="7" fill="transparent"/>`+footprintRect({position_m:p,size_m:[4.2,14.6],yaw_deg:yaw},`class="map-agv map-selection${a.payload_kg>0?' loaded':''}"`));
   }else{
@@ -72,9 +98,9 @@ export function renderTerminalOverview(state,layout,{selected=null,focus=null,mo
    if(xy(a.head_position_m))h+=`<circle cx="${a.head_position_m[0]}" cy="${a.head_position_m[1]}" r="2.1" fill="${a.fault?'#b83c46':'#116a59'}" pointer-events="none"/>`;
   }
   const e=a.emergency_test;
-  if(e?.active&&xy(e.worker_position_m))h+=`<g class="map-test-worker" pointer-events="none"><circle cx="${e.worker_position_m[0]}" cy="${e.worker_position_m[1]}" r="3.5"/><text x="${e.worker_position_m[0]+6}" y="${e.worker_position_m[1]-5}">시험 작업자</text></g>`;
+  if(e?.active&&xy(e.worker_position_m))h+=`<g class="map-test-worker map-item" data-actor="${esc(a.id)}" role="button" tabindex="0" aria-label="${esc(a.name)} 작업자 진입 상황"><title>${esc(a.name)} · ${e.stopped?'안전 정지 · 작업자 제거 대기':e.brake_command?'급제동 중':'감지·반응 중'}</title><circle cx="${e.worker_position_m[0]}" cy="${e.worker_position_m[1]}" r="7" fill="transparent"/><circle cx="${e.worker_position_m[0]}" cy="${e.worker_position_m[1]}" r="3.5"/><text x="${e.worker_position_m[0]+6}" y="${e.worker_position_m[1]-5}">작업자 · ${esc(a.name)}</text></g>`;
  }
  const {minX,minY,width,height}=viewport,scale=mode==='depot'?25:100;
  h+=`<g class="map-scale" transform="translate(${minX+width-140} ${minY+height-25})" pointer-events="none"><path d="M0 -5v5h${scale}v-5"/><text x="${scale/2}" y="-9" text-anchor="middle">${scale}m</text></g>`;
- return `<section class="panel terminal-overview" data-map-mode="${esc(mode)}">${head}<div class="terminal-map-wrap"><svg class="terminal-world-map" viewBox="${minX} ${minY} ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="동일 축척의 실제 엔진 터미널 배치 지도"><defs><clipPath id="terminal-plan-clip"><rect x="${minX}" y="${minY}" width="${width}" height="${height}"/></clipPath></defs><g clip-path="url(#terminal-plan-clip)">${h}</g></svg></div><div class="map-caption"><span>X 내륙 → · Y 부두축 ↓ · 가로/세로 동일 축척</span><span>슬롯 구획: 엔진 배치 · 채워진 칸: 실제 적재 화물</span></div><div class="map-plan-key"><span><i class="key-road"></i>실제 포장면</span><span><i class="key-yard"></i>야드 슬롯</span><span><i class="key-agv"></i>AGV 실제 차체</span><span>7열 · 빈 공간 · 6열</span></div></section>`;
+ return `<section class="panel terminal-overview" data-map-mode="${esc(mode)}">${head}<div class="terminal-map-wrap"><svg class="terminal-world-map" viewBox="${minX} ${minY} ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="동일 축척의 실제 엔진 터미널 배치 지도"><defs><clipPath id="terminal-plan-clip"><rect x="${minX}" y="${minY}" width="${width}" height="${height}"/></clipPath></defs><g clip-path="url(#terminal-plan-clip)">${h}</g></svg></div><div class="map-caption"><span>X 내륙 → · Y 부두축 ↓ · 가로/세로 동일 축척</span><span>슬롯 구획: 엔진 배치 · 채워진 칸: 실제 적재 화물 · 색상 구역: 대시보드 전용</span></div><div class="map-plan-key"><span><i class="key-road"></i>실제 포장면</span><span><i class="key-yard"></i>야드 슬롯</span><span><i class="key-reefer"></i>냉동</span><span><i class="key-dangerous"></i>위험물</span><span><i class="key-chemical"></i>유해화학물</span><span><i class="key-agv"></i>AGV 실제 차체</span><span><i style="background:#dc8d40"></i>R/S 리치 스태커</span><span>7열 · 빈 공간 · 6열</span></div></section>`;
 }

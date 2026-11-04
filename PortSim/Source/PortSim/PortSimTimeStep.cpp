@@ -6,7 +6,9 @@
 bool UPortSimTimeStep::Initialize(UEngine* InEngine)
 {
     bInitialized=true;
-    LastFrameWall=SampleStart=FPlatformTime::Seconds();
+    InputGate=FPlaybackInputGate();
+    SampleStart=FPlatformTime::Seconds();
+    NextFrameWall=SampleStart+StepSeconds/PlaybackRate;
     SampleSimulation=0;
     return true;
 }
@@ -18,7 +20,23 @@ void UPortSimTimeStep::Shutdown(UEngine* InEngine)
 
 void UPortSimTimeStep::SetPlaybackRate(float Rate)
 {
-    PlaybackRate=FMath::Clamp(Rate,1.f,16.f);
+    const float NewRate=FMath::IsFinite(Rate)?FMath::Clamp(Rate,1.f,16.f):1.f;
+    if(NewRate==PlaybackRate) return;
+    PlaybackRate=NewRate;
+    NextFrameWall=FPlatformTime::Seconds()+StepSeconds/GetEffectiveRate();
+}
+
+float UPortSimTimeStep::GetEffectiveRate() const
+{
+    return bLiveFallback?1.f:InputGate.EffectiveRate(PlaybackRate,FPlatformTime::Seconds());
+}
+
+void UPortSimTimeStep::NotifyExternalInput()
+{
+    const double Now=FPlatformTime::Seconds();
+    InputGate.Submit(Now);
+    NextFrameWall=Now+StepSeconds;
+    SampleStart=Now; SampleSimulation=0; AchievedRate=1.f;
 }
 
 ECustomTimeStepSynchronizationState UPortSimTimeStep::GetSynchronizationState() const
@@ -29,17 +47,23 @@ ECustomTimeStepSynchronizationState UPortSimTimeStep::GetSynchronizationState() 
 bool UPortSimTimeStep::UpdateTimeStep(UEngine* InEngine)
 {
     if (!bInitialized) return true;
-    // Keep presentation pacing independent of playback. Accelerate simulation time,
-    // not the required render/engine frame rate (16x must not require 960 FPS).
-    const double Deadline=LastFrameWall+StepSeconds;
+    // Advance controllers, environment and Chaos with the same interval at every
+    // playback rate. Plant-only substeps cannot correct observations/kinematic
+    // targets held across an enlarged world frame (visible as extra rope sway).
+    const double Deadline=NextFrameWall;
     double Now=FPlatformTime::Seconds();
     if (Now<Deadline)
     {
         FPlatformProcess::SleepNoStats(static_cast<float>(Deadline-Now));
         Now=FPlatformTime::Seconds();
     }
-    const double SimulationDelta=FMath::Clamp((Now-LastFrameWall)*PlaybackRate,0.0,MaxSimulationDelta);
-    LastFrameWall=Now;
+    // Never enlarge the physics interval. Buffered terminal playback accounts
+    // for elapsed-time debt separately; the ordinary world clock has no queue.
+    const double SimulationDelta=StepSeconds;
+    // Preserve cadence across sleep/scheduler jitter rather than adding that
+    // overshoot to every interval. Bound lag to one tick: no stall catch-up queue.
+    const float FrameRate=(bBufferedPlayback || bLiveFallback)?1.f:InputGate.EffectiveRate(PlaybackRate,Now);
+    NextFrameWall=FMath::Max(Deadline+StepSeconds/FrameRate,Now);
     UpdateApplicationLastTime();
     FApp::SetDeltaTime(SimulationDelta);
     FApp::SetCurrentTime(FApp::GetLastTime()+SimulationDelta);
