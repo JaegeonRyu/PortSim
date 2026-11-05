@@ -5,7 +5,7 @@
 #include "PortSimTimeStep.h"
 #include "PortEnvironmentComponent.h"
 #include "PortFogVisualComponent.h"
-#include "PortRainVisualComponent.h"
+#include "PortPrecipitationVisualComponent.h"
 #include "PortContainerActor.h"
 #include "PortWorkingCrane.h"
 #include "Misc/FileHelper.h"
@@ -65,7 +65,7 @@ AQuayCrane::AQuayCrane()
 {
     Environment=CreateDefaultSubobject<UPortEnvironmentComponent>(TEXT("Environment"));
     CreateDefaultSubobject<UPortFogVisualComponent>(TEXT("FogVisual"));
-    CreateDefaultSubobject<UPortRainVisualComponent>(TEXT("RainVisual"));
+    CreateDefaultSubobject<UPortPrecipitationVisualComponent>(TEXT("PrecipitationVisual"));
     PrimaryActorTick.bCanEverTick = true;
     PrimaryActorTick.TickGroup = TG_PrePhysics;
     RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));

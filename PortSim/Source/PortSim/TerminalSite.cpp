@@ -47,7 +47,7 @@ void AQuayCrane::BuildTerminalSite()
         Mesh->RegisterComponent();
         return Mesh;
     };
-    auto* Roads=Group(TEXT("Site_Roads"),TEXT("SiteRoad"));
+    auto* Roads=Group(TEXT("Site_Roads"),TEXT("PortSnowGround"));
     auto* PaintYellow=Group(TEXT("Site_YellowMarkings"),TEXT("CraneYellow"));
     auto* White=Group(TEXT("Site_Markings"),TEXT("SiteWhite"));
     auto* Buildings=Group(TEXT("Site_Buildings"),TEXT("SiteBuilding"));

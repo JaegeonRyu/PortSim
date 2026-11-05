@@ -103,7 +103,7 @@ void AQuayCrane::BuildTerminal()
         }
         SiteMesh->CreateMeshSection_LinearColor(0,Vertices,Triangles,Normals,UVs,Colors,Tangents,true);
         SiteMesh->SetCollisionProfileName(TEXT("BlockAll"));
-        if (auto* QuayMaterial=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/PortSim/Assets/Materials/M_SiteRoad.M_SiteRoad")))
+        if (auto* QuayMaterial=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/PortSim/Assets/Materials/M_PortSnowGround.M_PortSnowGround")))
             SiteMesh->SetMaterial(0,QuayMaterial);
         SiteMesh->RegisterComponent();
     }
