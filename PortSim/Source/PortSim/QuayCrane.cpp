@@ -4,6 +4,7 @@
 #include "PortSiteLogistics.h"
 #include "PortSimTimeStep.h"
 #include "PortEnvironmentComponent.h"
+#include "PortRainVisualComponent.h"
 #include "PortContainerActor.h"
 #include "PortWorkingCrane.h"
 #include "Misc/FileHelper.h"
@@ -62,6 +63,7 @@ UStaticMeshComponent* AQuayCrane::MakeBox(const TCHAR* Name, USceneComponent* Pa
 AQuayCrane::AQuayCrane()
 {
     Environment=CreateDefaultSubobject<UPortEnvironmentComponent>(TEXT("Environment"));
+    CreateDefaultSubobject<UPortRainVisualComponent>(TEXT("RainVisual"));
     PrimaryActorTick.bCanEverTick = true;
     PrimaryActorTick.TickGroup = TG_PrePhysics;
     RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
@@ -586,7 +588,7 @@ void AQuayCrane::Tick(float DeltaSeconds)
         {
             Environment->ToggleRain();
             const auto& Rain=Environment->GetRainState();
-            UE_LOG(LogTemp,Display,TEXT("PORTSIM_RAIN_TOGGLE: enabled=%d rate_mmph=%.1f camera_scale=%.3f lidar_scale=%.3f surface_wetness=%.3f visual=0"),
+            UE_LOG(LogTemp,Display,TEXT("PORTSIM_RAIN_TOGGLE: enabled=%d rate_mmph=%.1f camera_scale=%.3f lidar_scale=%.3f surface_wetness=%.3f"),
                 Rain.bRainEnabled,Rain.RainfallMmPerHour,Rain.SensorRangeScale(TEXT("camera")),
                 Rain.SensorRangeScale(TEXT("lidar")),Environment->GetSurfaceConditions().Wetness);
             if(!FParse::Param(FCommandLine::Get(),TEXT("unattended"))) SaveRunSettings();

@@ -470,7 +470,7 @@ void UPortEnvironmentComponent::BeginPlay()
         Sea.SwellHeightMeters,Sea.SwellPeriodSeconds);
     PORTSIM_SIM_LOG(LogTemp,Display,TEXT("PORTSIM_FOG_STATE: enabled=%d visibility_m=%.1f sensor_only=1"),
         Fog.bFogEnabled,Fog.VisibilityMeters);
-    PORTSIM_SIM_LOG(LogTemp,Display,TEXT("PORTSIM_RAIN_STATE: enabled=%d rate_mmph=%.1f camera_scale=%.3f lidar_scale=%.3f surface_wetness=%.3f visual=0"),
+    PORTSIM_SIM_LOG(LogTemp,Display,TEXT("PORTSIM_RAIN_STATE: enabled=%d rate_mmph=%.1f camera_scale=%.3f lidar_scale=%.3f surface_wetness=%.3f"),
         Rain.bRainEnabled,Rain.RainfallMmPerHour,Rain.SensorRangeScale(TEXT("camera")),
         Rain.SensorRangeScale(TEXT("lidar")),GetSurfaceConditions().Wetness);
 }

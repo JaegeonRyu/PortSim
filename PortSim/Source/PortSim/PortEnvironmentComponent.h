@@ -162,7 +162,7 @@ struct PORTSIM_API FPortFogState
     }
 };
 
-/** Deterministic sensor and wet-surface rain model. Visual rain is deliberately excluded. */
+/** Deterministic sensor and wet-surface rain model. Read by the separate rain presentation. */
 struct PORTSIM_API FPortRainState
 {
     static constexpr float DefaultRainfallMmPerHour=25.f;

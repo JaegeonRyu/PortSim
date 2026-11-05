@@ -12,6 +12,10 @@
 	],
 	"Plugins": [
 		{
+			"Name": "Niagara",
+			"Enabled": true
+		},
+		{
 			"Name": "ProceduralMeshComponent",
 			"Enabled": true
 		},
