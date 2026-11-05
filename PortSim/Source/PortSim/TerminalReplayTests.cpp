@@ -26,6 +26,12 @@ bool FTerminalReplayCheckpointTest::RunTest(const FString& Parameters)
     const int32 PreviousBatch=BatchVariable->GetInt();
     BatchVariable->Set(0,ECVF_SetByCode); // Exercise the unsupported/disabled fallback first.
     ON_SCOPE_EXIT { BatchVariable->Set(PreviousBatch,ECVF_SetByCode); };
+    // This regression exercises a deliberately small sixteen-step limit,
+    // independently of the interactive playback default.
+    auto* StepVariable=IConsoleManager::Get().FindConsoleVariable(TEXT("PortSim.LivePhysicsMaxSteps"));
+    const int32 PreviousSteps=StepVariable->GetInt();
+    StepVariable->Set(16,ECVF_SetByCode);
+    ON_SCOPE_EXIT { StepVariable->Set(PreviousSteps,ECVF_SetByCode); };
     const auto Init=UWorld::InitializationValues().AllowAudioPlayback(false).CreatePhysicsScene(true)
         .RequiresHitProxies(false).CreateNavigation(false).CreateAISystem(false);
     auto* World=UWorld::CreateWorld(EWorldType::Game,false,NAME_None,nullptr,true,ERHIFeatureLevel::Num,&Init);

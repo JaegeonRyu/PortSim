@@ -2807,7 +2807,9 @@ void APortSiteLogistics::SynchronizeShipCollision(const FBox& Query,double Contr
 }
 bool APortSiteLogistics::PrepareKinematicPhysicsFrame() const
 {
-    if(FTerminalReplay::IsPredicting()) return false;
+    // The forward driver owns scene setup and synchronization for the entire
+    // batch. Do not configure the same scene again in every logistics step.
+    if(FTerminalReplay::IsPredicting() || FTerminalReplay::IsAdvancingPhysics()) return false;
     PortSimPerformance::FScope Timing(TEXT("physics_frame_policy"));
     UWorld* World=GetWorld();
     const auto* Settings=UPhysicsSettings::Get();

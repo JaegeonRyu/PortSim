@@ -25,6 +25,12 @@ private:
     double Credit=0;
     double SampleWall=0,SampleSimulation=0;
     float ActualRate=0;
+    double DiagnosticWall=0, DiagnosticModel=0, DiagnosticPhysics=0, DiagnosticFrame=0, DiagnosticDropped=0;
+    uint64 DiagnosticSteps=0, DiagnosticBatches=0, DiagnosticBudgetHits=0, DiagnosticStepHits=0;
+    double DiagnosticSolver=0, DiagnosticContactSync=0, DiagnosticTransition=0;
+    uint64 DiagnosticPhysicsCalls=0;
+    int32 DiagnosticFreeCargoPeak=0;
+    void ResetDiagnostics(double Wall=0);
 };
 
 #define PORTSIM_SIM_LOG(Category,Verbosity,Format,...) \

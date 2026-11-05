@@ -67,6 +67,9 @@ void APortContainerActor::ApplyWind(FVector WindVelocityMetersPerSecond,float Dr
     if(!Body->IsSimulatingPhysics()) return;
     const FVector ForceNewtons=FPortWindAerodynamics::DragForceNewtons(WindVelocityMetersPerSecond,
         Body->GetPhysicsLinearVelocity(),Body->GetComponentQuat(),ExternalDimensionsCm*.01f,DragCoefficient);
+    // Do not enqueue a zero-force command for a resting body. Nonzero wind
+    // and aerodynamic drag are still applied without thresholds or filtering.
+    if(ForceNewtons.IsZero()) return;
     // Chaos uses centimetres, so one SI newton is 100 kg*cm/s^2.
     Body->AddForce(ForceNewtons*100.f);
 }
