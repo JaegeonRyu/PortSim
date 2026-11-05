@@ -4,6 +4,7 @@
 #include "PortSiteLogistics.h"
 #include "PortSimTimeStep.h"
 #include "PortEnvironmentComponent.h"
+#include "PortFogVisualComponent.h"
 #include "PortRainVisualComponent.h"
 #include "PortContainerActor.h"
 #include "PortWorkingCrane.h"
@@ -63,6 +64,7 @@ UStaticMeshComponent* AQuayCrane::MakeBox(const TCHAR* Name, USceneComponent* Pa
 AQuayCrane::AQuayCrane()
 {
     Environment=CreateDefaultSubobject<UPortEnvironmentComponent>(TEXT("Environment"));
+    CreateDefaultSubobject<UPortFogVisualComponent>(TEXT("FogVisual"));
     CreateDefaultSubobject<UPortRainVisualComponent>(TEXT("RainVisual"));
     PrimaryActorTick.bCanEverTick = true;
     PrimaryActorTick.TickGroup = TG_PrePhysics;
@@ -580,7 +582,7 @@ void AQuayCrane::Tick(float DeltaSeconds)
         else if (Ctrl && PC->WasInputKeyJustPressed(EKeys::Two))
         {
             Environment->ToggleFog();
-            UE_LOG(LogTemp,Display,TEXT("PORTSIM_FOG_TOGGLE: enabled=%d visibility_m=%.1f sensor_only=1"),
+            UE_LOG(LogTemp,Display,TEXT("PORTSIM_FOG_TOGGLE: enabled=%d visibility_m=%.1f"),
                 Environment->IsFogEnabled(),Environment->GetFogVisibilityMeters());
             if(!FParse::Param(FCommandLine::Get(),TEXT("unattended"))) SaveRunSettings();
         }

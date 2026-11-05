@@ -573,7 +573,8 @@ bool APortWorkingCrane::STSSensorContains(const FString& Key,FVector Point) cons
         const bool bLiDAR=Key.Contains(TEXT("lidar"),ESearchCase::IgnoreCase);
         const double RainScale=bCamera?RainCameraRangeScale:(bLiDAR?RainLiDARRangeScale:1.f);
         const double RainMaximum=M.Maximum*RainScale;
-        const double Maximum=(bCamera||bLiDAR)?FMath::Min(RainMaximum,double(FogVisibilityMeters)):M.Maximum;
+        const bool bFogSensitive=bCamera||bLiDAR||(!bSTS && Key==TEXT("stack_profile"));
+        const double Maximum=bFogSensitive?FMath::Min(RainMaximum,double(FogVisibilityMeters)):M.Maximum;
         if(Distance>=M.Minimum && Distance<=Maximum && FVector::DotProduct(Delta.GetSafeNormal(),Marker->GetForwardVector())>=FMath::Cos(FMath::DegreesToRadians(M.Fov*.5)))return true;
     }
     return false;

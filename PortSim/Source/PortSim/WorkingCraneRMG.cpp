@@ -77,21 +77,29 @@ void APortWorkingCrane::SampleRMGEnvironment()
         const auto& M=STSProfile.Dynamics.Mounts[I];
         if(!M.Key.StartsWith(TEXT("crane_collision_")) || !SensorMarkers.IsValidIndex(I))continue;
         const auto* Marker=SensorMarkers[I].Get();
+        const FVector Direction=Marker->GetForwardVector();
+        const double Toward=FMath::Max(0.,FVector::DotProduct(Orientation.RotateVector(AxisVelocity),Direction));
+        const double StopDistance=STSProfile.CollisionMargin+Toward*STSProfile.SensorMaxAge+Toward*Toward/(2*FMath::Max(.001,RailAccelerationLimit(STSProfile.GantryAcceleration)));
+        const double Maximum=FMath::Min(M.Maximum,double(FogVisibilityMeters));
+        if(Maximum<M.Maximum && (Maximum<=M.Minimum || Maximum*100<StopDistance))
+        {
+            // A clear return cannot establish clearance past the visible rail.
+            O.bCraneClear=false;
+            continue;
+        }
         TArray<FVector> Origins;Origins.Add(M.Position);Origins.Append(M.AdditionalPositions);
         for(const FVector& LocalOrigin:Origins)
         {
             const FVector Origin=Marker->GetAttachParent()->GetComponentLocation()+Marker->GetAttachParent()->GetComponentQuat().RotateVector(LocalOrigin*100);
-            const FVector Begin=Origin+Marker->GetForwardVector()*M.Minimum*100;
-            const FVector End=Origin+Marker->GetForwardVector()*M.Maximum*100;
+            const FVector Begin=Origin+Direction*M.Minimum*100;
+            const FVector End=Origin+Direction*Maximum*100;
             FBox QueryBounds(ForceInit); QueryBounds+=Begin; QueryBounds+=End;
             SynchronizeShipQuery(QueryBounds);
             FHitResult Hit;
-            if(GetWorld()->LineTraceSingleByChannel(Hit,Origin+Marker->GetForwardVector()*M.Minimum*100,Origin+Marker->GetForwardVector()*M.Maximum*100,ECC_Visibility,Query) && Cast<APortWorkingCrane>(Hit.GetActor()))
+            if(GetWorld()->LineTraceSingleByChannel(Hit,Begin,End,ECC_Visibility,Query) && Cast<APortWorkingCrane>(Hit.GetActor()))
             {
                 const float Distance=FVector::Dist(Origin,Hit.ImpactPoint);
                 O.CraneDistance=O.CraneDistance<0?Distance:FMath::Min(O.CraneDistance,Distance);
-                const double Toward=FMath::Max(0.,FVector::DotProduct(Orientation.RotateVector(AxisVelocity),Marker->GetForwardVector()));
-                const double StopDistance=STSProfile.CollisionMargin+Toward*STSProfile.SensorMaxAge+Toward*Toward/(2*FMath::Max(.001,RailAccelerationLimit(STSProfile.GantryAcceleration)));
                 if(Distance<StopDistance)O.bCraneClear=false;
             }
         }

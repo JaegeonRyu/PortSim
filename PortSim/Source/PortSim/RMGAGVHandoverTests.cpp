@@ -20,6 +20,25 @@ bool FRMGAGVHandoverTest::RunTest(const FString& Parameters)
     auto* Crane=World->SpawnActor<APortWorkingCrane>();
     const FVector Landing=Vehicle->CargoPosition();
     Crane->Configure(1,false,Landing,Landing,false);
+    const int32 StackIndex=Crane->STSProfile.Dynamics.Mounts.IndexOfByPredicate(
+        [](const FSTSSensorMount& Mount){ return Mount.Key==TEXT("stack_profile"); });
+    if(!TestTrue(TEXT("RMG has a stack profile sensor"),Crane->SensorMarkers.IsValidIndex(StackIndex))) return false;
+    const auto* StackMarker=Crane->SensorMarkers[StackIndex].Get();
+    const FVector StackPoint=StackMarker->GetComponentLocation()+3000.*StackMarker->GetForwardVector();
+    TestTrue(TEXT("The RMG profile sensor sees a target at 30 m in clear weather"),
+        Crane->STSSensorContains(TEXT("stack_profile"),StackPoint));
+    Crane->SetFogVisibilityMeters(20.f);
+    TestFalse(TEXT("The same target is outside 20 m fog visibility"),
+        Crane->STSSensorContains(TEXT("stack_profile"),StackPoint));
+    const float OriginalMargin=Crane->STSProfile.CollisionMargin;
+    Crane->STSProfile.CollisionMargin=2500.f;
+    Crane->SampleRMGEnvironment();
+    TestFalse(TEXT("An empty 20 m laser scan cannot establish 25 m of clearance"),Crane->Observation.bCraneClear);
+    Crane->SetFogVisibilityMeters(MAX_flt);
+    Crane->SampleRMGEnvironment();
+    TestTrue(TEXT("Clear weather restores the full rail scan"),Crane->Observation.bCraneClear);
+    Crane->STSProfile.CollisionMargin=OriginalMargin;
+
     for(const auto& Pad:Crane->Pads) Pad->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     auto* Cargo=World->SpawnActor<APortContainerActor>();
     Cargo->GetBody()->SetSimulatePhysics(false);

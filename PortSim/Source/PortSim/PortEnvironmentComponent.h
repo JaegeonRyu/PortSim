@@ -144,7 +144,7 @@ struct PORTSIM_API FPortWindAerodynamics
         FQuat BodyRotation,FVector DimensionsMeters,double DragCoefficient);
 };
 
-/** Sensor-only fog model. Visual fog is deliberately outside this phase. */
+/** Shared visibility input for optical sensors and fog presentation. */
 struct PORTSIM_API FPortFogState
 {
     static constexpr float DefaultVisibilityMeters=30.f;
