@@ -23,6 +23,7 @@ class PORTSIM_API APortContainerActor : public AActor
 public:
     APortContainerActor();
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     void InitializeContainer(int32 Number);
     void ConfigureSpecification(const FPortContainerSpecification& Specification, FVector CoGOffset=FVector::ZeroVector);
     void ResetCargo(FVector Position);

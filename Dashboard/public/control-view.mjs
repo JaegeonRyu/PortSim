@@ -83,12 +83,12 @@ export function impactOverlay(state,focus,X,Y,selected){
  const points=ps=>ps.filter(p=>Array.isArray(p)&&p.slice(0,2).every(Number.isFinite)).map(p=>`${X(p[0])},${Y(p[1])}`).join(' ');
  let html='';
  for(const e of activeEvents.slice(-40))html+=`<polyline class="plan-connection" points="${points([e.from_position_m,e.to_position_m])}"/>`;
- for(const a of actors.filter(a=>['sts','rmg','agv'].includes(a.type))){
+ for(const a of actors.filter(a=>['sts','rmg','agv','rs'].includes(a.type))){
   const p=mapPosition(a);if(!p)continue;
   if(a.fault)html+=`<circle class="fault-halo" cx="${X(p[0])}" cy="${Y(p[1])}" r="9"/>`;
   else if(related.has(a.id))html+=`<circle class="impact-halo" cx="${X(p[0])}" cy="${Y(p[1])}" r="7"/>`;
-  if(related.has(a.id)||a.id===selected){
-   if(a.type==='agv'&&a.route?.length)html+=`<polyline class="impact-route" points="${points([p,...a.route.map(n=>n.position_m)])}"/>`;
+  if(related.has(a.id)||a.id===selected||a.type==='rs'&&a.loaded_recovery_active){
+   if(['agv','rs'].includes(a.type)&&a.route?.length)html+=`<polyline class="impact-route" points="${points([p,...a.route.map(n=>n.position_m)])}"/>`;
   }
  }
  return `<g class="impact-overlay" pointer-events="none">${html}</g>`;

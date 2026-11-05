@@ -1,4 +1,6 @@
 #include "PortContainerActor.h"
+#include "PortCargoBody.h"
+#include "PortSiteLogistics.h"
 #include "PortAGVActor.h"
 #include "PortEnvironmentComponent.h"
 #include "PortAGVActor.h"
@@ -14,7 +16,7 @@ APortContainerActor::APortContainerActor()
 {
     PrimaryActorTick.bCanEverTick=false;
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
-    Body=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ContainerBody"));
+    Body=CreateDefaultSubobject<UPortCargoBody>(TEXT("ContainerBody"));
     SetRootComponent(Body);
     Body->SetStaticMesh(Cube.Object);
     Body->SetWorldScale3D(ExternalDimensionsCm/100.f);
@@ -42,6 +44,13 @@ void APortContainerActor::BeginPlay()
     Super::BeginPlay();
     SetPhysicalParameters(MassKg,CoGOffsetCm);
     ApplyContainerAppearance();
+    if(auto* Site=Cast<APortSiteLogistics>(GetOwner())) Site->RefreshCargoActivity(this);
+}
+
+void APortContainerActor::EndPlay(const EEndPlayReason::Type Reason)
+{
+    if(auto* Site=Cast<APortSiteLogistics>(GetOwner())) Site->RemoveCargoActivity(this);
+    Super::EndPlay(Reason);
 }
 
 void APortContainerActor::SetPhysicalParameters(float Mass,FVector CoGOffset)
@@ -58,6 +67,9 @@ void APortContainerActor::ApplyWind(FVector WindVelocityMetersPerSecond,float Dr
     if(!Body->IsSimulatingPhysics()) return;
     const FVector ForceNewtons=FPortWindAerodynamics::DragForceNewtons(WindVelocityMetersPerSecond,
         Body->GetPhysicsLinearVelocity(),Body->GetComponentQuat(),ExternalDimensionsCm*.01f,DragCoefficient);
+    // Do not enqueue a zero-force command for a resting body. Nonzero wind
+    // and aerodynamic drag are still applied without thresholds or filtering.
+    if(ForceNewtons.IsZero()) return;
     // Chaos uses centimetres, so one SI newton is 100 kg*cm/s^2.
     Body->AddForce(ForceNewtons*100.f);
 }
@@ -154,7 +166,8 @@ void APortContainerActor::ApplySecuredMotionFraction(double Fraction)
         Velocity=FMath::Lerp(PreviousSecuredVelocity,CurrentSecuredVelocity,Alpha);
     }
     const FQuat Rotation=FQuat::Slerp(PreviousSecuredTransform.GetRotation(),CurrentSecuredTransform.GetRotation(),Alpha).GetNormalized();
-    SetActorLocationAndRotation(Position,Rotation,false,nullptr,ETeleportType::TeleportPhysics);
+    if(!GetActorLocation().Equals(Position,0.) || !GetActorQuat().Equals(Rotation,0.))
+        SetActorLocationAndRotation(Position,Rotation,false,nullptr,ETeleportType::TeleportPhysics);
     KinematicVelocityCentimetersPerSecond=Velocity;
     KinematicAccelerationCentimetersPerSecondSquared=FMath::Lerp(PreviousSecuredAcceleration,CurrentSecuredAcceleration,Alpha);
     KinematicJerkCentimetersPerSecondCubed=FMath::Lerp(PreviousSecuredJerk,CurrentSecuredJerk,Alpha);
