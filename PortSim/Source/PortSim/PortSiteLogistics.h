@@ -94,9 +94,12 @@ struct FLoadedAGVRecovery
     TWeakObjectPtr<APortSupportVehicle> Stacker;
     TArray<TWeakObjectPtr<APortContainerActor>> Cargo;
     TArray<FTransform> DeckTransforms;
-    TArray<FVector> StackerRoute;
+    TArray<FVector> StackerRoute, StackerExitRoute, ReplacementExitRoute;
     FVector Target=FVector::ZeroVector, StackerTarget=FVector::ZeroVector;
-    FTransform StackerHome;
+    FTransform StackerHome, ReplacementHome;
+    FBox WorkZone=FBox(ForceInit);
+    int32 ExitWaypoint=0, ReplacementExitWaypoint=0;
+    bool bRepairCancelled=false;
     double HoldSeconds=0;
     FString Status;
 };

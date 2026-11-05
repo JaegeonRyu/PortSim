@@ -818,6 +818,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             for(const auto& R:LoadedAGVRecoveries) if(R.Failed==Lane || R.Replacement==Lane)
             {
                 O->SetStringField(TEXT("loaded_recovery_status"),R.Status);
+                O->SetNumberField(TEXT("loaded_recovery_phase"),R.Phase);
                 O->SetStringField(TEXT("replacement_agv"),Vehicles[R.Replacement]->GetName());
                 O->SetNumberField(TEXT("recovery_transferred_count"),R.Box);
                 O->SetNumberField(TEXT("recovery_cargo_count"),R.Cargo.Num());
@@ -845,6 +846,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
                 O->SetStringField(TEXT("state"),Paused?TEXT("paused"):TEXT("working"));
                 O->SetBoolField(TEXT("loaded_recovery_active"),true);
                 O->SetStringField(TEXT("loaded_recovery_status"),R.Status);
+                O->SetNumberField(TEXT("loaded_recovery_phase"),R.Phase);
                 O->SetStringField(TEXT("failed_agv"),Vehicles[R.Failed]->GetName());
                 O->SetStringField(TEXT("replacement_agv"),Vehicles[R.Replacement]->GetName());
                 O->SetNumberField(TEXT("recovery_transferred_count"),R.Box);

@@ -2000,6 +2000,21 @@ bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float
 {
     if (!bTrafficIndexReady) BeginTrafficFrame();
     const int32 FleetIndex=Vehicles.IndexOfByKey(Vehicle);
+    for(const auto& Recovery:LoadedAGVRecoveries)
+    {
+        if(FleetIndex==Recovery.Replacement || !Recovery.WorkZone.IsValid) continue;
+        const FVector Extent=Vehicle->GetActorRightVector().GetAbs()*730.f+
+            Vehicle->GetActorForwardVector().GetAbs()*210.f+FVector(0,0,250);
+        FBox Sweep(Vehicle->GetActorLocation()-Extent,Vehicle->GetActorLocation()+Extent);
+        Sweep+=Target-Extent;
+        Sweep+=Target+Extent;
+        if(Sweep.Intersect(Recovery.WorkZone))
+        {
+            Vehicle->SetFMSHold(true);
+            if(Jobs.IsValidIndex(FleetIndex)) Jobs[FleetIndex].TrafficWaitSeconds+=Dt;
+            return false;
+        }
+    }
     if (Jobs.IsValidIndex(FleetIndex))
     {
         const auto& Job=Jobs[FleetIndex];

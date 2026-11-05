@@ -20,6 +20,26 @@ void APortSupportVehicle::PositionRecoverySpreader(FVector Position,FRotator Rot
     }
 }
 
+void APortSupportVehicle::StowRecoverySpreader()
+{
+    TInlineComponentArray<UStaticMeshComponent*> Parts(this);
+    for(auto* Part:Parts)
+    {
+        if(Part->GetName()==TEXT("Spreader"))
+        {
+            Part->SetRelativeLocation(FVector(540,0,650));
+            Part->SetRelativeRotation(FRotator::ZeroRotator);
+            Part->SetRelativeScale3D(FVector(2.4f,12.2f,.5f));
+        }
+        if(Part->GetName()==TEXT("TelescopicBoom"))
+        {
+            Part->SetRelativeLocation(FVector(150,0,470));
+            Part->SetRelativeRotation(FRotator(25,0,0));
+            Part->SetRelativeScale3D(FVector(9,1,1));
+        }
+    }
+}
+
 void APortSupportVehicle::Configure(EPortSupportType Type,int32 Number)
 {
     EquipmentType=Type; EquipmentNumber=Number;
