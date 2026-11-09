@@ -7,6 +7,9 @@
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#if WITH_DEV_AUTOMATION_TESTS
+#include "Misc/AutomationTest.h"
+#endif
 
 namespace
 {
@@ -53,18 +56,19 @@ namespace
             Ids.Add(Entry.ContainerId); Slots.Add(Slot); Result.Rows.Add(MoveTemp(Entry));
         }
         // Two explicit slot conventions: simulator 1-based slots, or sample
-        // odd bays / deck tiers 82,84. Never compact gaps or wrap excess cargo.
+        // odd bays / deck tiers 82,84,86. Never compact gaps or wrap excess cargo.
         const bool DeckCodes=Result.Rows.ContainsByPredicate([](const FPortVesselInputRow& R){return R.Tier>=82;});
         TSet<FIntVector> GridSlots;
         for(auto& R:Result.Rows)
         {
             if(DeckCodes && (R.Bay%2!=1 || R.Tier<82 || (R.Tier-82)%2!=0))
-            { Error=TEXT("위치 형식 오류: 갑판 표기는 홀수 Bay 및 Tier 82/84를 사용하세요."); return false; }
+            { Error=TEXT("위치 형식 오류: 갑판 표기는 홀수 Bay 및 Tier 82/84/86을 사용하세요."); return false; }
             R.GridSlot=FIntVector(DeckCodes?(R.Bay-1)/2:R.Bay-1,R.Row-1,DeckCodes?(R.Tier-82)/2:R.Tier-1);
             const FIntVector G=R.GridSlot;
             if(G.X<0 || G.X>=TerminalLayout::VesselBays || G.Y<0 || G.Y>=TerminalLayout::VesselRows ||
                 G.Z<0 || G.Z>=TerminalLayout::VesselTiers)
-            { Error=TEXT("선박 배치 범위 초과 또는 위치 중복: 10 Bay × 10 Row × 2 Tier"); return false; }
+            { Error=FString::Printf(TEXT("선박 배치 범위 초과: %d Bay × %d Row × %d Tier"),
+                TerminalLayout::VesselBays,TerminalLayout::VesselRows,TerminalLayout::VesselTiers); return false; }
             GridSlots.Add(G);
         }
         TSet<FIntVector> AboardSlots;
@@ -83,6 +87,28 @@ namespace
         return ParseContent(Content,Path,Kind,Result,Error);
     }
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVesselThreeTierInputTest,"PortSim.VesselInput.ThreeTierExchange",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FVesselThreeTierInputTest::RunTest(const FString& Parameters)
+{
+    FPortVesselInput Stowage,Operations; FString Error;
+    if(!TestTrue(TEXT("300-container stowage parses"),ParseInput(InputRoot()/TEXT("Stowage/stowage_300.csv"),1,Stowage,Error)))
+    { AddError(Error); return false; }
+    if(!TestTrue(TEXT("Exchange operations parse"),ParseInput(InputRoot()/TEXT("Operations/operations_300_d100_l100.csv"),0,Operations,Error)))
+    { AddError(Error); return false; }
+    TestEqual(TEXT("Initial inventory"),Stowage.Rows.Num(),300);
+    TestEqual(TEXT("Discharge count"),Operations.Rows.FilterByPredicate([](const auto& R){return R.Operation==TEXT("DISCHARGE");}).Num(),100);
+    TestEqual(TEXT("Load count"),Operations.Rows.FilterByPredicate([](const auto& R){return R.Operation==TEXT("LOAD");}).Num(),100);
+    TestTrue(TEXT("Exchange preserves supported remaining cargo"),ValidateVesselOperations(Stowage,Operations,Error));
+    FPortVesselInput Simulator,FourthTier,Unsupported;
+    TestTrue(TEXT("Simulator tier 3 accepted"),ParseContent(TEXT("container_id,bay,row,tier\nA,1,1,1\nB,1,1,2\nC,1,1,3\n"),TEXT("test.csv"),1,Simulator,Error));
+    TestFalse(TEXT("Fourth tier rejected"),ParseContent(TEXT("container_id,bay,row,tier\nA,1,1,88\n"),TEXT("test.csv"),1,FourthTier,Error));
+    TestFalse(TEXT("Unsupported third tier rejected"),ParseContent(TEXT("container_id,bay,row,tier\nA,1,1,86\n"),TEXT("test.csv"),1,Unsupported,Error));
+    return true;
+}
+#endif
 
 const FPortVesselInput* AQuayCrane::GetVesselInput(int32 Vessel) const
 {

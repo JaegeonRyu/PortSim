@@ -76,6 +76,7 @@ bool APortSiteLogistics::PlanArrivalStowage()
             const FVector Position((TerminalLayout::VesselCenterXM+P.PositionM.Y)*100.,
                 (TerminalLayout::VesselCenterY(Vessel)+P.PositionM.X)*100.,P.PositionM.Z*100.);
             C.Transform.SetLocation(Position); C.Transform.SetRotation(FQuat::Identity);
+            IndexedCargoCount=-1;
             C.ShipSlot=P; C.Wave=0;
             C.STS=Vessel*3+FMath::Clamp(FMath::RoundToInt(P.PositionM.X/70.)+1,0,2);
             C.OriginalSTS=C.STS;

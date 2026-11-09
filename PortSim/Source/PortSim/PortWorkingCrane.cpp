@@ -621,8 +621,8 @@ bool APortWorkingCrane::AssignCargo(APortContainerActor* Cargo,FVector Source,FV
 {
     // Dispatch can choose an otherwise passive box in the middle of a frame.
     if(IsValid(Cargo) && Cargo->LocationOwner==ECargoOwner::Ship && !Cargo->GetAttachParentActor())
-        if(const auto* Site=Cast<APortSiteLogistics>(Cargo->GetOwner()); Site && Site->IsDeferringVisuals())
-        { Cargo->ApplySecuredMotionFraction(1.); Source=Cargo->GetActorLocation(); }
+        if(auto* Site=Cast<APortSiteLogistics>(Cargo->GetOwner()); Site && Site->IsDeferringVisuals())
+        { Site->UpdateCargoMotion(Cargo); Cargo->ApplySecuredMotionFraction(1.); Source=Cargo->GetActorLocation(); }
     if (!bExternalJobs || bJobActive || !IsValid(Cargo) || !Fault.IsEmpty()) return false;
     {
         if(!STSProfile.bReady) { Stop(TEXT("Crane profile unavailable")); return false; }

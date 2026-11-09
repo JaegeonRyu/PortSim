@@ -8,6 +8,7 @@
 #include "AGVTrafficGeometry.h"
 #include "AGVReference.h"
 #include "TerminalLayout.h"
+#include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "EngineUtils.h"
 
@@ -15,6 +16,44 @@ namespace SiteLogistics
 {
     TArray<FVector> RoundRoadCorners(const FVector&,const TArray<FVector>&,TFunctionRef<bool(FVector,FVector)>);
     bool RouteIntersectsContainer(const TArray<FVector>&,const FVector&,const TArray<FSiteYardSlot>&,int32);
+}
+
+namespace
+{
+    FBox RecoverySweep(FVector From,FVector To,FVector Extent)
+    {
+        Extent=Extent.GetAbs();
+        FBox Box(From-Extent,From+Extent);
+        Box+=To-Extent;
+        Box+=To+Extent;
+        return Box;
+    }
+
+    FVector ContainerWorldExtent(const APortContainerActor* Cargo,const FRotator& Rotation)
+    {
+        const FVector Half=Cargo->ExternalDimensionsCm*.5f;
+        const FRotationMatrix Basis(Rotation);
+        return Basis.GetScaledAxis(EAxis::X).GetAbs()*Half.X+
+            Basis.GetScaledAxis(EAxis::Y).GetAbs()*Half.Y+
+            Basis.GetScaledAxis(EAxis::Z).GetAbs()*Half.Z;
+    }
+
+    bool RecoveryPathClear(UWorld* World,FVector From,FVector To,FVector Extent,const TSet<const AActor*>& Ignored)
+    {
+        const FBox Sweep=RecoverySweep(From,To,Extent);
+        for(TActorIterator<AActor> It(World);It;++It)
+        {
+            if(!IsValid(*It) || Ignored.Contains(*It)) continue;
+            TInlineComponentArray<UPrimitiveComponent*> Components(*It);
+            for(const auto* Component:Components)
+            {
+                if(!Component || Component->GetCollisionEnabled()==ECollisionEnabled::NoCollision) continue;
+                const FBox Bounds=Component->Bounds.GetBox();
+                if(Bounds.IsValid && Sweep.Intersect(Bounds)) return false;
+            }
+        }
+        return true;
+    }
 }
 
 bool APortSiteLogistics::IsLoadedRecoveryVehicle(int32 V) const
@@ -30,7 +69,9 @@ bool APortSiteLogistics::ValidateLoadedAGVRecoveries(FString& Error) const
         if(!Vehicles.IsValidIndex(R.Failed) || !Vehicles.IsValidIndex(R.Replacement) ||
             R.Failed==R.Replacement || Assigned.Contains(R.Failed) || Assigned.Contains(R.Replacement) ||
             !R.Stacker.IsValid() || Stackers.Contains(R.Stacker.Get()) || R.Cargo.IsEmpty() ||
-            R.Cargo.Num()!=R.DeckTransforms.Num() || Jobs[R.Replacement].Stage!=FSiteTransfer::ToRecovery)
+            R.Cargo.Num()!=R.DeckTransforms.Num() ||
+            (R.Phase<=6 && Jobs[R.Replacement].Stage!=FSiteTransfer::ToRecovery) ||
+            (R.Phase>=7 && Jobs[R.Replacement].Stage==FSiteTransfer::ToRecovery))
         {Error=TEXT("Invalid/duplicate loaded AGV recovery assignment");return false;}
         Assigned.Add(R.Failed);Assigned.Add(R.Replacement);Stackers.Add(R.Stacker.Get());
         for(int32 I=0;I<R.Cargo.Num();++I)
@@ -147,7 +188,14 @@ bool APortSiteLogistics::RequestLoadedAGVRecovery(int32 Failed,FString& Error)
     double Mass=0;
     for(const auto& C:ShipContainers) if(C->GetAttachParentActor()==Old && C->LocationOwner==ECargoOwner::AGV)
     {
-        if(C->MassKg>45000) {Error=TEXT("R/S 가정 인양 한도 45t 초과입니다.");return false;}
+        if(!FMath::IsFinite(C->MassKg) || C->MassKg<=0 || C->MassKg>45000 ||
+            !FMath::IsFinite(C->CoGOffsetCm.X) || !FMath::IsFinite(C->CoGOffsetCm.Y) ||
+            !FMath::IsFinite(C->CoGOffsetCm.Z) || !C->ExternalDimensionsCm.IsNearlyZero() ||
+            FMath::Abs(C->CoGOffsetCm.X)>C->ExternalDimensionsCm.X*.5f ||
+            FMath::Abs(C->CoGOffsetCm.Y)>C->ExternalDimensionsCm.Y*.5f ||
+            FMath::Abs(C->CoGOffsetCm.Z)>C->ExternalDimensionsCm.Z*.5f ||
+            C->GetBody()->IsSimulatingPhysics())
+        {Error=TEXT("화물 중량·무게중심·고정 상태가 R/S 복구 조건을 벗어났습니다.");return false;}
         R.Cargo.Add(C); R.DeckTransforms.Add(C->GetActorTransform().GetRelativeTransform(Old->GetActorTransform())); Mass+=C->MassKg;
     }
     if(R.Cargo.IsEmpty() || Mass>AGVReference::MaximumPayloadKg)
@@ -169,19 +217,94 @@ bool APortSiteLogistics::RequestLoadedAGVRecovery(int32 Failed,FString& Error)
         for(int32 V=0;V<Jobs.Num();++V)
         {
             if(V==Failed || Jobs[V].Stage || !Vehicles[V]->CanAcceptWork() || IsLoadedRecoveryVehicle(V)) continue;
+            auto* New=Vehicles[V].Get();
+            const FTransform DestinationDeck(New->GetActorRotation(),R.Target,New->GetActorScale3D());
+            FBox WorkZone(ForceInit);
+            WorkZone+=Old->GetActorLocation();
+            WorkZone+=R.Target;
+            WorkZone+=R.StackerTarget;
+            TSet<const AActor*> Participants;
+            Participants.Add(Old);
+            Participants.Add(New);
+            for(const auto& Cargo:R.Cargo) Participants.Add(Cargo.Get());
+            bool GeometryClear=true;
+            for(int32 Box=0;Box<R.Cargo.Num();++Box)
+            {
+                auto* Cargo=R.Cargo[Box].Get();
+                const FVector Destination=(R.DeckTransforms[Box]*DestinationDeck).GetLocation();
+                const float Height=FMath::Max(Old->CargoPosition().Z,New->CargoPosition().Z)+250.f;
+                const FVector LiftOld(Cargo->GetActorLocation().X,Cargo->GetActorLocation().Y,Height);
+                const FVector LiftNew(Destination.X,Destination.Y,Height);
+                const FVector CargoExtent=ContainerWorldExtent(Cargo,Cargo->GetActorRotation())+FVector(100,100,100);
+                WorkZone+=Cargo->GetActorLocation();
+                WorkZone+=LiftOld;
+                WorkZone+=LiftNew;
+                WorkZone+=Destination;
+                GeometryClear&=FVector::Dist2D(Cargo->GetActorLocation(),R.StackerTarget)<=850.f &&
+                    FVector::Dist2D(Destination,R.StackerTarget)<=850.f &&
+                    RecoveryPathClear(GetWorld(),Cargo->GetActorLocation(),LiftOld,CargoExtent,Participants) &&
+                    RecoveryPathClear(GetWorld(),LiftOld,LiftNew,CargoExtent,Participants) &&
+                    RecoveryPathClear(GetWorld(),LiftNew,Destination,CargoExtent,Participants);
+            }
+            if(!GeometryClear) continue;
+            WorkZone=WorkZone.ExpandBy(FVector(1000,1000,1000));
+            bool ZoneClear=true;
+            for(const auto& Vehicle:TrafficVehicles)
+            {
+                if(!IsValid(Vehicle) || Vehicle==Old || Vehicle==New) continue;
+                FVector OtherOrigin,OtherExtent;
+                Vehicle->GetActorBounds(true,OtherOrigin,OtherExtent);
+                if(WorkZone.Intersect(FBox(OtherOrigin-OtherExtent,OtherOrigin+OtherExtent)))
+                {ZoneClear=false;break;}
+            }
+            if(!ZoneClear) continue;
+            for(const auto& Reservation:RoadReservations)
+            {
+                if(Reservation.Key==Old->VehicleID || Reservation.Key==New->VehicleID) continue;
+                for(const FBox& Segment:Reservation.Value) if(WorkZone.Intersect(Segment))
+                {ZoneClear=false;break;}
+                if(!ZoneClear) break;
+            }
+            if(!ZoneClear || LoadedAGVRecoveries.ContainsByPredicate(
+                [&](const auto& Other){return Other.WorkZone.Intersect(WorkZone);})) continue;
             TArray<FVector> Route;
-            if(!PlanLoadedRecoveryRoad(Vehicles[V]->GetActorLocation(),R.Target,Axis,V,Route)) continue;
+            if(!PlanLoadedRecoveryRoad(New->GetActorLocation(),R.Target,Axis,V,Route)) continue;
             AGVRouteFound=true;
+            bool RouteClear=true;
+            FVector Previous=New->GetActorLocation();
+            for(const FVector& Point:Route)
+            {
+                if(!RecoveryPathClear(GetWorld(),Previous,Point,Extent,Participants))
+                {RouteClear=false;break;}
+                Previous=Point;
+            }
+            if(!RouteClear) continue;
             for(TActorIterator<APortSupportVehicle> It(GetWorld());It;++It)
             {
                 if(It->EquipmentType!=EPortSupportType::ReachStacker ||
                     LoadedAGVRecoveries.ContainsByPredicate([&](const auto& Other){return Other.Stacker.Get()==*It;})) continue;
-                if(!PlanLoadedRecoveryRoad(It->GetActorLocation(),R.StackerTarget,Axis,INDEX_NONE,R.StackerRoute)) continue;
-                R.Replacement=V; R.Stacker=*It; R.StackerHome=It->GetActorTransform(); R.Status=TEXT("대체 AGV · R/S 현장 이동");
+                auto* Stacker=*It;
+                if(!PlanLoadedRecoveryRoad(Stacker->GetActorLocation(),R.StackerTarget,Axis,INDEX_NONE,R.StackerRoute)) continue;
+                Participants.Add(Stacker);
+                bool StackerRouteClear=true;
+                Previous=Stacker->GetActorLocation();
+                for(const FVector& Point:R.StackerRoute)
+                {
+                    if(!RecoveryPathClear(GetWorld(),Previous,Point,FVector(450,170,350),Participants))
+                    {StackerRouteClear=false;break;}
+                    Previous=Point;
+                }
+                if(!StackerRouteClear) {Participants.Remove(Stacker);continue;}
+                R.Replacement=V; R.Stacker=Stacker; R.StackerHome=Stacker->GetActorTransform();
+                R.ReplacementHome=New->GetActorTransform();
+                R.WorkZone=WorkZone;
+                if(!PlanLoadedRecoveryRoad(R.StackerTarget,R.StackerHome.GetLocation(),Axis,INDEX_NONE,R.StackerExitRoute))
+                {Participants.Remove(Stacker);R.StackerRoute.Reset();continue;}
+                R.Status=TEXT("작업 구역 확보 · 대체 AGV와 R/S 출동");
                 auto& J=Jobs[V]; J=FSiteTransfer(); J.Stage=FSiteTransfer::ToRecovery; J.Route=MoveTemp(Route);
-                J.RouteStart=Vehicles[V]->GetActorLocation(); J.bRouteStartValid=true;
+                J.RouteStart=New->GetActorLocation(); J.bRouteStartValid=true;
                 LoadedAGVRecoveries.Add(R);
-                RecordRecoveryEvent(TEXT("loaded_agv_dispatched"),Old,Old,Vehicles[V],Jobs[Failed].Actor.Get());
+                RecordRecoveryEvent(TEXT("loaded_agv_dispatched"),Old,Old,New,Jobs[Failed].Actor.Get());
                 return true;
             }
         }
@@ -200,11 +323,41 @@ void APortSiteLogistics::AdvanceLoadedAGVRecoveries(float Dt)
         auto& R=LoadedAGVRecoveries[I]; auto* Old=Vehicles[R.Failed].Get(); auto* New=Vehicles[R.Replacement].Get();
         auto* RS=R.Stacker.Get(); auto& Arrival=Jobs[R.Replacement];
         Old->SetFMSHold(true);
-        if(!RS || New->bDriveFault || New->Emergency.Active || Old->Emergency.Active)
-        {New->SetFMSHold(true);R.Status=TEXT("복구 장비 고장 · 화물 유지 · 수리 대기");continue;}
+        if(!RS)
+        {New->SetFMSHold(true);R.Status=TEXT("복구 장비 참조 오류 · 화물 유지 · 수동 확인 대기");continue;}
+        if(!R.bRepairCancelled && !Old->bDriveFault && R.Phase<2)
+        {
+            TArray<FVector> ReturnRoute;
+            if(!PlanLoadedRecoveryRoad(New->GetActorLocation(),R.ReplacementHome.GetLocation(),
+                New->GetActorRightVector(),R.Replacement,ReturnRoute))
+            {R.Status=TEXT("인양 전 수리 완료 · 대체 AGV 퇴출 경로 확보 대기");continue;}
+            R.ReplacementExitRoute=MoveTemp(ReturnRoute);
+            R.ReplacementExitWaypoint=0;
+            New->SetFMSHold(true);
+            auto& ReturnJob=Jobs[R.Replacement];
+            ReturnJob=FSiteTransfer();
+            ReturnJob.Stage=FSiteTransfer::ToRecovery;
+            ReturnJob.Route=R.ReplacementExitRoute;
+            ReturnJob.RouteStart=New->GetActorLocation();
+            ReturnJob.bRouteStartValid=true;
+            for(int32 ID:{Old->VehicleID})
+            {
+                RoadReservations.Remove(ID); RoadReservationEndWaypoint.Remove(ID); ReservationIndex.Remove(ID);
+                RoadTargets.Remove(ID); RoadBlockers.Remove(ID); RoadWaitSince.Remove(ID);
+                FinishedRoadSegments.Remove(ID); ClearPendingRoadRequest(ID);
+            }
+            R.bRepairCancelled=true;
+            R.Phase=7;
+            R.HoldSeconds=0;
+            RS->StowRecoverySpreader();
+            R.Status=TEXT("인양 전 수리 완료 · 붐 정리 후 안전 퇴출");
+            RecordRecoveryEvent(TEXT("loaded_agv_recovery_cancelled"),Old,RS,Old,Jobs[R.Failed].Actor.Get());
+        }
+        if(New->bDriveFault || New->Emergency.Active || Old->Emergency.Active)
+        {New->SetFMSHold(true);R.Status=TEXT("복구 장비 고장 · 화물 지지 유지 · 안전 정지");continue;}
         if(R.Phase==0)
         {
-            R.Status=TEXT("대체 AGV · R/S 현장 이동");
+            R.Status=TEXT("작업 구역 확보 · 대체 AGV와 R/S 출동");
             if(Arrival.Route.IsValidIndex(Arrival.Waypoint))
             {
                 New->SetFMSHold(false);
@@ -217,6 +370,8 @@ void APortSiteLogistics::AdvanceLoadedAGVRecoveries(float Dt)
                 bool Clear=true;
                 for(const auto& V:TrafficVehicles) if(IsValid(V) &&
                     AGVTrafficGeometry::SweptChassisIntersects(P,Next,V->GetActorLocation(),V->GetActorRightVector(),450,170,50,730,210)) {Clear=false;break;}
+                for(const auto& Recovery:LoadedAGVRecoveries)
+                    if(&Recovery!=&R && Recovery.WorkZone.Intersect(RecoverySweep(P,Next,FVector(450,170,350)))) Clear=false;
                 if(Clear)
                 {
                     RS->SetActorLocation(Next);
@@ -227,6 +382,88 @@ void APortSiteLogistics::AdvanceLoadedAGVRecoveries(float Dt)
             }
             if(Arrival.Waypoint<Arrival.Route.Num() || R.Waypoint<R.StackerRoute.Num() || New->Speed>.1f) continue;
             New->SetFMSHold(true); R.Phase=1; R.HoldSeconds=0;
+        }
+        if(R.Phase>=7)
+        {
+            if(R.Phase==7)
+            {
+                New->SetFMSHold(true);
+                RS->StowRecoverySpreader();
+                R.HoldSeconds+=Dt;
+                R.Status=R.bRepairCancelled?TEXT("인양 전 수리 완료 · 붐 정리"):TEXT("화물 인계 완료 · 붐 주행 자세 복귀");
+                if(R.HoldSeconds<1) continue;
+                R.StackerExitRoute.Reset();
+                R.ExitWaypoint=0;
+                if(!RS->GetActorLocation().Equals(R.StackerHome.GetLocation(),5) &&
+                    !PlanLoadedRecoveryRoad(RS->GetActorLocation(),R.StackerHome.GetLocation(),
+                        Old->GetActorRightVector(),INDEX_NONE,R.StackerExitRoute))
+                {R.Status=TEXT("붐 정리 완료 · R/S 퇴출 경로 확보 대기");continue;}
+                R.Phase=R.bRepairCancelled?9:8;
+            }
+            if(R.Phase==8)
+            {
+                if(R.bRepairCancelled)
+                {
+                    R.Status=TEXT("인양 전 수리 완료 · 대체 AGV 원위치 복귀");
+                    if(R.ReplacementExitRoute.IsValidIndex(R.ReplacementExitWaypoint) &&
+                        MoveVehicle(New,R.ReplacementExitRoute[R.ReplacementExitWaypoint],Dt)) ++R.ReplacementExitWaypoint;
+                    if(R.ReplacementExitWaypoint<R.ReplacementExitRoute.Num() || New->Speed>.1f ||
+                        !New->GetActorLocation().Equals(R.ReplacementHome.GetLocation(),100)) continue;
+                    New->SetFMSHold(true);
+                    Arrival=FSiteTransfer();
+                    RoadReservations.Remove(New->VehicleID); RoadReservationEndWaypoint.Remove(New->VehicleID);
+                    ReservationIndex.Remove(New->VehicleID); RoadTargets.Remove(New->VehicleID);
+                }
+                else
+                {
+                    R.Status=TEXT("운송 승계 · 새 AGV 안전 퇴출");
+                    if(Arrival.Route.IsValidIndex(Arrival.Waypoint) &&
+                        MoveVehicle(New,Arrival.Route[Arrival.Waypoint],Dt)) ++Arrival.Waypoint;
+                    FVector NewOrigin,NewExtent;
+                    New->GetActorBounds(true,NewOrigin,NewExtent);
+                    if(New->Speed>.1f || R.WorkZone.Intersect(FBox(NewOrigin-NewExtent,NewOrigin+NewExtent))) continue;
+                    New->SetFMSHold(true);
+                    RoadReservations.Remove(New->VehicleID); RoadReservationEndWaypoint.Remove(New->VehicleID);
+                    ReservationIndex.Remove(New->VehicleID); RoadTargets.Remove(New->VehicleID);
+                }
+                R.Phase=9;
+                continue;
+            }
+            if(R.Phase==9)
+            {
+                R.Status=R.bRepairCancelled?TEXT("R/S 안전 퇴출 · 원래 AGV 작업 복귀 대기"):TEXT("R/S 안전 퇴출 · 작업 구역 해제 대기");
+                if(!RS->GetActorLocation().Equals(R.StackerHome.GetLocation(),5))
+                {
+                    if(!R.StackerExitRoute.IsValidIndex(R.ExitWaypoint)) continue;
+                    const FVector From=RS->GetActorLocation(),Goal=R.StackerExitRoute[R.ExitWaypoint];
+                    const FVector Next=FMath::VInterpConstantTo(From,Goal,Dt,200.f);
+                    TSet<const AActor*> Participants;
+                    Participants.Add(Old); Participants.Add(RS);
+                    for(const auto& Cargo:R.Cargo) Participants.Add(Cargo.Get());
+                    bool Clear=RecoveryPathClear(GetWorld(),From,Next,FVector(450,170,350),Participants);
+                    const FBox Sweep=RecoverySweep(From,Next,FVector(450,170,350));
+                    for(const auto& Reservation:RoadReservations)
+                    {
+                        if(Reservation.Key==Old->VehicleID) continue;
+                        for(const FBox& Segment:Reservation.Value) if(Sweep.Intersect(Segment)) Clear=false;
+                    }
+                    if(!Clear) continue;
+                    RS->SetActorLocation(Next);
+                    if(!Next.Equals(From,.01)) RS->SetActorRotation((Next-From).Rotation());
+                    if(Next.Equals(Goal,5)) ++R.ExitWaypoint;
+                    if(!RS->GetActorLocation().Equals(R.StackerHome.GetLocation(),5)) continue;
+                }
+                RS->SetActorTransform(R.StackerHome);
+                if(R.bRepairCancelled)
+                {
+                    Old->SetFMSHold(false);
+                    New->SetFMSHold(false);
+                }
+                else
+                    RecordRecoveryEvent(TEXT("loaded_agv_recovery_complete"),Old,RS,RS,Arrival.Actor.Get());
+                LoadedAGVRecoveries.RemoveAt(I);
+            }
+            continue;
         }
         New->SetFMSHold(true);
         if(Old->Speed>.1f || New->Speed>.1f || !New->GetActorLocation().Equals(R.Target,6))
@@ -256,7 +493,15 @@ void APortSiteLogistics::AdvanceLoadedAGVRecoveries(float Dt)
             const float Height=FMath::Max(Old->CargoPosition().Z,New->CargoPosition().Z)+250.f;
             if(R.Phase==2) {Goal=C->GetActorLocation();Goal.Z=Height;}
             if(R.Phase==3) Goal.Z=Height;
-            C->SetActorLocation(FMath::VInterpConstantTo(C->GetActorLocation(),Goal,Dt,R.Phase==3?60.f:40.f));
+            const FVector Current=C->GetActorLocation();
+            const FVector Next=FMath::VInterpConstantTo(Current,Goal,Dt,R.Phase==3?60.f:40.f);
+            TSet<const AActor*> Participants;
+            Participants.Add(Old); Participants.Add(New); Participants.Add(RS);
+            for(const auto& Cargo:R.Cargo) Participants.Add(Cargo.Get());
+            const FVector CargoExtent=ContainerWorldExtent(C,C->GetActorRotation())+FVector(100,100,100);
+            if(!RecoveryPathClear(GetWorld(),Current,Next,CargoExtent,Participants))
+            {R.Status=TEXT("이송 공간 침입 · 화물 지지 유지 · 안전 정지");continue;}
+            C->SetActorLocation(Next);
             C->SetActorRotation(FMath::QInterpConstantTo(C->GetActorQuat(),Destination.GetRotation(),Dt,.2f));
             RS->PositionRecoverySpreader(C->GetActorLocation()+FVector(0,0,C->ExternalDimensionsCm.Z*.5f),C->GetActorRotation(),C->ExternalDimensionsCm.Y);
             if(!C->GetActorLocation().Equals(Goal,.1f)) continue;
@@ -303,13 +548,15 @@ void APortSiteLogistics::AdvanceLoadedAGVRecoveries(float Dt)
             }
             RecordRecoveryEvent(TEXT("loaded_agv_resumed"),Old,Old,New,Arrival.Actor.Get());
             New->SetFMSHold(false);
-            LoadedAGVRecoveries.RemoveAt(I);
+            R.Phase=7;
+            R.HoldSeconds=0;
         }
     }
 }
 
 void APortSiteLogistics::ResetLoadedAGVRecoveries()
 {
-    for(auto& R:LoadedAGVRecoveries) if(R.Stacker.IsValid()) R.Stacker->SetActorTransform(R.StackerHome);
+    for(auto& R:LoadedAGVRecoveries) if(R.Stacker.IsValid())
+    { R.Stacker->StowRecoverySpreader(); R.Stacker->SetActorTransform(R.StackerHome); }
     LoadedAGVRecoveries.Reset();
 }
