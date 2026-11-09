@@ -173,7 +173,10 @@ void UPortPrecipitationVisualComponent::UpdateForDraw()
     {
         PortSimPerformance::FScope Timing(TEXT("snow_visual_update"));
         const float Strength = FMath::Sqrt(FMath::Clamp(Snowfall / 100.f, 0.f, 1.f));
-        const float SpawnRate = FMath::RoundToFloat(300.f * Strength * AltitudeScale * (bRain ? 0.65f : 1.f));
+        // The overview needs only a hint of flakes at the camera's altitude.
+        const float OverviewScale = FMath::GetMappedRangeValueClamped(
+            FVector2f(25000.f, 85000.f), FVector2f(1.f, 0.22f), float(Position.Z));
+        const float SpawnRate = FMath::RoundToFloat(300.f * Strength * AltitudeScale * OverviewScale * (bRain ? 0.65f : 1.f));
         const FVector Drift = (Wind * 65.).GetClampedToMaxSize(350.);
         const float FallSpeed = FMath::Lerp(120.f, 210.f, Strength);
         Snow.Draw(GetOwner(), Center, SpawnRate, FVector(Drift.X, Drift.Y, -FallSpeed), WallDelta);
