@@ -14,6 +14,9 @@ class UPortFogVisualComponent : public UActorComponent
 {
     GENERATED_BODY()
 
+public:
+    void SetDaylightIlluminance(float Lux) { DaylightIlluminance=Lux; }
+
 private:
     void BeginPlay() override;
     void EndPlay(EEndPlayReason::Type Reason) override;
@@ -24,4 +27,6 @@ private:
     UPROPERTY(Transient) TObjectPtr<UPostProcessComponent> FogExposure;
     TWeakObjectPtr<UGameViewportClient> Viewport;
     float LastVisibilityMeters = 0.f;
+    float DaylightIlluminance = 0.f;
+    float LastDaylightIlluminance = 0.f;
 };

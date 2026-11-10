@@ -1,4 +1,5 @@
 #include "PortEnvironmentComponent.h"
+#include "PortSimulationClock.h"
 #include "TerminalReplay.h"
 #include "QuayCrane.h"
 #include "Misc/CommandLine.h"
@@ -301,6 +302,7 @@ float FPortWindState::EffectiveDirectionDegrees() const
 }
 
 UPortEnvironmentComponent::UPortEnvironmentComponent()
+    : StartLocalTime(PortSimulationClock::DefaultStartLocalTime())
 {
     PrimaryComponentTick.bCanEverTick=false;
 }
@@ -437,6 +439,17 @@ void UPortEnvironmentComponent::SetFrictionSettings(const FPortFrictionSettings&
 void UPortEnvironmentComponent::BeginPlay()
 {
     Super::BeginPlay();
+    FString StartTime;
+    if(FParse::Value(FCommandLine::Get(),TEXT("PortSimStartLocal="),StartTime))
+    {
+        FDateTime Parsed;
+        if(StartTime.Len()==19 && FDateTime::ParseIso8601(*StartTime,Parsed) &&
+            Parsed.ToString(TEXT("%Y-%m-%dT%H:%M:%S"))==StartTime &&
+            Parsed.GetYear()>=1900 && Parsed.GetYear()<=2100)
+            StartLocalTime=Parsed;
+        else
+            UE_LOG(LogTemp,Warning,TEXT("Invalid -PortSimStartLocal; expected YYYY-MM-DDTHH:MM:SS in KST (1900-2100)"));
+    }
     int32 Seed=static_cast<int32>(FGuid::NewGuid().A);
     FParse::Value(FCommandLine::Get(),TEXT("PortSimEnvironmentSeed="),Seed);
     Wind.Initialize(Seed);
@@ -511,6 +524,8 @@ UPhysicalMaterial* UPortEnvironmentComponent::GetContactMaterial()
 
 void UPortEnvironmentComponent::AdvanceEnvironment(float SimulationSeconds)
 {
+    if(FMath::IsFinite(SimulationSeconds) && SimulationSeconds>0.f)
+        EnvironmentElapsedSeconds+=SimulationSeconds;
     SynchronizeSurfaceInputs();
     Accumulation.Advance(FrictionSettings.SurfaceDynamics,Rain.bRainEnabled?Rain.RainfallMmPerHour:0,
         bSnowEnabled?GetSnowfallMmPerHour():0,bIceEnabled?FMath::Clamp(IceIntensity,0.f,1.f):0,SimulationSeconds);

@@ -40,7 +40,8 @@ void UPortFogVisualComponent::UpdateFogForDraw()
 {
     const float VisibilityMeters = FogVisuals.GetValueOnGameThread() != 0 && Environment->IsFogEnabled()
         ? Environment->GetFogVisibilityMeters() : 0.f;
-    if (VisibilityMeters == LastVisibilityMeters)
+    const bool bVisibilityChanged=VisibilityMeters!=LastVisibilityMeters;
+    if (!bVisibilityChanged && (VisibilityMeters<=0.f || DaylightIlluminance==LastDaylightIlluminance))
         return;
     LastVisibilityMeters = VisibilityMeters;
 
@@ -49,39 +50,39 @@ void UPortFogVisualComponent::UpdateFogForDraw()
         if (Fog)
         {
             Fog->SetVisibility(false);
-            FogExposure->bEnabled = false;
+            FogExposure->bEnabled=false;
         }
         return;
     }
 
-    // UE uses exp2 attenuation and scales density by 1/1000 in cm space.
-    // Keep some contrast at the nominal distance for the operator camera.
-    const float Density = 14.5f / VisibilityMeters;
-    // Limit how far automatic exposure can darken a view filled with haze.
-    // The project uses EV100. Allow more adaptation as visibility improves.
-    const float MaxExposureEV100 = 2.6f + 0.35f * FMath::Log2(VisibilityMeters / 30.f);
     if (!Fog)
     {
         Fog = NewObject<UExponentialHeightFogComponent>(GetOwner());
         Fog->SetVolumetricFog(false);
         Fog->SetFogHeightFalloff(0.035f);
-        // Height fog takes scene-linear luminance. The terminal's exposure
-        // needs an HDR value for dense fog to read as daylight haze.
-        Fog->SetFogInscatteringColor(FLinearColor(18.f, 18.f, 18.f));
         Fog->SetFogMaxOpacity(0.99f);
-        Fog->SetFogDensity(Density);
         Fog->RegisterComponent();
 
-        FogExposure = NewObject<UPostProcessComponent>(GetOwner());
-        FogExposure->bUnbound = true;
-        FogExposure->Settings.bOverride_AutoExposureMaxBrightness = true;
-        FogExposure->Settings.AutoExposureMaxBrightness = MaxExposureEV100;
+        FogExposure=NewObject<UPostProcessComponent>(GetOwner());
+        FogExposure->bUnbound=true;
+        FogExposure->Settings.bOverride_AutoExposureMaxBrightness=true;
         FogExposure->RegisterComponent();
-        return;
     }
 
-    Fog->SetFogDensity(Density);
-    Fog->SetVisibility(true);
-    FogExposure->Settings.AutoExposureMaxBrightness = MaxExposureEV100;
-    FogExposure->bEnabled = true;
+    if (bVisibilityChanged)
+    {
+        // UE uses exp2 attenuation and scales density by 1/1000 in cm space.
+        Fog->SetFogDensity(14.5f / VisibilityMeters);
+        Fog->SetVisibility(true);
+    }
+    // Approximate broadband scattering by the droplets with a neutral diffuse
+    // luminance. This is proportional to ambient daylight, including twilight.
+    const float Luminance=0.5f*DaylightIlluminance/UE_PI;
+    Fog->SetFogInscatteringColor(FLinearColor(Luminance,Luminance,Luminance));
+    // In bright haze, keep eye adaptation from metering the filled frame down to grey.
+    // Lift the limit with visibility. The 12 EV floor leaves dim scenes free to adapt.
+    FogExposure->bEnabled=true;
+    FogExposure->Settings.AutoExposureMaxBrightness=FMath::Max(12.f,FMath::Log2(FMath::Max(1.f,Luminance))+0.5f)
+        +0.8f*FMath::Log2(VisibilityMeters/30.f);
+    LastDaylightIlluminance=DaylightIlluminance;
 }

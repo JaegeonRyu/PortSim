@@ -1,5 +1,6 @@
 #include "QuayCrane.h"
 #include "PortSimulationClock.h"
+#include "PortSolarLighting.h"
 #include "TerminalLayout.h"
 #include "PortSiteLogistics.h"
 #include "PortSimTimeStep.h"
@@ -17,9 +18,8 @@
 #include "Components/SkyLightComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Engine/Canvas.h"
-#include "Engine/DirectionalLight.h"
 #include "Engine/Engine.h"
-#include "Engine/SkyLight.h"
+#include "Engine/GameViewportClient.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "Materials/MaterialInterface.h"
@@ -29,6 +29,7 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/WorldSettings.h"
 #include "InputCoreTypes.h"
+#include "Misc/App.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
@@ -64,7 +65,7 @@ UStaticMeshComponent* AQuayCrane::MakeBox(const TCHAR* Name, USceneComponent* Pa
 AQuayCrane::AQuayCrane()
 {
     Environment=CreateDefaultSubobject<UPortEnvironmentComponent>(TEXT("Environment"));
-    CreateDefaultSubobject<UPortFogVisualComponent>(TEXT("FogVisual"));
+    FogVisual=CreateDefaultSubobject<UPortFogVisualComponent>(TEXT("FogVisual"));
     CreateDefaultSubobject<UPortPrecipitationVisualComponent>(TEXT("PrecipitationVisual"));
     PrimaryActorTick.bCanEverTick = true;
     PrimaryActorTick.TickGroup = TG_PrePhysics;
@@ -133,6 +134,8 @@ AQuayCrane::AQuayCrane()
     Camera->SetFieldOfView(65.f);
     Camera->PostProcessSettings.bOverride_AutoExposureBias=true;
     Camera->PostProcessSettings.AutoExposureBias=-1.5f;
+    Camera->PostProcessSettings.bOverride_AutoExposureMinBrightness=true;
+    Camera->PostProcessSettings.AutoExposureMinBrightness=0.f;
 }
 
 void AQuayCrane::BuildYard()
@@ -157,20 +160,52 @@ void AQuayCrane::BuildYard()
     Box(TEXT("RailLeft"), FVector(-850.f, 0.f, 0.f), FVector(35.f, 7500.f, 20.f));
     Box(TEXT("RailRight"), FVector(850.f, 0.f, 0.f), FVector(35.f, 7500.f, 20.f));
     }
-    auto* Sun = GetWorld()->SpawnActor<ADirectionalLight>(FVector(0.f, 0.f, 6000.f), FRotator(-50.f, -35.f, 0.f));
-    Sun->GetLightComponent()->SetMobility(EComponentMobility::Movable);
-    Sun->GetLightComponent()->SetIntensity(5.f);
-    CastChecked<UDirectionalLightComponent>(Sun->GetLightComponent())->SetAtmosphereSunLight(true);
+    if (!FApp::CanEverRender() || GetNetMode()==NM_DedicatedServer) return;
     auto* Atmosphere = NewObject<USkyAtmosphereComponent>(this, TEXT("Atmosphere"));
     AddInstanceComponent(Atmosphere);
     Atmosphere->RegisterComponent();
-    auto* Sky = GetWorld()->SpawnActor<ASkyLight>();
-    Sky->GetLightComponent()->SetMobility(EComponentMobility::Movable);
-    Sky->GetLightComponent()->SetIntensity(1.f);
-    Sky->GetLightComponent()->SetRealTimeCapture(true);
-    Sky->GetLightComponent()->SetLowerHemisphereColor(FLinearColor(0.25f, 0.3f, 0.4f));
+
+    // Calibrate once to Epic's clear-sky zenith reference at 1 AU. SkyAtmosphere
+    // applies its own ground transmittance as the sun moves. Keep the input above the atmosphere.
+    SolarReferenceLux=Atmosphere->GetAtmosphericLightToMatchIlluminanceOnGround(FVector::UpVector,120000.f);
+    SunLight=NewObject<UDirectionalLightComponent>(this,TEXT("Sun"));
+    SunLight->SetMobility(EComponentMobility::Movable);
+    SunLight->SetAtmosphereSunLight(true);
+    SunLight->SetLightSourceAngle(0.545f);
+    SunLight->SetIntensity(0.f);
+    AddInstanceComponent(SunLight);
+    UpdateSolarLightingForDraw();
+    SunLight->RegisterComponent();
+
+    auto* Sky=NewObject<USkyLightComponent>(this,TEXT("SkyLight"));
+    Sky->SetMobility(EComponentMobility::Movable);
+    Sky->SetIntensity(1.f);
+    Sky->SetRealTimeCapture(true);
+    Sky->SetLowerHemisphereColor(FLinearColor::Black);
+    AddInstanceComponent(Sky);
+    Sky->RegisterComponent();
+
+    if (auto* Viewport=GetWorld()->GetGameViewport())
+    {
+        LightingViewport=Viewport;
+        Viewport->OnBeginDraw().AddUObject(this,&AQuayCrane::UpdateSolarLightingForDraw);
+    }
 }
 
+void AQuayCrane::UpdateSolarLightingForDraw()
+{
+    const FDateTime LocalTime=Environment->GetLocalDateTime();
+    // Roughly 0.04 degrees of sun travel per sample. Skip physics substeps and paused frames.
+    if (LocalTime>=LastSolarUpdate && (LocalTime-LastSolarUpdate).GetTotalSeconds()<10.0) return;
+    LastSolarUpdate=LocalTime;
+    const FPortSolarPosition Sun=PortSolarLighting::Calculate(LocalTime);
+    FogVisual->SetDaylightIlluminance(Sun.EstimateHorizontalIlluminanceLux());
+    const float Intensity=SolarReferenceLux*Sun.RelativeSolarIlluminance();
+    if (Intensity>0.f)
+        SunLight->SetWorldRotation((-Sun.DirectionToSun()).Rotation());
+    if (!FMath::IsNearlyEqual(SunLight->Intensity,Intensity,0.01f))
+        SunLight->SetIntensity(Intensity);
+}
 
 void AQuayCrane::ApplyAppearance()
 {
@@ -331,6 +366,7 @@ void AQuayCrane::ResetSimulation()
 {
     NotifyExternalSimulationInput();
     if (bTerminalMode) { ResetTerminal(); return; }
+    Environment->ResetEnvironmentClock();
     Suspension->BreakConstraint();
     TwistLock->BreakConstraint();
     bLocked = false;
@@ -907,7 +943,8 @@ void APortSimHUD::DrawHUD()
         TogglePosition.X+10.f*Scale,TogglePosition.Y+7.f*Scale,GEngine->GetSmallFont(),TextScale);
     AddHitBox(TogglePosition,ToggleSize,TEXT("TogglePortHUD"),true,100);
     {
-        const double Time=PortSimulationClock::TimeOfDaySeconds(CranePawn->AutoElapsed);
+        const auto* Weather=CranePawn->GetEnvironment();
+        const double Time=Weather->GetLocalDateTime().GetTimeOfDay().GetTotalSeconds();
         const int32 Hour=static_cast<int32>(Time/3600.0);
         const int32 Minute=static_cast<int32>(Time/60.0)%60;
         const int32 DisplayHour=Hour%12==0?12:Hour%12;
@@ -929,8 +966,7 @@ void APortSimHUD::DrawHUD()
         }
         Segment(70,20,3,4,true); Segment(70,38,3,4,true);
         DrawText(Hour<12?TEXT("AM"):TEXT("PM"),Lit,X+142.f*Scale,Y+19.f*Scale,GEngine->GetSmallFont(),.75f*Scale);
-        const auto* Weather=CranePawn->GetEnvironment();
-        const float Temperature=PortSimulationClock::TemperatureCelsius(CranePawn->AutoElapsed,
+        const float Temperature=PortSimulationClock::TemperatureCelsius(Time,
             Weather&&Weather->IsSnowEnabled(),Weather?Weather->GetSnowfallMmPerHour():0.f,
             Weather&&Weather->IsRainEnabled(),Weather?Weather->GetRainfallMmPerHour():0.f);
         DrawText(FString::Printf(TEXT("%.1f C"),Temperature),
@@ -1248,6 +1284,7 @@ float AQuayCrane::GetEffectivePlaybackRate() const
 
 void AQuayCrane::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    if (auto* Viewport=LightingViewport.Get()) Viewport->OnBeginDraw().RemoveAll(this);
 #if WITH_EDITOR
     FCoreUObjectDelegates::OnObjectPropertyChanged.RemoveAll(this);
 #endif

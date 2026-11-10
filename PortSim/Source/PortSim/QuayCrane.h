@@ -21,6 +21,9 @@ class UCameraComponent;
 class UPortSimTimeStep;
 class UEngineCustomTimeStep;
 class UPortEnvironmentComponent;
+class UPortFogVisualComponent;
+class UDirectionalLightComponent;
+class UGameViewportClient;
 struct FPortWindInputTestState;
 
 enum class ETerminalStage : uint8
@@ -172,6 +175,12 @@ public:
 
 private:
     UPROPERTY(VisibleAnywhere, Category="Environment") TObjectPtr<UPortEnvironmentComponent> Environment;
+    UPROPERTY() TObjectPtr<UPortFogVisualComponent> FogVisual;
+    UPROPERTY(Transient) TObjectPtr<UDirectionalLightComponent> SunLight;
+    TWeakObjectPtr<UGameViewportClient> LightingViewport;
+    FDateTime LastSolarUpdate;
+    float SolarReferenceLux=0.f;
+    void UpdateSolarLightingForDraw();
 #if WITH_DEV_AUTOMATION_TESTS
     TSharedPtr<FPortWindInputTestState> WindInputTestState;
     void TickWindInputTest(float Dt);

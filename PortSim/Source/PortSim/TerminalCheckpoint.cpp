@@ -112,7 +112,7 @@ void FTerminalCheckpoint::Capture(UPortEnvironmentComponent& O)
 {
     Objects.Add(&O);
     Values(O.OperatingLimits,O.FrictionSettings,O.Surface,O.bSnowEnabled,O.SnowIntensity,O.bIceEnabled,O.IceIntensity);
-    Values(O.MaterialSurface,O.MaterialSettings,O.Accumulation,O.PublishedSurface,O.bSurfaceInitialized,
+    Values(O.EnvironmentElapsedSeconds,O.MaterialSurface,O.MaterialSettings,O.Accumulation,O.PublishedSurface,O.bSurfaceInitialized,
         O.Wind,O.Sea,O.Fog,O.Rain,O.LastReportedGustCount);
     if(O.ContactMaterial)
     {

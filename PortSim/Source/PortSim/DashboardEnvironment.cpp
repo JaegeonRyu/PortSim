@@ -1,7 +1,7 @@
 #include "PortSiteLogistics.h"
 #include "PortEnvironmentComponent.h"
 #include "PortSimulationClock.h"
-#include "QuayCrane.h"
+#include "PortSolarLighting.h"
 #include "Dom/JsonObject.h"
 
 TSharedPtr<FJsonObject> APortSiteLogistics::CaptureEnvironment() const
@@ -9,10 +9,15 @@ TSharedPtr<FJsonObject> APortSiteLogistics::CaptureEnvironment() const
     const auto* E=GetOwner()?GetOwner()->FindComponentByClass<UPortEnvironmentComponent>():nullptr;
     if(!E) return nullptr;
     auto O=MakeShared<FJsonObject>();
-    const auto* Crane=Cast<AQuayCrane>(GetOwner());
-    const double Elapsed=Crane?Crane->AutoElapsed:0.0;
-    O->SetNumberField(TEXT("time_of_day_seconds"),PortSimulationClock::TimeOfDaySeconds(Elapsed));
-    O->SetNumberField(TEXT("temperature_celsius"),PortSimulationClock::TemperatureCelsius(Elapsed,
+    const FDateTime LocalTime=E->GetLocalDateTime();
+    const double TimeOfDay=LocalTime.GetTimeOfDay().GetTotalSeconds();
+    const FPortSolarPosition Sun=PortSolarLighting::Calculate(LocalTime);
+    O->SetStringField(TEXT("local_datetime"),LocalTime.ToString(TEXT("%Y-%m-%dT%H:%M:%S"))+TEXT("+09:00"));
+    O->SetNumberField(TEXT("sun_elevation_deg"),Sun.ElevationDegrees);
+    O->SetNumberField(TEXT("sun_azimuth_deg"),Sun.AzimuthDegrees);
+    O->SetNumberField(TEXT("estimated_clear_sky_horizontal_lux"),Sun.EstimateHorizontalIlluminanceLux());
+    O->SetNumberField(TEXT("time_of_day_seconds"),TimeOfDay);
+    O->SetNumberField(TEXT("temperature_celsius"),PortSimulationClock::TemperatureCelsius(TimeOfDay,
         E->IsSnowEnabled(),E->GetSnowfallMmPerHour(),E->IsRainEnabled(),E->GetRainfallMmPerHour()));
     O->SetBoolField(TEXT("wind_enabled"),E->IsWindEnabled());
     O->SetNumberField(TEXT("wind_mps"),E->IsWindEnabled()?E->GetWindSpeedMetersPerSecond():0);

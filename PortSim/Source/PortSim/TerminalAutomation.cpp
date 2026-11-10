@@ -216,6 +216,7 @@ void AQuayCrane::BuildConfiguredVessels()
 
 void AQuayCrane::ResetTerminal()
 {
+    Environment->ResetEnvironmentClock();
     if (bUnifiedTerminal)
     {
         ApplySeaMotion();

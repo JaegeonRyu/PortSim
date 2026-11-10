@@ -236,6 +236,8 @@ public:
     // Called once by AQuayCrane with the already accelerated world DeltaSeconds.
     // Do not multiply speed or delta by SimulationSpeed a second time.
     void AdvanceEnvironment(float SimulationSeconds);
+    FDateTime GetLocalDateTime() const { return StartLocalTime+FTimespan::FromSeconds(EnvironmentElapsedSeconds); }
+    void ResetEnvironmentClock() { EnvironmentElapsedSeconds=0.0; }
 
     UFUNCTION(BlueprintPure, Category="Environment|Wind") bool IsWindEnabled() const { return Wind.bWindEnabled; }
     UFUNCTION(BlueprintPure, Category="Environment|Wind") float GetWindSpeedMetersPerSecond() const { return Wind.WindSpeedMetersPerSecond; }
@@ -303,6 +305,8 @@ public:
     UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Environment|Ice") bool bIceEnabled=false;
     UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Environment|Ice",meta=(ClampMin="0",ClampMax="1")) float IceIntensity=1;
 private:
+    FDateTime StartLocalTime;
+    double EnvironmentElapsedSeconds=0.0;
     void NotifyExternalInput();
     UPROPERTY() TObjectPtr<UPhysicalMaterial> ContactMaterial;
     FPortSurfaceState MaterialSurface;
