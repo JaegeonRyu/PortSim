@@ -166,14 +166,18 @@ public:
     int32 PendingCargoLimit(int32 Vessel) const;
     int32 PendingCargoTotal() const;
     void StopSimulation();
+    bool CanAdjustStartTime() const { return bUnifiedTerminal && !bStartTimeLocked; }
+    void AdjustStartTime(bool bForward);
     FString ElapsedText() const;
     FString CameraViewName=TEXT("전체");
     bool bRunSettingsSaved=true;
     void TickControlsTest(float Dt);
     int32 ControlsTestStage=0, ControlsTestFrames=0;
     double ControlsTestTime=0;
+    FDateTime ControlsTestStartTime;
 
 private:
+    bool bStartTimeLocked=false;
     UPROPERTY(VisibleAnywhere, Category="Environment") TObjectPtr<UPortEnvironmentComponent> Environment;
     UPROPERTY() TObjectPtr<UPortFogVisualComponent> FogVisual;
     UPROPERTY(Transient) TObjectPtr<UDirectionalLightComponent> SunLight;

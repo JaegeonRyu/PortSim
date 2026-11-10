@@ -38,6 +38,17 @@ void AQuayCrane::TickControlsTest(float Dt)
         if(ElapsedText()!=TEXT("25시 01분 01초")) { Fail(TEXT("Elapsed formatting wraps days")); return; }
         AutoElapsed=0;
         if(!Environment) { Fail(TEXT("Missing environment controls")); return; }
+        {
+            const FDateTime Before=Environment->GetLocalDateTime();
+            HUD->NotifyHitBoxClick(TEXT("StartTimeUp"));
+            ControlsTestStartTime=Environment->GetLocalDateTime();
+            const FDateTime After=Before+FTimespan::FromMinutes(30);
+            if(ControlsTestStartTime!=Before.GetDate()+After.GetTimeOfDay())
+            { Fail(TEXT("Start time did not advance 30 minutes on the same date")); return; }
+            HUD->NotifyHitBoxClick(TEXT("StartTimeDown"));
+            if(Environment->GetLocalDateTime()!=Before) { Fail(TEXT("Start time did not move back 30 minutes")); return; }
+            HUD->NotifyHitBoxClick(TEXT("StartTimeUp"));
+        }
         for(const FName Toggle:{FName(TEXT("ToggleWindSetting")),FName(TEXT("ToggleSeaSetting")),
             FName(TEXT("ToggleRainSetting")),FName(TEXT("ToggleFogSetting")),
             FName(TEXT("ToggleSnowSetting")),FName(TEXT("ToggleIceSetting"))})
@@ -60,6 +71,15 @@ void AQuayCrane::TickControlsTest(float Dt)
         if(SimulationSpeed!=2) { Fail(TEXT("Speed button")); return; }
         HUD->NotifyHitBoxClick(TEXT("RunSimulation"));
         if(!bAutoRunning) { Fail(TEXT("Run button")); return; }
+        HUD->NotifyHitBoxClick(TEXT("StartTimeUp"));
+        if(CanAdjustStartTime() || Environment->GetLocalDateTime()!=ControlsTestStartTime)
+        { Fail(TEXT("Start time editable during a run")); return; }
+        {
+            TGuardValue<bool> FinishedRun(bAutoRunning,false);
+            HUD->NotifyHitBoxClick(TEXT("StartTimeDown"));
+            if(CanAdjustStartTime() || Environment->GetLocalDateTime()!=ControlsTestStartTime)
+            { Fail(TEXT("Start time editable after completion without reset")); return; }
+        }
         ControlsTestStage=1; ControlsTestFrames=0; break;
     case 1:
         if(AutoElapsed<2) break;
@@ -68,6 +88,12 @@ void AQuayCrane::TickControlsTest(float Dt)
     case 2:
         if(AutoElapsed!=ControlsTestTime) { Fail(TEXT("Paused execution clock advanced")); return; }
         if(ControlsTestFrames<30) break;
+        {
+            const FDateTime Before=Environment->GetLocalDateTime();
+            HUD->NotifyHitBoxClick(TEXT("StartTimeDown"));
+            if(CanAdjustStartTime() || Environment->GetLocalDateTime()!=Before)
+            { Fail(TEXT("Start time editable during pause")); return; }
+        }
         SiteLogistics->ExportDashboard(true,true);
         {
             FString Json; TSharedPtr<FJsonObject> O;
@@ -83,6 +109,8 @@ void AQuayCrane::TickControlsTest(float Dt)
         HUD->NotifyHitBoxClick(TEXT("StopSimulation"));
         if(bAutoRunning || bAutoPaused || AutoElapsed!=0 || Deliveries!=0 || !SiteLogistics->Validate(Error))
         { Fail(TEXT("Stop did not restore valid empty initial yard: ")+Error); return; }
+        if(!CanAdjustStartTime() || Environment->GetLocalDateTime()!=ControlsTestStartTime)
+        { Fail(TEXT("Reset did not restore the selected and editable start time")); return; }
         if(SiteLogistics->Surface.WaterFilmMm!=Environment->GetSurfaceConditions().WaterFilmMm ||
             (Environment->IsRainEnabled() && SiteLogistics->Surface.WaterFilmMm<=0))
         { Fail(TEXT("Reset equipment lost the accumulated live surface")); return; }

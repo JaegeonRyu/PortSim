@@ -936,8 +936,14 @@ void APortSimHUD::DrawHUD()
             Y+=RowHeight;
         }
     };
-    const FVector2D TogglePosition(Canvas->SizeX-188.f*Scale,16.f);
-    const FVector2D ToggleSize(172.f*Scale,30.f*Scale);
+    constexpr float ClockWidth=172.f,ClockHeight=92.f;
+    constexpr float ArrowWidth=25.f,ArrowGap=4.f;
+    constexpr float ArrowHeight=(ClockHeight-ArrowGap)/2.f;
+    const bool bCanAdjustStartTime=CranePawn->CanAdjustStartTime();
+    const float ClockX=Canvas->SizeX-208.f*Scale;
+    const float HeaderWidth=bCanAdjustStartTime?ClockWidth+ArrowGap+ArrowWidth:ClockWidth;
+    const FVector2D TogglePosition(ClockX,16.f);
+    const FVector2D ToggleSize(HeaderWidth*Scale,30.f*Scale);
     DrawRect(FLinearColor(0.04f,0.18f,0.24f,0.96f),TogglePosition.X,TogglePosition.Y,ToggleSize.X,ToggleSize.Y);
     DrawText(CranePawn->bHUDVisible?TEXT("HUD 숨기기"):TEXT("HUD 표시"),FLinearColor(0.4f,1.f,1.f),
         TogglePosition.X+10.f*Scale,TogglePosition.Y+7.f*Scale,GEngine->GetSmallFont(),TextScale);
@@ -949,9 +955,9 @@ void APortSimHUD::DrawHUD()
         const int32 Minute=static_cast<int32>(Time/60.0)%60;
         const int32 DisplayHour=Hour%12==0?12:Hour%12;
         const int32 Digits[4]={DisplayHour/10,DisplayHour%10,Minute/10,Minute%10};
-        const float X=Canvas->SizeX-188.f*Scale,Y=53.f*Scale;
+        const float X=ClockX,Y=TogglePosition.Y+ToggleSize.Y+7.f*Scale;
         const FLinearColor Lit(.26f,1.f,.77f),Dim(.08f,.24f,.21f);
-        DrawRect(FLinearColor(.015f,.04f,.055f,.96f),X,Y,172.f*Scale,92.f*Scale);
+        DrawRect(FLinearColor(.015f,.04f,.055f,.96f),X,Y,ClockWidth*Scale,ClockHeight*Scale);
         const uint8 Masks[10]={0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,0x07,0x7f,0x6f};
         auto Segment=[&](float SX,float SY,float W,float H,bool On)
         { DrawRect(On?Lit:Dim,X+SX*Scale,Y+SY*Scale,W*Scale,H*Scale); };
@@ -971,6 +977,21 @@ void APortSimHUD::DrawHUD()
             Weather&&Weather->IsRainEnabled(),Weather?Weather->GetRainfallMmPerHour():0.f);
         DrawText(FString::Printf(TEXT("%.1f C"),Temperature),
             Lit,X+12.f*Scale,Y+63.f*Scale,GEngine->GetSmallFont(),Scale);
+        if (bCanAdjustStartTime)
+        {
+            auto DrawTimeArrow=[&](bool bUp,float OffsetY,FName Name)
+            {
+                const FVector2D Position(X+(ClockWidth+ArrowGap)*Scale,Y+OffsetY*Scale),Size(ArrowWidth*Scale,ArrowHeight*Scale);
+                DrawRect(FLinearColor(.04f,.18f,.24f),Position.X,Position.Y,Size.X,Size.Y);
+                const FVector2D Center=Position+0.5f*Size;
+                const float Rise=(bUp?4.f:-4.f)*Scale;
+                DrawLine(Center.X-5.f*Scale,Center.Y+Rise,Center.X,Center.Y-Rise,Lit,2.f*Scale);
+                DrawLine(Center.X,Center.Y-Rise,Center.X+5.f*Scale,Center.Y+Rise,Lit,2.f*Scale);
+                AddHitBox(Position,Size,Name,true,100);
+            };
+            DrawTimeArrow(true,0.f,TEXT("StartTimeUp"));
+            DrawTimeArrow(false,ArrowHeight+ArrowGap,TEXT("StartTimeDown"));
+        }
     }
     if (!CranePawn->bHUDVisible) return;
     if (const auto* Environment=CranePawn->GetEnvironment())
@@ -1194,6 +1215,8 @@ void APortSimHUD::NotifyHitBoxClick(FName BoxName)
     auto* PC=GetOwningPlayerController(); auto* C=PC?Cast<AQuayCrane>(PC->GetPawn()):nullptr;
     if(!C) return;
     if(BoxName==TEXT("TogglePortHUD")) { C->SaveRunSettings(); DragSlider=-2; C->ToggleHUD(); return; }
+    if(BoxName==TEXT("StartTimeUp") || BoxName==TEXT("StartTimeDown"))
+    { C->AdjustStartTime(BoxName==TEXT("StartTimeUp")); return; }
     for(int32 I=0;I<C->PendingShips;++I) for(int32 Mode=0;Mode<2;++Mode)
         if(BoxName==FName(*FString::Printf(TEXT("VesselMode%d_%d"),I,Mode)))
         { DragSlider=-2; VesselImportStatus.Empty(); C->SetVesselInputMode(I,Mode==1); return; }

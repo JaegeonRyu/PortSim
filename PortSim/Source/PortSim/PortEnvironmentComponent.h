@@ -238,6 +238,7 @@ public:
     void AdvanceEnvironment(float SimulationSeconds);
     FDateTime GetLocalDateTime() const { return StartLocalTime+FTimespan::FromSeconds(EnvironmentElapsedSeconds); }
     void ResetEnvironmentClock() { EnvironmentElapsedSeconds=0.0; }
+    void ShiftStartTimeByHalfHour(bool bForward);
 
     UFUNCTION(BlueprintPure, Category="Environment|Wind") bool IsWindEnabled() const { return Wind.bWindEnabled; }
     UFUNCTION(BlueprintPure, Category="Environment|Wind") float GetWindSpeedMetersPerSecond() const { return Wind.WindSpeedMetersPerSecond; }

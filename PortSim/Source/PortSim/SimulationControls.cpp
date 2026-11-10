@@ -161,6 +161,13 @@ bool AQuayCrane::SaveRunSettings()
         IFileManager::Get().Move(*Path,*(Path+TEXT(".tmp")),true,true);
     return bRunSettingsSaved;
 }
+void AQuayCrane::AdjustStartTime(bool bForward)
+{
+    if(!CanAdjustStartTime()) return;
+    Environment->ShiftStartTimeByHalfHour(bForward);
+    LastSolarUpdate=FDateTime();
+}
+
 void AQuayCrane::StopSimulation()
 {
     if(bUnifiedTerminal && !ApplyPendingVesselInputs()) return;

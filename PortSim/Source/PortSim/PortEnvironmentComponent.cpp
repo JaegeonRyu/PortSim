@@ -522,6 +522,14 @@ UPhysicalMaterial* UPortEnvironmentComponent::GetContactMaterial()
     return ContactMaterial;
 }
 
+void UPortEnvironmentComponent::ShiftStartTimeByHalfHour(bool bForward)
+{
+    constexpr int64 HalfHour=30*ETimespan::TicksPerMinute;
+    const int64 Ticks=StartLocalTime.GetTimeOfDay().GetTicks()+(bForward?HalfHour:-HalfHour);
+    StartLocalTime=StartLocalTime.GetDate()+FTimespan((Ticks+ETimespan::TicksPerDay)%ETimespan::TicksPerDay);
+    NotifyExternalInput();
+}
+
 void UPortEnvironmentComponent::AdvanceEnvironment(float SimulationSeconds)
 {
     if(FMath::IsFinite(SimulationSeconds) && SimulationSeconds>0.f)

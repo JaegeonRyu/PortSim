@@ -219,6 +219,7 @@ void AQuayCrane::ResetTerminal()
     Environment->ResetEnvironmentClock();
     if (bUnifiedTerminal)
     {
+        bStartTimeLocked=false;
         ApplySeaMotion();
         ResetSiteOperations();
         WeatherHold=FPortWeatherHold();
@@ -332,6 +333,7 @@ void AQuayCrane::StartAutomatic(bool bLoad)
     {
         if (bLoad) { Status=TEXT("Unified berths unload automatically; R restores all three ships."); return; }
         if (bEmergencyStop || !SiteLogistics->Fault.IsEmpty()) { Status=TEXT("Clear E-stop or reset after a fault."); return; }
+        bStartTimeLocked=true;
         bAutoPaused=false; bAutoRunning=true;
         return;
     }
