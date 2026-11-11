@@ -10,6 +10,7 @@ param(
     [switch]$SingleThreadedPhysics,
     [switch]$BatchLivePhysics,
     [switch]$NoReplay,
+    [switch]$RepeatUnchangedWork,
     [string]$LogPath,
     [string]$SummaryPath
 )
@@ -29,6 +30,7 @@ if($EngineStats) { $arguments+='-PortSimProfileEngineStats' }
 if($BatchLivePhysics) { $arguments+='-PortSimBatchLivePhysics' }
 if($SingleThreadedPhysics) { $arguments+='-SingleThreadedPhysics' }
 if($FullPhysics) { $arguments+='-PortSimFullPhysics' }
+if($RepeatUnchangedWork) { $arguments+='"-ExecCmds=PortSim.SkipUnchangedUpdates 0"' }
 if($NoReplay) { $arguments+='-PortSimNoReplay' }
 $process=Start-Process -FilePath (Join-Path $Engine 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe') `
     -ArgumentList $arguments -WindowStyle Hidden -PassThru
@@ -67,7 +69,20 @@ foreach($sample in $samples) {
     }
     $previousWall=$wall; $previousSimulation=$simulation
 }
+# Scopes are inclusive and may overlap; worker output is not game-thread time.
+$metricMap=@{}
+foreach($metric in [regex]::Matches($text,'PORTSIM_PERF_SCOPE: (\w+) total_ms=([\d.]+) calls=(\d+) mean_ms=([\d.]+)')) {
+    $name=$metric.Groups[1].Value
+    $metricMap[$name]=[pscustomobject]@{
+        Name=$name;TotalMs=[double]$metric.Groups[2].Value;Calls=[long]$metric.Groups[3].Value
+        MeanMs=[double]$metric.Groups[4].Value
+        MsPerSimulationSecond=[double]$metric.Groups[2].Value/[Math]::Max(.001,[double]$last.Groups[2].Value)
+        Thread=if($name -eq 'dashboard_serialize_write') {'worker'} else {'game'}
+    }
+}
 $result=[ordered]@{
+    SkipUnchangedUpdates=(-not [bool]$RepeatUnchangedWork)
+    ScopeSemantics="Inclusive; do not sum overlapping scopes or worker time";Scopes=@($metricMap.Values | Sort-Object TotalMs -Descending)
     Ships=$Ships;CargoPerShip=$CargoPerShip
     InitialShipCargo=[int]$inventory[-1].Groups[1].Value;InitialYardCargo=[int]$inventory[-1].Groups[2].Value
     RequestedRate=$PlaybackRate;BatchLivePhysics=[bool]$BatchLivePhysics;Render=[bool]$Render;SingleThreadedPhysics=[bool]$SingleThreadedPhysics;FullPhysics=[bool]$FullPhysics;BufferedReplay=(-not [bool]$NoReplay);WallSeconds=[double]$last.Groups[1].Value

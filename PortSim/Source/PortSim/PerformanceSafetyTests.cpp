@@ -4,6 +4,8 @@
 #include "PortSiteLogistics.h"
 #include "PortWorkingCrane.h"
 #include "STSDynamics.h"
+#include "UnchangedUpdates.h"
+#include "Misc/ScopeExit.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
@@ -124,4 +126,42 @@ bool FNoEventCollisionTest::RunTest(const FString& Parameters)
     World->DestroyWorld(false);
     return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUnchangedCargoTest,"PortSim.Performance.UnchangedCargoInterpolation",
+    EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FUnchangedCargoTest::RunTest(const FString& Parameters)
+{
+    PortSimUpdates::SkipUnchanged(); // Register the A/B switch.
+    auto* Switch=IConsoleManager::Get().FindConsoleVariable(TEXT("PortSim.SkipUnchangedUpdates"));
+    const int32 Previous=Switch->GetInt();
+    ON_SCOPE_EXIT { Switch->Set(Previous,ECVF_SetByCode); };
+    const auto Init=UWorld::InitializationValues().AllowAudioPlayback(false).CreatePhysicsScene(true)
+        .RequiresHitProxies(false).CreateNavigation(false).CreateAISystem(false);
+    auto* World=UWorld::CreateWorld(EWorldType::Game,false,NAME_None,nullptr,true,ERHIFeatureLevel::Num,&Init);
+    ON_SCOPE_EXIT { World->DestroyWorld(false); };
+    auto* Box=World->SpawnActor<APortContainerActor>();
+    for(int32 Frame=0;Frame<4;++Frame)
+    {
+        // Includes stationary endpoints and a new frame at the same alpha.
+        Box->SetSecuredVesselMotion(FVector(1000+Frame*100,0,300),FQuat::Identity,FVector::ZeroVector);
+        Box->SetSecuredVesselMotion(FVector(1200+Frame*100,50,320),FRotator(1,3,2).Quaternion(),
+            FVector(10,2,1),FVector(1,2,3),FVector(3,2,1),.05,false);
+        Box->SetSecuredMotionWindow(.2,.8);
+        for(double Alpha:{0.,.5,1.,1.,.5})
+        {
+            Switch->Set(0,ECVF_SetByCode); Box->ApplySecuredMotionFraction(Alpha);
+            const FTransform Expected=Box->GetActorTransform();
+            const FVector Velocity=Box->GetMotionVelocity(),Acceleration=Box->GetMotionAcceleration(),Jerk=Box->GetMotionJerk();
+            Switch->Set(1,ECVF_SetByCode);
+            Box->SetActorLocation(FVector(-10000,0,0)); // Reuse must still correct external pose changes.
+            Box->ApplySecuredMotionFraction(Alpha);
+            TestTrue(TEXT("Reused pose matches uncached interpolation"),Box->GetActorTransform().Equals(Expected,0.));
+            TestTrue(TEXT("Velocity preserved"),Box->GetMotionVelocity().Equals(Velocity,0.));
+            TestTrue(TEXT("Acceleration preserved"),Box->GetMotionAcceleration().Equals(Acceleration,0.));
+            TestTrue(TEXT("Jerk preserved"),Box->GetMotionJerk().Equals(Jerk,0.));
+        }
+    }
+    return true;
+}
+
 #endif

@@ -120,15 +120,15 @@ test('a recipient stays highlighted until its last pending plan finishes; supers
  state.actors[2].planned_rmg=3;assert.equal(impactModel(state).related.size,0);
 });
 
-test('loaded AGV replacement requires eligibility and shows transfer progress',async t=>{
+test('loaded AGV replacement is locked even with stale eligible telemetry',async t=>{
  const f=await fixture(t);
  assert.equal((await f.post({actor_id:'agv',action:'replace_loaded_agv'})).status,409);
  const actor=f.state.actors.find(a=>a.id==='agv');
  Object.assign(actor,{fault_scope:'equipment',drive_failure:true,can_replace_loaded_agv:true});
  await writeFile(path.join(f.directory,'state.json'),JSON.stringify(f.state));
- assert.equal((await f.post({actor_id:'agv',action:'replace_loaded_agv'})).status,202);
+ assert.equal((await f.post({actor_id:'agv',action:'replace_loaded_agv'})).status,409);
  const enabled=controlPanel(actor,f.state,true,null);
- assert.match(enabled,/data-command="replace_loaded_agv"  title=/);
+ assert.match(enabled,/data-command="replace_loaded_agv" disabled title=/);
  const held=controlPanel({...actor,can_replace_loaded_agv:false,loaded_recovery_active:true,loaded_recovery_status:'R/S 인양',recovery_transferred_count:1,recovery_cargo_count:2},f.state,true,null);
  assert.match(held,/data-command="replace_loaded_agv" disabled/);
  assert.match(held,/R\/S 인양.*1\/2개 인계/);

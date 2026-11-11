@@ -38,6 +38,21 @@ bool FLoadedAGVRecoveryTest::RunTest(const FString& Parameters)
     FString Error;
     TestFalse(TEXT("Healthy loaded AGV cannot be replaced"),Site->CanRecoverLoadedAGV(0,Error));
     Old->SetDriveFailure(true);
+    if(!Site->bLoadedAGVRecoveryEnabled)
+    {
+        TestFalse(TEXT("Eligibility is locked"),Site->CanRecoverLoadedAGV(0,Error));
+        TestFalse(TEXT("Direct request is locked"),Site->RequestLoadedAGVRecovery(0,Error));
+        TestEqual(TEXT("No recovery allocated"),Site->LoadedAGVRecoveries.Num(),0);
+        Site->LoadedAGVRecoveries.Add(R);
+        const FTransform NewPose=New->GetActorTransform(), RSPose=RS->GetActorTransform();
+        Site->AdvanceLoadedAGVRecoveries(10);
+        TestTrue(TEXT("RS stays in place"),RS->GetActorTransform().Equals(RSPose));
+        TestTrue(TEXT("Replacement stays in place"),New->GetActorTransform().Equals(NewPose));
+        TestEqual(TEXT("Phase stays locked"),Site->LoadedAGVRecoveries[0].Phase,R.Phase);
+        for(const auto& C:R.Cargo)
+            TestEqual(TEXT("Cargo retained"),C->GetAttachParentActor(),static_cast<AActor*>(Old));
+        World->DestroyWorld(false);return true;
+    }
     TestTrue(TEXT("Stopped loaded road job is eligible"),Site->CanRecoverLoadedAGV(0,Error));
     TArray<FVector> Access;
     TestTrue(TEXT("Depot has a road route to the receiving bay"),Site->PlanLoadedRecoveryRoad(Site->FleetPark(1),R.Target,FVector(0,1,0),1,Access));

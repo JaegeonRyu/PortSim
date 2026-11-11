@@ -1,4 +1,5 @@
 #include "PortContainerActor.h"
+#include "UnchangedUpdates.h"
 #include "PortCargoBody.h"
 #include "PortSiteLogistics.h"
 #include "PortAGVActor.h"
@@ -77,6 +78,7 @@ void APortContainerActor::ApplyWind(FVector WindVelocityMetersPerSecond,float Dr
 void APortContainerActor::SetSecuredVesselMotion(FVector Position,FQuat Rotation,FVector VelocityCentimetersPerSecond,
     FVector AccelerationCentimetersPerSecondSquared,FVector JerkCentimetersPerSecondCubed,double FrameDurationSeconds,bool ApplyPose)
 {
+    CachedMotionAlpha=-1;
     const bool WasSimulating=Body->IsSimulatingPhysics();
     if(WasSimulating) Body->SetSimulatePhysics(false);
     const FTransform Next(Rotation.GetNormalized(),Position);
@@ -148,7 +150,9 @@ void APortContainerActor::ApplySecuredMotionFraction(double Fraction)
     if(!bHasSecuredMotionFrame || Body->IsSimulatingPhysics()) return;
     const double Alpha=FMath::Lerp(SecuredWindowStart,SecuredWindowEnd,FMath::Clamp(Fraction,0.,1.));
     FVector Position,Velocity;
-    if(SecuredFrameDurationSeconds>UE_SMALL_NUMBER)
+    const bool Cached=PortSimUpdates::SkipUnchanged() && CachedMotionAlpha==Alpha;
+    if(Cached) { Position=CachedMotionPosition; Velocity=CachedMotionVelocity; }
+    else if(SecuredFrameDurationSeconds>UE_SMALL_NUMBER)
     {
         // Cubic Hermite interpolation keeps the position derivative consistent
         // with the analytic vessel velocity. Linear position interpolation plus
@@ -165,7 +169,9 @@ void APortContainerActor::ApplySecuredMotionFraction(double Fraction)
         Position=FMath::Lerp(PreviousSecuredTransform.GetLocation(),CurrentSecuredTransform.GetLocation(),Alpha);
         Velocity=FMath::Lerp(PreviousSecuredVelocity,CurrentSecuredVelocity,Alpha);
     }
-    const FQuat Rotation=FQuat::Slerp(PreviousSecuredTransform.GetRotation(),CurrentSecuredTransform.GetRotation(),Alpha).GetNormalized();
+    const FQuat Rotation=Cached?CachedMotionRotation:
+        FQuat::Slerp(PreviousSecuredTransform.GetRotation(),CurrentSecuredTransform.GetRotation(),Alpha).GetNormalized();
+    CachedMotionAlpha=Alpha; CachedMotionPosition=Position; CachedMotionVelocity=Velocity; CachedMotionRotation=Rotation;
     if(!GetActorLocation().Equals(Position,0.) || !GetActorQuat().Equals(Rotation,0.))
         SetActorLocationAndRotation(Position,Rotation,false,nullptr,ETeleportType::TeleportPhysics);
     KinematicVelocityCentimetersPerSecond=Velocity;

@@ -1,3 +1,4 @@
+#include "SimulationPerformance.h"
 #include "PortSiteLogistics.h"
 #include "PortContainerActor.h"
 #include "PortWorkingCrane.h"
@@ -52,6 +53,7 @@ void APortSiteLogistics::UpdateCargoMotion(APortContainerActor* Actor)
 
 void APortSiteLogistics::PublishCargoPresentation()
 {
+    PortSimPerformance::FScope Timing(TEXT("cargo_presentation"));
     for(const auto& Cargo:FixedCargo) if(auto* Box=Cargo.Get())
     {
         UpdateCargoMotion(Box);

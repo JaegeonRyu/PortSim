@@ -4,6 +4,7 @@
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Engine/Engine.h"
+#include "Misc/ScopeLock.h"
 
 // Opt-in wall-clock diagnostics. Inclusive scopes retain the simulation's time
 // steps, sensor periods and interlocks; the profiler never changes their input.
@@ -14,6 +15,7 @@ namespace PortSimPerformance
     {
         bool Enabled=FParse::Param(FCommandLine::Get(),TEXT("PortSimProfile"));
         double Start=FPlatformTime::Seconds(), Last=Start, SimulationStart=-1, Duration=0;
+        FCriticalSection Mutex;
         TMap<FName,FMetric> Metrics;
         double LastSimulation=0;
         FState() { FParse::Value(FCommandLine::Get(),TEXT("PortSimProfileSeconds="),Duration); }
@@ -29,6 +31,7 @@ namespace PortSimPerformance
         ~FScope()
         {
             if(Start==0) return;
+            FScopeLock Lock(&State().Mutex);
             auto& Metric=State().Metrics.FindOrAdd(Name);
             Metric.Seconds+=FPlatformTime::Seconds()-Start; ++Metric.Calls;
         }
@@ -48,6 +51,7 @@ namespace PortSimPerformance
         UE_LOG(LogTemp,Display,TEXT("PORTSIM_PERF_INTERVAL: seconds=%.3f achieved=%.3fx"),
             Now-S.Last,(Simulation-S.LastSimulation)/FMath::Max(.001,Now-S.Last));
         S.Last=Now; S.LastSimulation=Simulation;
+        FScopeLock Lock(&S.Mutex);
         for(const auto& Pair:S.Metrics)
             UE_LOG(LogTemp,Display,TEXT("PORTSIM_PERF_SCOPE: %s total_ms=%.3f calls=%llu mean_ms=%.6f"),
                 *Pair.Key.ToString(),Pair.Value.Seconds*1000,Pair.Value.Calls,

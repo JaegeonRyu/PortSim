@@ -2038,6 +2038,7 @@ void APortSiteLogistics::BeginTrafficFrame()
 
 bool APortSiteLogistics::MoveVehicle(APortAGVActor* Vehicle,FVector Target,float Dt)
 {
+    PortSimPerformance::FScope Timing(TEXT("agv_move_collision"));
     if (!bTrafficIndexReady) BeginTrafficFrame();
     const int32 FleetIndex=Vehicles.IndexOfByKey(Vehicle);
     for(const auto& Recovery:LoadedAGVRecoveries)

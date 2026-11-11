@@ -93,6 +93,8 @@ bool APortSiteLogistics::ValidateLoadedAGVRecoveries(FString& Error) const
 
 bool APortSiteLogistics::CanRecoverLoadedAGV(int32 V,FString& Error) const
 {
+    if(!bLoadedAGVRecoveryEnabled)
+    { Error=TEXT("새 AGV 배정과 R/S 이동·인계는 현재 잠겨 있습니다."); return false; }
     if(!Jobs.IsValidIndex(V) || !Vehicles[V]->bDriveFault)
     { Error=TEXT("적재 AGV의 주행 고장이 필요합니다."); return false; }
     if(IsLoadedRecoveryVehicle(V)) { Error=TEXT("이미 R/S 복구 작업 중입니다."); return false; }
@@ -318,6 +320,7 @@ bool APortSiteLogistics::RequestLoadedAGVRecovery(int32 Failed,FString& Error)
 
 void APortSiteLogistics::AdvanceLoadedAGVRecoveries(float Dt)
 {
+    if(!bLoadedAGVRecoveryEnabled) return;
     for(int32 I=LoadedAGVRecoveries.Num()-1;I>=0;--I)
     {
         auto& R=LoadedAGVRecoveries[I]; auto* Old=Vehicles[R.Failed].Get(); auto* New=Vehicles[R.Replacement].Get();

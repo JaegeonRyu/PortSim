@@ -128,6 +128,7 @@ void FTerminalCheckpoint::Capture(APortContainerActor& O)
         O.CargoMassKg,O.MassKg,O.CoGOffsetCm,O.LocationOwner);
     Values(O.KinematicVelocityCentimetersPerSecond,O.KinematicAccelerationCentimetersPerSecondSquared,
         O.KinematicJerkCentimetersPerSecondCubed,O.DeferredVisualParent,O.DeferredVisualRelative,O.SecuredSweptBounds);
+    Values(O.CachedMotionAlpha,O.CachedMotionPosition,O.CachedMotionVelocity,O.CachedMotionRotation);
     Values(O.PreviousSecuredTransform,O.CurrentSecuredTransform,O.PreviousSecuredVelocity,O.CurrentSecuredVelocity,
         O.PreviousSecuredAcceleration,O.CurrentSecuredAcceleration,O.PreviousSecuredJerk,O.CurrentSecuredJerk,
         O.SecuredFrameDurationSeconds,O.SecuredWindowStart,O.SecuredWindowEnd,O.bHasSecuredMotionFrame);

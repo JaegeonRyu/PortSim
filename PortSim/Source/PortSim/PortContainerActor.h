@@ -71,5 +71,9 @@ private:
     FVector PreviousSecuredJerk=FVector::ZeroVector, CurrentSecuredJerk=FVector::ZeroVector;
     double SecuredFrameDurationSeconds=0;
     double SecuredWindowStart=0,SecuredWindowEnd=1;
+    // Reused only within the current motion frame and exact interpolation alpha.
+    double CachedMotionAlpha=-1;
+    FVector CachedMotionPosition=FVector::ZeroVector, CachedMotionVelocity=FVector::ZeroVector;
+    FQuat CachedMotionRotation=FQuat::Identity;
     bool bHasSecuredMotionFrame=false;
 };

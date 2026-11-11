@@ -1,3 +1,5 @@
+#include "UnchangedUpdates.h"
+#include "SimulationPerformance.h"
 #include "PortAGVActor.h"
 #include "AGVReference.h"
 #include "PortEnvironmentComponent.h"
@@ -39,6 +41,7 @@ void APortAGVActor::ConstrainDynamicsStop()
 
 void APortAGVActor::AdvanceDynamics(double TargetSpeedMps,double CurvaturePerM,double Seconds)
 {
+    PortSimPerformance::FScope Timing(TEXT("agv_dynamics"));
     if(Seconds<=0) return;
     DynamicsSettings.Sanitize();
     // Compatibility for initial speed set by scene fixtures or recovery code.
@@ -78,6 +81,10 @@ void APortAGVActor::UpdateWheelVisuals()
         const FQuat Q=FQuat(FVector::UpVector,Steer*PI/180.)*
             FQuat(FVector::ForwardVector,Spin*PI/180.)*FRotator(90,0,0).Quaternion();
         for(int Part=0;Part<2;++Part) if(WheelMeshes.IsValidIndex((Side*3+Axle)*2+Part))
-            WheelMeshes[(Side*3+Axle)*2+Part]->SetRelativeRotation(Q);
+        {
+            auto* Mesh=WheelMeshes[(Side*3+Axle)*2+Part].Get();
+            if(!PortSimUpdates::SkipUnchanged() || !Mesh->GetRelativeTransform().GetRotation().Equals(Q,0.))
+                Mesh->SetRelativeRotation(Q);
+        }
     }
 }

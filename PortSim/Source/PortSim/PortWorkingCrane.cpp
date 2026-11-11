@@ -1,4 +1,5 @@
 #include "PortWorkingCrane.h"
+#include "UnchangedUpdates.h"
 #include "TerminalReplay.h"
 #include "SimulationPerformance.h"
 #include "PortContainerActor.h"
@@ -211,10 +212,16 @@ void APortWorkingCrane::FlushParts()
     if(!bPartsDirty) return;
     bPartsDirty=false;
     PortSimPerformance::FScope Timing(TEXT("crane_parts"));
-    SetActorLocation(Home+Orientation.RotateVector(FVector(0,Head.Y,0)));
-    Trolley->SetRelativeLocation(FVector(Head.X,0,BeamZ));
-    Spreader->SetRelativeLocationAndRotation(FVector(Head.X,0,Head.Z)+SuspendedOffset,
-        AttitudeState.Rotation(SuspensionState.Yaw));
+    const bool Reuse=PortSimUpdates::SkipUnchanged();
+    const FVector Base=Home+Orientation.RotateVector(FVector(0,Head.Y,0));
+    const FVector TrolleyPosition(Head.X,0,BeamZ), SpreaderPosition=FVector(Head.X,0,Head.Z)+SuspendedOffset;
+    const FQuat SpreaderRotation=AttitudeState.Rotation(SuspensionState.Yaw);
+    if(!Reuse || !GetActorLocation().Equals(Base,0.)) SetActorLocation(Base);
+    if(!Reuse || !Trolley->GetRelativeLocation().Equals(TrolleyPosition,0.))
+        Trolley->SetRelativeLocation(TrolleyPosition);
+    if(!Reuse || !Spreader->GetRelativeLocation().Equals(SpreaderPosition,0.) ||
+        !Spreader->GetRelativeTransform().GetRotation().Equals(SpreaderRotation,0.))
+        Spreader->SetRelativeLocationAndRotation(SpreaderPosition,SpreaderRotation);
     // Telescope geometry is refreshed by AdvanceTelescope only when its length
     // changes. Moving the parent already carries all sensors and lock corners.
     bRopeVisualsDirty=true;
