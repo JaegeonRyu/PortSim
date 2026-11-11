@@ -165,6 +165,9 @@ void FTerminalCheckpoint::Capture(APortWorkingCrane& O)
 
 void FTerminalCheckpoint::Capture(APortSiteLogistics& O)
 {
+    Values(O.FreeCargo,O.MovingCargo,O.FixedCargo,O.CargoBays,O.CargoBayIndex,O.CargoSources,
+        O.CargoMotionVersions,O.PreviousCargoMotions,O.CurrentCargoMotions,O.CargoMotionVersion,
+        O.CargoMotionDuration,O.IndexedCargoCount);
     Values(O.Surface,O.Friction,O.SurfaceActorCount,O.BaselineYard,O.InitialYard,O.ReceivingCapacity,O.QueuedHandoffs,
         O.Delivered,O.DispatchLimit,O.Fault,O.EquipmentFaultEvents,O.STSReassignments,O.YardReassignments);
     Values(O.PeakMovingVehicles,O.PrefetchedJobs,O.PairedTrips,O.PlacedContainers,O.RecoveryEvents,O.RecoverySequence,

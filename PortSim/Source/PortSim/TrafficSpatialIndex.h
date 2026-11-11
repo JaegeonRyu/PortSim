@@ -7,9 +7,10 @@ class FTrafficSpatialIndex
 {
 public:
     static constexpr double CellSize=2000.;
-    void Reset() { Cells.Reset(); Membership.Reset(); }
+    void Reset() { Cells.Reset(); Membership.Reset(); CachedBounds.Reset(); }
     void Remove(int32 ID)
     {
+        CachedBounds.Remove(ID);
         const auto* Previous=Membership.Find(ID);
         if (!Previous) return;
         for (const FIntPoint& Cell:*Previous)
@@ -22,12 +23,17 @@ public:
     }
     void Set(int32 ID,const TArray<FBox>& Bounds)
     {
+        // Stationary vehicles and unchanged reservation envelopes retain their
+        // exact broad phase without rebuilding temporary cell arrays.
+        if(const auto* Previous=CachedBounds.Find(ID); Previous && *Previous==Bounds) return;
         TArray<FIntPoint> Keys;
         for (const FBox& Box:Bounds) Visit(Box,[&](FIntPoint Cell) { Keys.AddUnique(Cell); });
-        if (const auto* Previous=Membership.Find(ID); Previous && *Previous==Keys) return;
+        if (const auto* Previous=Membership.Find(ID); Previous && *Previous==Keys)
+        { CachedBounds.Add(ID,Bounds); return; }
         Remove(ID);
         for (const FIntPoint& Cell:Keys) Cells.FindOrAdd(Cell).Add(ID);
         Membership.Add(ID,MoveTemp(Keys));
+        CachedBounds.Add(ID,Bounds);
     }
     TSet<int32> Query(const TArray<FBox>& Bounds) const
     {
@@ -48,4 +54,5 @@ private:
     }
     TMap<FIntPoint,TSet<int32>> Cells;
     TMap<int32,TArray<FIntPoint>> Membership;
+    TMap<int32,TArray<FBox>> CachedBounds;
 };
