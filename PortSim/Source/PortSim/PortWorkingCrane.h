@@ -6,6 +6,8 @@
 #include "WeatherFriction.h"
 #include "PortWorkingCrane.generated.h"
 
+class USpotLightComponent;
+
 class APortContainerActor;
 class UTextRenderComponent;
 class APortAGVActor;
@@ -30,6 +32,8 @@ class PORTSIM_API APortWorkingCrane : public APortEquipmentActor
 public:
     APortWorkingCrane();
     void Configure(int32 Number, bool bQuayside, FVector Source, FVector Destination, bool bCreateCargo=true);
+    void AddTerminalWorkLights(TArray<TWeakObjectPtr<USpotLightComponent>>& Lights,
+        TArray<TWeakObjectPtr<USpotLightComponent>>& ShadowLights);
     void Advance(float Dt, bool bGlobalPaused);
     bool AssignCargo(APortContainerActor* Cargo, FVector Source, FVector Destination, bool SourceSupport, bool DestinationSupport, APortAGVActor* HandoverVehicle=nullptr,bool ReverseTransfer=false);
     void UpdateShipLandingTarget(FVector Target);

@@ -81,6 +81,7 @@ bool AQuayCrane::ValidateTerminalActors(FString& Error) const
 
 void AQuayCrane::DestroyTerminalActors()
 {
+    ClearTerminalLighting();
     TerminalReplay.Invalidate();
     // Constraints span actors; release them before destroying their physics bodies.
     if (Suspension) Suspension->BreakConstraint();

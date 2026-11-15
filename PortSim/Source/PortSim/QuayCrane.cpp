@@ -164,6 +164,7 @@ void AQuayCrane::BuildYard()
     auto* Atmosphere = NewObject<USkyAtmosphereComponent>(this, TEXT("Atmosphere"));
     AddInstanceComponent(Atmosphere);
     Atmosphere->RegisterComponent();
+    if (bUnifiedTerminal) BuildNightAmbientLight();
 
     // Calibrate once to Epic's clear-sky zenith reference at 1 AU. SkyAtmosphere
     // applies its own ground transmittance as the sun moves. Keep the input above the atmosphere.
@@ -196,15 +197,20 @@ void AQuayCrane::UpdateSolarLightingForDraw()
 {
     const FDateTime LocalTime=Environment->GetLocalDateTime();
     // Roughly 0.04 degrees of sun travel per sample. Skip physics substeps and paused frames.
-    if (LocalTime>=LastSolarUpdate && (LocalTime-LastSolarUpdate).GetTotalSeconds()<10.0) return;
-    LastSolarUpdate=LocalTime;
-    const FPortSolarPosition Sun=PortSolarLighting::Calculate(LocalTime);
-    FogVisual->SetDaylightIlluminance(Sun.EstimateHorizontalIlluminanceLux());
-    const float Intensity=SolarReferenceLux*Sun.RelativeSolarIlluminance();
-    if (Intensity>0.f)
-        SunLight->SetWorldRotation((-Sun.DirectionToSun()).Rotation());
-    if (!FMath::IsNearlyEqual(SunLight->Intensity,Intensity,0.01f))
-        SunLight->SetIntensity(Intensity);
+    if (LocalTime<LastSolarUpdate || (LocalTime-LastSolarUpdate).GetTotalSeconds()>=10.0)
+    {
+        LastSolarUpdate=LocalTime;
+        const FPortSolarPosition Sun=PortSolarLighting::Calculate(LocalTime);
+        UpdateNightAmbientLight(Sun.ElevationDegrees);
+        TerminalDaylightLux=Sun.EstimateHorizontalIlluminanceLux();
+        FogVisual->SetDaylightIlluminance(TerminalDaylightLux);
+        const float Intensity=SolarReferenceLux*Sun.RelativeSolarIlluminance();
+        if (Intensity>0.f)
+            SunLight->SetWorldRotation((-Sun.DirectionToSun()).Rotation());
+        if (!FMath::IsNearlyEqual(SunLight->Intensity,Intensity,0.01f))
+            SunLight->SetIntensity(Intensity);
+    }
+    UpdateTerminalLightingForDraw();
 }
 
 void AQuayCrane::ApplyAppearance()

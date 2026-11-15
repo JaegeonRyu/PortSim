@@ -711,5 +711,9 @@ void AQuayCrane::BuildTerminalSite()
     Label(TEXT("부산항 신항 7부두 | 1,050 미터"),FVector(72,-200,.4),5.f);
     SiteLogistics->Initialize(WorkingCranes,MoveTemp(YardSlots),{Blue,Yellow,Red,Green},bUnifiedTerminal?0:24,FixedYard);
     SiteLogistics->RegisterBerthVehicles(AGVActors);
-    if (bUnifiedTerminal) BuildSupportFleet();
+    if (bUnifiedTerminal)
+    {
+        BuildSupportFleet();
+        BuildTerminalLighting(Root);
+    }
 }

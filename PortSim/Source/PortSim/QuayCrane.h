@@ -23,6 +23,7 @@ class UEngineCustomTimeStep;
 class UPortEnvironmentComponent;
 class UPortFogVisualComponent;
 class UDirectionalLightComponent;
+class USpotLightComponent;
 class UGameViewportClient;
 struct FPortWindInputTestState;
 
@@ -181,10 +182,21 @@ private:
     UPROPERTY(VisibleAnywhere, Category="Environment") TObjectPtr<UPortEnvironmentComponent> Environment;
     UPROPERTY() TObjectPtr<UPortFogVisualComponent> FogVisual;
     UPROPERTY(Transient) TObjectPtr<UDirectionalLightComponent> SunLight;
+    UPROPERTY(Transient) TObjectPtr<UDirectionalLightComponent> NightAmbientLight;
     TWeakObjectPtr<UGameViewportClient> LightingViewport;
     FDateTime LastSolarUpdate;
     float SolarReferenceLux=0.f;
     void UpdateSolarLightingForDraw();
+    void BuildNightAmbientLight();
+    void UpdateNightAmbientLight(double SolarElevation);
+    void BuildTerminalLighting(USceneComponent* SiteRoot);
+    void UpdateTerminalLightingForDraw();
+    void ClearTerminalLighting();
+    TArray<TWeakObjectPtr<USpotLightComponent>> TerminalLights;
+    TArray<TWeakObjectPtr<USpotLightComponent>> TerminalShadowLights;
+    float TerminalDaylightLux=0.f;
+    double NextTerminalShadowUpdate=0.0;
+    bool bTerminalLightsOn=false;
 #if WITH_DEV_AUTOMATION_TESTS
     TSharedPtr<FPortWindInputTestState> WindInputTestState;
     void TickWindInputTest(float Dt);
