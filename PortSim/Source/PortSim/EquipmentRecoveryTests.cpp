@@ -120,7 +120,8 @@ bool FEquipmentRecoveryTest::RunTest(const FString& Parameters)
     Site->YardApproachOwners[0]=1; Site->SimulationTime=8.5; Site->ManageEquipmentFailures();
     TestTrue(TEXT("Recovered pickup cannot steal an approach now owned by another AGV"),Site->Jobs[0].bYardAdmissionSuspended && Site->YardApproachOwners[0]==1);
     Site->YardApproachOwners[0]=INDEX_NONE; Site->SimulationTime=8.75; Site->ManageEquipmentFailures();
-    TestTrue(TEXT("Recovered pickup reacquires its own booked slot and resumes"),!Site->Jobs[0].bYardAdmissionSuspended && Site->YardApproachOwners[0]==0);
+    TestTrue(TEXT("Recovered pickup restores its service booking without occupying the distant approach"),
+        !Site->Jobs[0].bYardAdmissionSuspended && Site->Jobs[0].bYardAdvanceBooking && Site->YardApproachOwners[0]==INDEX_NONE);
     Site->Equipment[2]->CancelUnliftedJob(); Site->STSOwners[0]=INDEX_NONE; Site->STSOwners[1]=0;
     Site->Jobs[0].STS=1; Site->Jobs[0].Stage=1; Site->Manifest[0].STS=1; Failed->RepairSensors();
     Failed->AssignCargo(Box,Before,V->CargoPosition(),false,false,V);

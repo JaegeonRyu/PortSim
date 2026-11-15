@@ -104,6 +104,164 @@ bool FInlandRoadTrafficTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Congested return can select another existing cross-terminal road"),Site->PlanRoadRoute(0,false));
     TestTrue(TEXT("Live initial planning diverts from the occupied north spine"),Site->Jobs[0].ReturnCorridor!=2);
     TestTrue(TEXT("Return still ends at its own depot bay"),Site->Jobs[0].Route.Last().Equals(Site->FleetPark(0),.1));
+
+    // Recorded V112/V123/V141 merge cycle, with V131 preventing another
+    // reverse manoeuvre behind V112. All four poses come from the stalled run.
+    auto* Recorded=World->SpawnActor<APortSiteLogistics>();
+    Recorded->LaneCount=9;
+    Recorded->bDepotParking=Recorded->bReuseFreedApron=true;
+    Recorded->TrafficClock=3000;
+    Recorded->Jobs.SetNum(4);
+    Recorded->Yard.SetNum(4);
+    Recorded->RMGBusy.Init(true,4);
+    Recorded->YardApproachOwners.Init(INDEX_NONE,4);
+    Recorded->STSOwners.Init(INDEX_NONE,9);
+    const FVector RecordedPositions[]={
+        FVector(13888.01541,25802.06964,0.00000),
+        FVector(16338.05487,29820.04230,0.00000),
+        FVector(16336.90881,26320.04814,0.00000),
+        FVector(13887.97942,24306.84449,0.00000)
+    };
+    const double RecordedYaw[]={179.97276359,89.97920087,-90.01581030,-179.98405740};
+    const TArray<TArray<FVector>> RecordedRoutes={
+        {
+            FVector(13887.98018,32769.99933,0.00000),
+            FVector(13843.83029,32991.95571,0.00000),
+            FVector(13718.10211,33180.12123,0.00000),
+            FVector(13529.93649,33305.84941,0.00000),
+            FVector(13307.98028,33349.99930,0.00000),
+            FVector(11926.38938,33349.99925,0.00000),
+            FVector(11704.43298,33394.14914,0.00000),
+            FVector(11516.26740,33519.87732,0.00000),
+            FVector(11390.53918,33708.04295,0.00000),
+            FVector(11346.38943,33929.99929,0.00000),
+            FVector(11346.38942,36909.99921,0.00000),
+            FVector(11346.38941,38689.99915,0.00000),
+            FVector(11346.38939,42869.99904,0.00000),
+            FVector(11302.23951,43091.95544,0.00000),
+            FVector(11176.51132,43280.12096,0.00000),
+            FVector(10988.34570,43405.84914,0.00000),
+            FVector(10766.38936,43449.99899,0.00000),
+            FVector(8204.77423,43449.99903,0.00000),
+            FVector(7982.81783,43405.84914,0.00000)
+        },
+        {
+            FVector(14467.99034,29820.00951,0.00000),
+            FVector(14288.75795,29848.39426,0.00000),
+            FVector(14127.06961,29930.77615,0.00000),
+            FVector(13998.75270,30059.09084,0.00000),
+            FVector(13916.36794,30220.77791,0.00000),
+            FVector(13887.98021,30400.00968,0.00000),
+            FVector(13887.98016,32769.99927,0.00000),
+            FVector(13843.83027,32991.95567,0.00000),
+            FVector(13718.10209,33180.12118,0.00000),
+            FVector(13529.93647,33305.84937,0.00000),
+            FVector(13307.98012,33349.99922,0.00000),
+            FVector(11926.38938,33349.99925,0.00000),
+            FVector(11704.43298,33394.14914,0.00000),
+            FVector(11516.26740,33519.87732,0.00000),
+            FVector(11390.53918,33708.04295,0.00000),
+            FVector(11346.38943,33929.99929,0.00000),
+            FVector(11346.38942,36909.99921,0.00000),
+            FVector(11346.38941,39889.99913,0.00000),
+            FVector(11346.38939,42869.99904,0.00000)
+        },
+        {
+            FVector(14467.99168,26320.01095,0.00000),
+            FVector(14288.75898,26348.39536,0.00000),
+            FVector(14127.07027,26430.77701,0.00000),
+            FVector(13998.75299,26559.09184,0.00000),
+            FVector(13916.36809,26720.77895,0.00000),
+            FVector(13887.98019,26900.01099,0.00000),
+            FVector(13887.98018,28335.00516,0.00000),
+            FVector(13887.98016,32769.99927,0.00000),
+            FVector(13843.83027,32991.95567,0.00000),
+            FVector(13718.10209,33180.12118,0.00000),
+            FVector(13529.93647,33305.84937,0.00000),
+            FVector(13307.98012,33349.99922,0.00000),
+            FVector(11926.38938,33349.99925,0.00000),
+            FVector(11704.43298,33394.14914,0.00000),
+            FVector(11516.26740,33519.87732,0.00000),
+            FVector(11390.53918,33708.04295,0.00000),
+            FVector(11346.38943,33929.99929,0.00000),
+            FVector(11346.38943,36697.49922,0.00000),
+            FVector(11346.38942,39464.99916,0.00000)
+        },
+        {
+            FVector(13887.97970,27727.89607,0.00000),
+            FVector(13887.98011,32769.99927,0.00000),
+            FVector(13843.83022,32991.95566,0.00000),
+            FVector(13718.10204,33180.12123,0.00000),
+            FVector(13529.93654,33305.84942,0.00000),
+            FVector(13307.98021,33349.99930,0.00000),
+            FVector(11926.38938,33349.99925,0.00000),
+            FVector(11704.43298,33394.14914,0.00000),
+            FVector(11516.26740,33519.87732,0.00000),
+            FVector(11390.53918,33708.04295,0.00000),
+            FVector(11346.38943,33929.99929,0.00000),
+            FVector(11346.38942,36519.99923,0.00000),
+            FVector(11346.38942,39109.99916,0.00000),
+            FVector(11346.38941,41699.99909,0.00000),
+            FVector(11346.38941,44289.99903,0.00000),
+            FVector(11346.38940,48179.99893,0.00000),
+            FVector(11346.38939,49469.99889,0.00000),
+            FVector(11302.23951,49691.95529,0.00000),
+            FVector(11176.51132,49880.12081,0.00000)
+        },
+    };
+    for(int32 I=0;I<4;++I)
+    {
+        auto* Vehicle=World->SpawnActor<APortAGVActor>();
+        Vehicle->InitializeVehicle(100+I);
+        Vehicle->ResetVehicle(RecordedPositions[I]);
+        Vehicle->SetActorRotation(FRotator(0,RecordedYaw[I],0));
+        Vehicle->SetFMSHold(true);
+        Recorded->Vehicles.Add(Vehicle);
+        Recorded->TrafficVehicles.Add(Vehicle);
+        auto& Job=Recorded->Jobs[I];
+        Job.Stage=5;
+        Job.Slot=Job.RMG=I;
+        Job.Route=RecordedRoutes[I];
+        Job.RouteStart=RecordedPositions[I];
+        Job.bRouteStartValid=true;
+        auto& YardSlot=Recorded->Yard[I];
+        YardSlot.Crane=I;
+        YardSlot.Handover=RecordedPositions[I];
+    }
+    Recorded->RoadBlockers={{100,101},{101,102},{102,100},{103,100}};
+    Recorded->RoadWaitSince={{100,950},{101,800},{102,790},{103,900}};
+    for(int32 I:{1,2})
+    {
+        const auto& Job=Recorded->Jobs[I];
+        const FVector Position=Recorded->Vehicles[I]->GetActorLocation();
+        const FBox Limit(Position-FVector(6000,6000,500),Position+FVector(6000,6000,500));
+        const auto Corridor=Recorded->BuildRoadCorridor(*Recorded->Vehicles[I],Job.Route[0],
+            &Job.Route,0,Job.Route.Num(),false);
+        TArray<FBox> Pending;
+        for(const auto& Segment:Corridor)
+            if(Segment.Intersect(Limit)) Pending.Add(Segment.Overlap(Limit));
+        Recorded->PendingRoadRequests.Add(100+I,Pending);
+    }
+    bool AllAdvanced=false;
+    for(int32 Step=0;Step<1800 && !AllAdvanced;++Step)
+    {
+        Recorded->TrafficClock+=.05;
+        Recorded->BeginTrafficFrame();
+        AllAdvanced=true;
+        for(int32 I=0;I<3;++I)
+        {
+            if(Recorded->Jobs[I].Route.IsValidIndex(Recorded->Jobs[I].Waypoint))
+                Recorded->Drive(I,.05f);
+            AllAdvanced&=FVector::Dist2D(RecordedPositions[I],
+                Recorded->Vehicles[I]->GetActorLocation())>1400.;
+        }
+    }
+    TestTrue(TEXT("Recorded merge cycle drains using ordinary road reservations"),AllAdvanced);
+    TestTrue(TEXT("The through vehicle clears the merge without reversing into its follower"),
+        Recorded->Vehicles[0]->GetActorLocation().Y>RecordedPositions[0].Y+1400.);
+    TestTrue(TEXT("The close follower keeps its physical position during merge recovery"),
+        Recorded->Vehicles[3]->GetActorLocation().Equals(RecordedPositions[3],.01));
+
     World->DestroyWorld(false);
     return true;
 }

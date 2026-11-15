@@ -73,6 +73,11 @@ void APortAGVActor::ResetVehicle(FVector Position)
     WorkerMarker->SetVisibility(false); WorkerLabel->SetVisibility(false);
     ActiveDeckOffsetCm=0;
     bDriveFault=false;
+    bIncidentSensorFault=bIncidentDestinationMismatch=false;IncidentRebootRemaining=0;
+    IncidentSensorPhase=TEXT("healthy");
+    IncidentFaults.Reset();IncidentResponses.Reset();IncidentNavigationClock=IncidentPacketReadyAt=0;
+    IncidentPositionUncertaintyCm=IncidentWheelMarkCm=0;bIncidentNeedsPositionFix=bIncidentFMSPending=false;IncidentPendingFMSNode=INDEX_NONE;
+    bIncidentRoadHold=false;
     DeckCoGOffsetCm=FVector::ZeroVector;
     Speed=0; CompletedJobs=0; PayloadKg=0; LastCurvaturePerCm=0;
     BatteryPercent=ChargeLimitPercent; bNeedsCharge=bCharging=false;
@@ -138,7 +143,13 @@ FVector APortAGVActor::PlannedMotionDirection(FVector Target) const
 
 bool APortAGVActor::MoveToPosition(FVector Target,float Dt,bool StopAtTarget)
 {
-    if(bDriveFault || !Dynamics.Fault.IsEmpty()) { SetFMSHold(true); return false; }
+    if(bDriveFault || bIncidentSensorFault || !Dynamics.Fault.IsEmpty()) { SetFMSHold(true); return false; }
+    if(IncidentNavigationStop())
+    {
+        Sensors.bFMSHold=true;
+        AdvanceDynamics(0,LastCurvaturePerCm*100.,Dt);
+        return false;
+    }
     const FVector Previous=GetActorLocation();
     const FVector ToTarget=Target-Previous;
     const float Distance=ToTarget.Size2D();
@@ -154,6 +165,7 @@ bool APortAGVActor::MoveToPosition(FVector Target,float Dt,bool StopAtTarget)
         // No waypoint teleport is used.  Final docking keeps the supplied
         // +/-50 mm limit; intermediate road nodes use the steering sweep.
         CorrectAtTransponder(Previous);
+        if(Sensors.bDockingNode&&!Sensors.bTransponderLocked)return false;
         Sensors.LateralSlipCm=0;
         if(StopAtTarget) ConstrainDynamicsStop();
         return true;
@@ -208,7 +220,8 @@ bool APortAGVActor::MoveToPosition(FVector Target,float Dt,bool StopAtTarget)
         FMath::Min(SpeedLimitCmPerSecond(),CurveSpeedCmPerSecond()):SpeedLimitCmPerSecond();
     const float CurveLimit=FMath::Abs(Curvature)>1.e-6f?
         FMath::Sqrt(.5f*TireGripCmPerSecondSquared()/FMath::Abs(Curvature)):SpeedLimitCmPerSecond();
-    const float Limit=FMath::Min3(HeadingLimit,FMSApproachSpeedLimit,CurveLimit);
+    const float NavigationLimit=IncidentFaults.Contains(TEXT("localization_loss"))||bIncidentNeedsPositionFix?100.f:MAX_flt;
+    const float Limit=FMath::Min(NavigationLimit,FMath::Min3(HeadingLimit,FMSApproachSpeedLimit,CurveLimit));
     float Desired=StopAtTarget?FMath::Min(Limit,FMath::Sqrt(2.f*BrakingCmPerSecondSquared()*Distance)):Limit;
     if((Sensors.bDockingNode || FMSAcceptanceCm<=100.f) &&
         Distance<=AGVReference::DockingApproachDistanceCm)
@@ -222,6 +235,16 @@ bool APortAGVActor::MoveToPosition(FVector Target,float Dt,bool StopAtTarget)
 void APortAGVActor::SetFMSCommand(FVector Target,int32 NodeIndex,int32 NodeCount,bool Docking,float AcceptanceCm,
     FVector ExpectedDockingAxis)
 {
+    if(IncidentFaults.Contains(TEXT("fms_disconnect")))
+    {Sensors.bFMSConnected=false;IncidentResponses.Add(TEXT("fms_disconnect"));return;}
+    if(IncidentFaults.Contains(TEXT("fms_delay")))
+    {
+        if(IncidentPendingFMSNode!=NodeIndex||!IncidentPendingFMSTarget.Equals(Target,.01))
+        {IncidentPendingFMSNode=NodeIndex;IncidentPendingFMSTarget=Target;IncidentPacketReadyAt=IncidentNavigationClock+2.;bIncidentFMSPending=true;}
+        if(IncidentNavigationClock<IncidentPacketReadyAt)
+        {IncidentResponses.Add(TEXT("fms_delay"));return;}
+    }
+    bIncidentFMSPending=false;
     const bool NewNode=!Sensors.FMSNextNode.Equals(Target,.01f) || Sensors.FMSNodeIndex!=NodeIndex;
     if(NewNode)
     {
@@ -273,12 +296,21 @@ void APortAGVActor::UpdateOdometry(FVector PreviousPosition)
     const FVector Delta=GetActorLocation()-PreviousPosition;
     // Wheel distance is integrated from angular velocity in AdvanceDynamics.
     // Navigation remains idealized transponder/IMU fusion, not raw wheel-only dead reckoning.
-    Sensors.EstimatedPosition+=Delta;
+    const double WheelDelta=Sensors.WheelOdometryCm-IncidentWheelMarkCm;IncidentWheelMarkCm=Sensors.WheelOdometryCm;
+    if(IncidentFaults.Contains(TEXT("localization_loss")))
+    {
+        const FVector WheelDisplacement=GetActorRightVector()*(Sensors.bReversing?-1:1)*WheelDelta;
+        Sensors.EstimatedPosition+=WheelDisplacement*1.01;
+        // Wheel travel and integrated inertial displacement diverge during slip and steering.
+        IncidentPositionUncertaintyCm+=FVector::Dist2D(WheelDisplacement,Delta)+FMath::Abs(WheelDelta)*.01;
+    }
+    else Sensors.EstimatedPosition+=Delta;
     Sensors.PositionErrorCm=FVector::Dist2D(Sensors.EstimatedPosition,GetActorLocation());
 }
 
 void APortAGVActor::CorrectAtTransponder(FVector Position)
 {
+    if(IncidentFaults.Contains(TEXT("localization_loss"))||bIncidentSensorFault){Sensors.bTransponderLocked=false;return;}
     const int32 X=FMath::RoundToInt(Position.X);
     const int32 Y=FMath::RoundToInt(Position.Y);
     Sensors.CurrentTransponderID=int32(HashCombine(GetTypeHash(X),GetTypeHash(Y))&0x7fffffff);
@@ -288,6 +320,8 @@ void APortAGVActor::CorrectAtTransponder(FVector Position)
     Sensors.EstimatedPosition=Position+BoundedError*AGVReference::PositionAccuracyCm;
     Sensors.PositionErrorCm=AGVReference::PositionAccuracyCm;
     Sensors.bTransponderLocked=true;
+    bIncidentNeedsPositionFix=false;IncidentPositionUncertaintyCm=Sensors.PositionErrorCm;
+    if(IncidentSensorPhase==TEXT("confirming"))IncidentSensorPhase=TEXT("healthy");
 }
 
 float APortAGVActor::SpeedLimitCmPerSecond() const

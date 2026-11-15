@@ -256,6 +256,52 @@ bool APortWorkingCrane::MoveHead(FVector Target,float Dt)
     return MoveSTS(Target,Dt);
 }
 
+bool APortWorkingCrane::STSTransferClear(FVector Target,bool Landing) const
+{
+    const FVector From=Local(Observation.SpreaderPosition);
+    const double Clearance=FMath::Max(50.,STSProfile.Pickup.RecoveryClearance);
+    FBox Shape(-FVector(PortSpreaderTelescope::WidthCm*.5,TelescopeLengthCm*.5,30),
+        FVector(PortSpreaderTelescope::WidthCm*.5,TelescopeLengthCm*.5,30));
+    if(bCarrying)
+    {
+        const FQuat Rotation=Orientation.Inverse()*CargoActor->GetActorQuat();
+        const FVector Half=CargoActor->ExternalDimensionsCm*.5;
+        const FVector Extent=Rotation.RotateVector(FVector(Half.X,0,0)).GetAbs()+
+            Rotation.RotateVector(FVector(0,Half.Y,0)).GetAbs()+
+            Rotation.RotateVector(FVector(0,0,Half.Z)).GetAbs();
+        const FVector Offset=Orientation.UnrotateVector(Observation.CargoPosition-Observation.SpreaderPosition);
+        Shape+=FBox(Offset-Extent,Offset+Extent);
+    }
+    else
+    {
+        // The selected source is ignored by the scene query, so require
+        // clearance above its top before approaching it horizontally.
+        const double SourceTop=Local(Slots[SourceSlot]).Z+CargoActor->ExternalDimensionsCm.Z*.5;
+        if(FMath::Min(From.Z,Target.Z)+Shape.Min.Z<SourceTop+Clearance) return false;
+    }
+    FVector Margin(Clearance);
+    for(int32 Axis=0;Axis<2;++Axis)
+    {
+        const double Acceleration=RailAccelerationLimit(Axis==0?STSProfile.TrolleyAcceleration:STSProfile.GantryAcceleration);
+        if(Acceleration<=0) return false;
+        Margin[Axis]+=FMath::Square(double(Observation.DriveVelocity[Axis]))/(2*Acceleration);
+    }
+    const double Downward=FMath::Min(0.,double(Observation.SpreaderVelocity.Z));
+    Margin.Z+=Downward*Downward/(2*STSProfile.HoistAcceleration);
+    // Reserve the whole rectangular travel volume, including stopping room,
+    // rather than assuming the independent axes follow a straight diagonal.
+    const FBox Corridor(From.ComponentMin(Target)+Shape.Min-Margin,
+        From.ComponentMax(Target)+Shape.Max+Margin);
+    const FVector Centre=Home+Orientation.RotateVector(Corridor.GetCenter());
+    SynchronizeShipQuery(Corridor.TransformBy(FTransform(Orientation,Home)));
+    FCollisionQueryParams Query(SCENE_QUERY_STAT(STSCoordinatedTravel),false);
+    Query.AddIgnoredActor(this);
+    Query.AddIgnoredActor(CargoActor);
+    if(Landing && IsValid(HandoverAGV)) Query.AddIgnoredActor(HandoverAGV);
+    return !GetWorld()->OverlapBlockingTestByChannel(Centre,Orientation,ECC_WorldDynamic,
+        FCollisionShape::MakeBox(Corridor.GetExtent()),Query);
+}
+
 bool APortWorkingCrane::DestinationClear() const
 {
     const FVector Extent(120,IsValid(CargoActor)?CargoActor->ExternalDimensionsCm.Y*.5f-2.f:608.f,127.5);
@@ -272,6 +318,8 @@ void APortWorkingCrane::Stop(const FString& Reason,EPortCraneFault Kind)
     Fault=Reason; FaultType=Kind; SetOperationPaused(true);
     if(Kind==EPortCraneFault::PickupUnavailable)
     {PORTSIM_SIM_LOG(LogTemp,Warning,TEXT("EQUIPMENT_PICKUP_ISOLATED: crane=%d %s"),CraneID,*Reason);}
+    else if(Kind==EPortCraneFault::EquipmentUnavailable)
+    {PORTSIM_SIM_LOG(LogTemp,Warning,TEXT("EQUIPMENT_DEVICE_FAULT: crane=%d %s"),CraneID,*Reason);}
     else if(Kind==EPortCraneFault::SensorUnavailable || Kind==EPortCraneFault::GantryUnavailable)
     { PORTSIM_SIM_LOG(LogTemp,Warning,TEXT("EQUIPMENT_SENSOR_FAULT: crane=%d %s"),CraneID,*Reason); }
     else { PORTSIM_SIM_LOG(LogTemp,Error,TEXT("WORKING_CRANE_%d: %s"),CraneID,*Reason); }
@@ -337,6 +385,7 @@ void APortWorkingCrane::Advance(float Dt,bool bGlobalPaused)
 {
     if(bAppliedSensorFault!=bSensorFault) SetSensorFailure(bSensorFault);
     if(bAppliedGantryFault!=bGantryFault) SetGantryFailure(bGantryFault);
+    if(IncidentFaults.Contains(TEXT("equipment_failure"))&&FaultType!=EPortCraneFault::EquipmentUnavailable&&(Fault.IsEmpty()||IsEquipmentUnavailable()))SetEquipmentFailure(true);
     PortSimPerformance::FScope Profile(TEXT("crane_advance"));
     if(!FMath::IsFinite(Dt) || Dt<=0) { if(Dt==0)AdvanceStep(0,bGlobalPaused);return; }
     if(!bJobActive) { AdvanceStep(Dt,bGlobalPaused); return; }
@@ -398,6 +447,13 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
     }
     const bool bSTSNeedsAGV=AGVAtDestination() && !bAGVHandoverComplete && ((Stage==5 && bDestinationReady) || Stage==6 || Stage==7);
     const bool bRMGNeedsAGV=!AGVAtDestination() && Stage<=2 && IsValid(HandoverAGV);
+    if(IncidentFaults.Contains(TEXT("fail_hoist"))||
+        (IncidentFaults.Contains(TEXT("agv_unavailable"))&&IncidentHandoverWindow()))
+    {
+        if(IncidentFaults.Contains(TEXT("fail_hoist")))IncidentResponses.Add(TEXT("fail_hoist"));
+        if(IncidentFaults.Contains(TEXT("agv_unavailable"))&&IncidentHandoverWindow())IncidentResponses.Add(TEXT("agv_unavailable"));
+        SettleTime=0;MoveSTS(Head,Dt);return;
+    }
     if((bSTSNeedsAGV || bRMGNeedsAGV) && !Observation.bAGVAligned)
     {
         // A newly arrived vehicle can be visible one sensor period after the
@@ -439,7 +495,24 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
     // Pick and lift the next ship box while the vehicle is away; hold it safely
     // above the dock until the returning AGV is stopped beneath the spreader.
     if (Stage==5 && !bDestinationReady) { MoveSTS(StageHoldTarget,Dt); return; }
-    if(!bRailSafetyHold) StageTime+=Dt;
+    if(bSTS && bCoordinatedSTSTravel && Stage==4 && !Observation.bCraneClear)
+    {
+        const FVector Hold=Local(Observation.SpreaderPosition);
+        SettleTime=0;
+        StageTime+=Dt;
+        if(StageTime>STSProfile.StageTimeout) { Stop(TEXT("STS transfer corridor remained obstructed")); return; }
+        MoveSTS(FVector(Hold.X,Hold.Y,SafeZ),Dt);
+        return;
+    }
+    if(bIncidentPlacementFailure&&Stage==5)
+    {SettleTime=0;MoveSTS(Head,Dt);return;}
+    if(!bSTS&&Stage==5&&(IncidentFaults.Contains(TEXT("slot_occupied"))||IncidentFaults.Contains(TEXT("height_mismatch"))))
+    {
+        if(IncidentFaults.Contains(TEXT("slot_occupied")))IncidentResponses.Add(TEXT("slot_occupied"));
+        if(IncidentFaults.Contains(TEXT("height_mismatch")))IncidentResponses.Add(TEXT("height_mismatch"));
+        SettleTime=0;MoveSTS(Head,Dt);return;
+    }
+    if(!bRailSafetyHold && !(bIncidentPickupFailure&&Stage==2) && !(IncidentFaults.Contains(TEXT("fail_release"))&&Stage==5)) StageTime+=Dt;
     const double StageBudget=STSProfile.StageTimeout*(Stage==2?1+PickupRecoveryCount:1);
     if (StageTime>StageBudget) { Stop(TEXT("Job stage timed out")); return; }
     const FVector Source=Stage==3?Local(Pickup.TrialOrigin):Local(Slots[SourceSlot]);
@@ -453,6 +526,24 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
             return;
         }
         AdvancePickup(Dt);return;
+    }
+    if(bSTS && !bReverseTransfer && bCoordinatedSTSTravel && Observation.Timestamp==SimulationTime)
+    {
+        const FVector Measured=Local(Observation.SpreaderPosition);
+        const FVector TravelTarget(Stage==0?Source.X:Destination.X,Stage==0?Source.Y:Destination.Y,Measured.Z);
+        if((Stage==0 || Stage==3) && Observation.SpreaderVelocity.Z>=0 && STSTransferClear(TravelTarget))
+        {
+            // Leave a lifting-only phase as soon as the complete load envelope
+            // clears the route. The next phase continues lifting to SafeZ.
+            ++Stage; StageTime=SettleTime=0;
+        }
+        else if(Stage==4 && bDestinationReady && Observation.bAGVAligned &&
+            FVector::Dist2D(Measured,Destination)<=500.f)
+        {
+            const FVector Landing=Destination+Orientation.UnrotateVector(Observation.SpreaderPosition-Observation.CargoPosition);
+            if(STSTransferClear(Landing,true))
+            { Stage=5; StageTime=SettleTime=0; }
+        }
     }
     FVector Target=StageHoldTarget;
     switch(Stage)
@@ -506,6 +597,8 @@ void APortWorkingCrane::AdvanceStep(float Dt,bool bGlobalPaused)
                 !Observation.CargoPosition.Equals(Slots[1-SourceSlot],STSProfile.LandingTolerance)) { SettleTime=0; return; }
             SettleTime+=Dt;
             if(SettleTime<STSProfile.SettleTime) return;
+            if(IncidentFaults.Contains(TEXT("fail_release")))
+            {IncidentResponses.Add(TEXT("fail_release"));return;}
             // Finish the receiving-side coupling before unlocking or lifting
             // the spreader. Failure leaves the load retained by this crane.
             if(!bSTS && bExternalJobs && AGVAtDestination() && !SecureRMGToAGV())

@@ -64,7 +64,7 @@ void APortWorkingCrane::SamplePickupGeometry()
             FMath::Abs(ActualError.Z)<=C.VerticalTolerance && O.TargetTiltDegrees<=C.TiltTolerance &&
             C.PickupSpeedWithin(O.CornerRelativeVelocity[I]);
         int32 Missing=INDEX_NONE;FParse::Value(FCommandLine::Get(),bSTS?TEXT("PortSimSTSSeatFault="):TEXT("PortSimRMGSeatFault="),Missing);
-        O.CornerSeated[I]=PhysicalSeating[I]&&I!=Missing; All &= O.CornerSeated[I];
+        O.CornerSeated[I]=PhysicalSeating[I]&&I!=Missing&&!(bIncidentPickupFailure&&Stage==2&&I==0); All &= O.CornerSeated[I];
     }
     O.PreviousGeometryTimestamp=O.Timestamp;
     O.bLanded=All&&C.PickupSpeedWithin(O.SpreaderVelocity-O.CargoVelocity);
@@ -76,6 +76,8 @@ void APortWorkingCrane::AdvancePickup(float Dt)
     Pickup.Update(STSProfile.Pickup,Observation,SimulationTime,Dt,STSProfile.SensorMaxAge,Slots[SourceSlot],STSProfile.RatedPayloadKg);
     if(!Pickup.Fault.IsEmpty())
     {
+        if(bIncidentPickupFailure && !bCarrying && Pickup.Failure==ESTSPickupFailure::AlignmentExhausted)
+        {Pickup=FSTSPickupController();Pickup.Reason=TEXT("Injected corner seating feedback unavailable; retain supported cargo and retry");return;}
         if(StartPickupRecovery()) return;
         double MaximumCornerHorizontal=0,MaximumCornerVertical=0;
         for(const FVector& Error:Observation.CornerError)

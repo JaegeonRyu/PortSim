@@ -2,8 +2,8 @@ import {compareOperation, vesselDuration, formatDuration} from './metrics.mjs';
 import {renderFrictionDetails} from './friction-view.mjs';
 import {renderRSPhysics} from './rs-physics-view.mjs';
 import {renderAGVPhysics,renderAGVSensors} from './agv-physics-view.mjs';
-import {weatherHoldStatus,environmentLive,recordLiveSample,livePhysicsResults} from './scenario-view.mjs';
-let physicsActor=null,physicsHistory=[];
+import {IncidentUI,refreshIncidentRuns} from './incident-view.mjs';
+import {weatherHoldStatus} from './scenario-view.mjs';
 import {renderRecoveryDetails, faultDialogTitle} from './recovery-view.mjs';
 import {controlPanel,impactFeed,workerImpactDetails} from './control-view.mjs';
 import {renderTerminalOverview} from './terminal-map.mjs';
@@ -20,6 +20,7 @@ const labels={charging:'충전 중',to_charge:'충전소 이동',charge_return:'
 const dispatchReasons={admitted:'AGV · 야드 확보 완료',agv_approaching:'배정 AGV 접근 중',agv_returning:'배정 AGV 복귀 중',vehicle_pending:'실행 가능한 화물 · 차량 배정 대기',yard_support_pending:'야드 아래층 적재 대기',rmg_approach_reserved:'목적 RMG 접근 예약 대기',rmg_turn_clearance:'RMG 인수·출차 공간 대기',yard_block_reserved:'야드 블록 사용 중',yard_slot_unavailable:'목적 슬롯 사용 불가',source_not_ready:'선박 상부 화물·이전 배치 또는 작업 종료 확인'};
 const stages=['안전 높이 이동','픽업 위치 접근','착좌 · 잠금','화물 인양','인계 위치 이동','하강 · 인계','스프레더 회수','안착 확인'];
 const paths={grid:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',crane:'M3 7h18M7 7V4h5l6 3M7 7v14M4 21h6M13 7v10m-3 0h6v4h-6zM18 7v14m-3 0h6',agv:'M3 9h18v8H3zM6 9V6h12v3M6 17v3m12-3v3M7 13h10',ship:'M3 13l9 4 9-4-3 7H6zM6 13V8h12v5M9 8V4h6v4M2 22l4-1 5 1 6-1 5 1',box:'M3 6h18v13H3zM7 6v13m5-13v13m5-13v13',sensor:'M12 11v2M8 8a6 6 0 0 0 0 8m8-8a6 6 0 0 1 0 8M4 4a11 11 0 0 0 0 16M20 4a11 11 0 0 1 0 16',chart:'M3 3v18h18M7 16l4-6 4 3 6-8',download:'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',search:'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14m5 12 6 6',clock:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18m0 4v6l4 2'};
+Object.assign(paths,{weather:'M6 17h11a4 4 0 0 0 0-8 6 6 0 0 0-11-1 4.5 4.5 0 0 0 0 9M8 21l-1 2m7-2-1 2',pulse:'M2 12h4l3-8 5 16 3-8h5'});
 Object.assign(labels,{emergency_hold:'작업자 안전정지 유지',emergency_braking:'물리 급제동',emergency_detection:'작업자 감지·반응 중'});
 function icon(name){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name]||paths.grid}"/></svg>`;}
 document.querySelectorAll('[data-icon]').forEach(e=>e.innerHTML=icon(e.dataset.icon));
@@ -51,7 +52,7 @@ async function sendEquipmentCommand(action){
 }
 function observeControls(){
  const run=`${state?.run_id}|${state?.control_session}`;
- if(controlRun!==run){impactFocus=null;controlMessages.clear();controlRun=run;physicsHistory=[];}
+ if(controlRun!==run){impactFocus=null;controlMessages.clear();controlRun=run;}
  if(pendingCommand){
   const p=pendingCommand,result=state?.command_results?.find(r=>r.id===p.id);
   if(p.run!==state?.run_id||p.session!==state?.control_session){controlMessages.set(p.actor,'실행 변경으로 명령 확인을 취소했습니다.');pendingCommand=null;}
@@ -92,9 +93,9 @@ function kv(name,value){return `<div class="kv-row"><span>${esc(name)}</span><b>
 function tile(label,value,unit=''){return `<div class="value-tile"><small>${esc(label)}</small><strong>${esc(value)}<em>${esc(unit)}</em></strong></div>`;}
 function actorLink(id){const a=actors().find(x=>x.id===id);return a?`<button class="link" data-actor="${esc(a.id)}">${esc(a.name)} ↗</button>`:'—';}
 function heading(){
- if(view==='agv-physics'){
-  $('#breadcrumb').textContent='실시간 물리 · 돌발상황';$('#page-title').textContent='현재 움직임과 돌발상황을 확인하세요.';
-  $('#page-description').textContent='장비 고장·작업자 진입을 제어하고 센서·하중·슬립·제동을 확인합니다. 날씨는 언리얼 설정을 관측합니다.';
+ if(view==='incidents'){
+  $('#breadcrumb').textContent='실시간 돌발상황 관리';$('#page-title').textContent='상황 발생부터 해결까지, 실시간으로.';
+  $('#page-description').textContent='날씨·장비 오류·작업자 진입을 조합하고 실제 대응·재배정·복구 결과를 확인합니다.';
   document.querySelectorAll('[data-view]').forEach(e=>e.classList.toggle('active',e.dataset.view===view));return;
  }
  const info={overview:['항만 모니터링','항만의 움직임을, 한눈에.','선박에서 야드까지. 장비와 화물, 자동 운반의 모든 연결을 살펴보세요.'],equipment:['장비 탐색기','장비 하나하나, 더 깊이.','실행 중인 액터의 변수와 구성 부품, 연결된 화물을 찾아보세요.'],sensors:['센서 레퍼런스','작은 관측이 만드는 자동화.','STS·AGV·RMG 센서의 부착 부위와 관측값, 제어 판단의 연결을 확인하세요.'],environment:['환경 변수','항만의 환경을 살펴보세요.','날씨 · 기온 · 가시거리 · 풍향 · 풍속 · 파도 · 너울'],performance:['시간 절감 분석','자동화로 확보한 시간.','같은 선박 물량·STS 대수·완료 기준으로 기존 작업과 비교합니다.']}[view];
@@ -107,7 +108,7 @@ function renderChrome(){
  $('#sidebar-status').textContent=live?'실행 데이터 수신 중':state?'마지막 기록 조회 중':'시뮬레이터 실행 대기';
  $('#kpis').className=view==='environment'?'weather-kpis':'kpis';
  const status=live?'엔진 연결됨':state?'저장된 실행 기록':'엔진 연결 대기';
- const playbackMode={replay:'사전 계산 재생',preparing:'재생 버퍼 준비',live_input_hold:'입력 반영 · 1배속',live_physics_batch:'자유 강체 · 고정 간격 배속',live_chaos:'자유 강체 · 실시간',live:'실시간'}[state?.playback_mode]||'실시간';
+ const playbackMode={replay:'사전 계산 재생',preparing:'재생 버퍼 준비',live_input_hold:'입력 반영 · 1배속',live_physics_batch:'고정 간격 배속',live_external_physics:'외부 물리 · 1배속',live_chaos:'자유 강체 · 실시간',live:'실시간'}[state?.playback_mode]||'실시간';
  $('#connection').className=`connection ${live?'live':''}`;
  $('#connection').innerHTML=`<span class="connection-dot"></span><strong>${status}</strong><span>· ${live?'1~2초 간격 갱신':state?`${num(age,0)}초 전 기록 · 현재 실시간 아님`:'언리얼에서 시뮬레이션을 실행하면 액터가 나타납니다.'}</span>${state?.paused?' · 일시정지':''}${state?' · '+weatherHoldStatus(state):''}<span class="tag">${state?esc(state.run_id.slice(0,21)): 'REFERENCE AVAILABLE'}</span>`;
  const fleet=actors().filter(a=>['sts','agv','rmg','rs'].includes(a.type)), running=fleet.filter(a=>a.state==='working').length;
@@ -287,7 +288,7 @@ function physicsDetailsBase(a){
  if(a.dynamics)return dynamicsDetails(a);
  if(!['sts','rmg'].includes(a.type))return `<div class="detail-subhead">${esc(types[a.type]?.[0]||'액터')} 물리 상태</div>${a.type==='container'?kv('질량',`${num(a.mass_kg)} kg`)+kv('무게중심 편차',`${vector(a.cog_m)} m`)+kv('강체 시뮬레이션',a.simulating_physics?'활성':'고정 또는 장비에 부착')+kv('소유 단계',labels[a.state]||a.state):a.type==='agv'?kv('운반 모델','종축 전진/후진 + 조향 운동학')+kv('횡이동','비활성')+kv('최소 내측 회전반경','5.8 m')+kv('최고 속도',`${num(a.speed_limit_mps)} m/s`)+kv('가속도',`${num(a.acceleration_mps2)} m/s²`):kv('표현 방식',a.type==='vessel'?'매니페스트 기반 선박 그룹':a.type==='yard'?'컨테이너 인스턴스 블록':'엔진 액터')}<div class="note">${a.type==='agv'?'차체의 긴 축을 따라서만 이동하며, 조향 곡률은 5.8 m 회전반경으로 제한합니다. 차륜 토크·타이어 접촉·주행 모터의 상세 동역학은 아직 모델링하지 않았습니다.':a.type==='container'?'운반 중 장비에 부착되며 착지 과정에서 강체 물리를 사용합니다. 현재 상태에 따라 활성 여부가 달라집니다.':'이 그룹 자체의 별도 물리 관측값은 없습니다.'}</div>`;
  return `${a.type==='sts'?loads(a):''}<div class="detail-subhead">상세 물리 모델</div><div class="model-card"><h4>개별 와이어 장력 <span class="badge">미구현</span></h4><p>독립 와이어 반력 솔버가 없습니다. 줄걸이 구성, 로프 강성·감쇠, 풀리 및 장력 분배 조건이 필요합니다.</p></div><div class="model-card"><h4>모터 토크 <span class="badge">미구현</span></h4><p>${a.type==='sts'?`권상 정격 ${num(a.hoist_power_w/1000,0)} kW는 속도 상한에 적용됩니다. `:''}드럼 반경, 감속비, 효율 및 회전 관성이 없어 토크 측정값을 표시하지 않습니다.</p></div><div class="model-card"><h4>Anti-sway / Anti-skew <span class="badge">미구현</span></h4><p>사이트 크레인은 수평 스프레더의 운동학적 이동 모델입니다. 흔들림 0°는 제어 성능 결과가 아닌 모델 가정입니다.</p></div><div class="note">이 화면은 현재 엔진의 계산 범위를 보여줍니다. 상세 물리 모델을 구현한 것으로 해석하지 않습니다.</div>`;}
-function inspector(){const a=current();if(!a)return `<aside class="panel inspector"><div class="empty"><strong>장비를 선택하세요</strong>지도나 목록에서 장비를 선택하면<br>실행 데이터와 레퍼런스를 볼 수 있습니다.</div></aside>`;return `<aside class="panel inspector"><div class="panel-head"><div class="inspector-title"><div class="large-thumb">${icon(types[a.type]?.[1])}</div><div><h2>${esc(a.name)}</h2><p>${esc(types[a.type]?.[0]||a.class)}</p></div></div>${badge(a.state)}</div>${workerImpactDetails(state,a)}<div class="detail-tabs" role="tablist" aria-label="장비 상세 탭">${[['overview','개요'],['variables','변수'],['sensors','센서'],['physics','물리 모델'],['failures','오류·돌발상황']].map(([k,n])=>`<button role="tab" aria-selected="${tab===k}" class="detail-tab ${tab===k?'active':''}" data-tab="${k}">${n}</button>`).join('')}</div><div class="detail-body" role="tabpanel">${tab==='failures'?controlPanel(a,state,live,pendingCommand,controlMessages.get(a.id),workerDistance):({overview:overviewDetails,variables:variableDetails,sensors:sensorDetails,physics:physicsDetails}[tab])(a)}</div></aside>`;}
+function inspector(){const a=current();if(!a)return `<aside class="panel inspector"><div class="empty"><strong>장비를 선택하세요</strong>지도나 목록에서 장비를 선택하면<br>실행 데이터와 레퍼런스를 볼 수 있습니다.</div></aside>`;return `<aside class="panel inspector"><div class="panel-head"><div class="inspector-title"><div class="large-thumb">${icon(types[a.type]?.[1])}</div><div><h2>${esc(a.name)}</h2><p>${esc(types[a.type]?.[0]||a.class)}</p></div></div>${badge(a.state)}</div>${workerImpactDetails(state,a)}<div class="detail-tabs" role="tablist" aria-label="장비 상세 탭">${[['overview','개요'],['variables','변수'],['sensors','센서'],['physics','물리 모델'],['failures','오류·돌발상황']].map(([k,n])=>`<button role="tab" aria-selected="${tab===k}" class="detail-tab ${tab===k?'active':''}" data-tab="${k}">${n}</button>`).join('')}</div><div class="detail-body" role="tabpanel">${tab==='failures'?`<p class="note">${esc(a.fault||"돌발상황 관리에서 상태를 확인하고 제어하세요.")}</p><button class="button" data-view="incidents" data-incident-target="${esc(a.id)}">돌발상황 관리 열기</button>`:({overview:overviewDetails,variables:variableDetails,sensors:sensorDetails,physics:physicsDetails}[tab])(a)}</div></aside>`;}
 
 function mountedLayout(a){
  const families=a?.mounted_sensors;if(!families?.length)return craneDrawing({pins:true});
@@ -336,35 +337,20 @@ function performancePage(){
  const input=(key,label,placeholder,type='number')=>`<label>${label}<input data-baseline="${key}" type="${type}" ${type==='number'?'min="0" step="any"':''} value="${esc(baseline[key])}" placeholder="${esc(placeholder)}"></label>`;
  return `<div class="analysis-grid"><section class="panel"><div class="panel-head"><h2>비교 조건</h2><span class="badge">동일 작업 기준</span></div><div class="form-body"><label>비교할 선박<select data-baseline="vessel">${vessels.map(x=>`<option value="${x.id}" ${baseline.vessel===x.id?'selected':''}>${x.name} · ${x.initial_count}개</option>`).join('')||'<option>엔진 데이터 대기</option>'}</select></label><label>작업 완료 기준<select data-baseline="boundary"><option value="handover" ${baseline.boundary==='handover'?'selected':''}>선박 하역 · 마지막 STS→AGV 인계</option><option value="yard" ${baseline.boundary==='yard'?'selected':''}>야드 완료 · 마지막 RMG 적재</option></select><small>기준 시간도 동일한 시작·종료 조건이어야 합니다. 선박별 첫 자동 작업 시작부터 측정합니다.</small></label><div class="section-label">기존 사람 운전 방식</div>${input('hours','선박 1척 작업 시간 (시간)','기존 측정 시간 입력')}<div class="input-pair">${input('count','컨테이너 수 (개)','물량 입력')}${input('cranes','STS 투입 대수','3')}</div>${input('source','기준 자료 / 작업 조건','예: 작업일지, 정지·휴식 포함 여부','text')}<div class="section-label">자동화 방식</div><label>결과 출처<select data-baseline="mode"><option value="engine" ${baseline.mode==='engine'?'selected':''}>선택 선박의 엔진 완료 기록</option><option value="manual" ${baseline.mode==='manual'?'selected':''}>직접 입력 · 계산 시나리오</option></select></label>${baseline.mode==='manual'?`${input('manualHours','자동화 시간 (시간)','비교할 시간 입력')}<div class="input-pair">${input('manualCount','자동화 물량 (개)','동일 물량')}${input('manualCranes','자동화 STS 대수','3')}</div><div class="note amber">직접 입력한 결과는 엔진 검증 결과가 아닙니다.</div>`:kv('자동화 투입',`${count??'—'}개 · STS 3대`)}<button id="calculate" class="button primary" style="width:100%;margin-top:15px">절감률 계산</button><small>입력 기준은 이 브라우저에 저장됩니다.</small><button id="reset-baseline" class="inline-link">비교 입력 초기화</button></div></section><section class="panel"><div class="panel-head"><div><h2>시간 절감 비교</h2><p>${baseline.boundary==='yard'?'선박 → 야드 최종 적재':'선박 → AGV 최종 인계'} · 시뮬레이션 시간</p></div><span class="badge ${baseline.mode==='manual'?'recorded':''}">${baseline.mode==='manual'?'직접 입력 시나리오':'엔진 기록'}</span></div><div class="result-body"><div class="result-hero"><div class="result-label">기준 운용 대비 시간 절감률</div><strong>${result.ok?`${num(result.percent,1)}<small>%</small>`:'—'}</strong><p>${result.ok?`${result.savedSeconds>=0?'절감':'증가'} 시간 ${formatDuration(Math.abs(result.savedSeconds))}${baseline.mode==='manual'?' · 사용자 입력값으로 계산':''}`:esc(reason)}</p></div>${result.ok?`<div class="bar-row"><div class="bar-label"><span>기존 사람 운전</span><span class="mono">${formatDuration(result.baselineSeconds)}</span></div><div class="bar-track"><div class="bar" style="width:${result.baselineSeconds/Math.max(result.baselineSeconds,result.automatedSeconds)*100}%"></div></div></div><div class="bar-row"><div class="bar-label"><span>자동화 운전</span><span class="mono">${formatDuration(result.automatedSeconds)}</span></div><div class="bar-track auto"><div class="bar" style="width:${result.automatedSeconds/Math.max(result.baselineSeconds,result.automatedSeconds)*100}%"></div></div></div>`:`<div class="empty"><strong>${v?`${v.name} · ${v.initial_count}개`:'완료 기록 대기'}</strong>STS 인계 ${v?.unloaded??0}개 · 야드 적재 ${v?.placed??0}개<br>현재까지의 경과 ${formatDuration(v?.started_at>=0?(state?.simulation_seconds-v.started_at):null)}</div>`}<div class="formula">절감률 = (기준 작업 시간 − 자동화 작업 시간) ÷ 기준 작업 시간 × 100<br>음수는 시간 증가입니다. 배속으로 줄어든 실제 실행 시간은 계산에 사용하지 않습니다.</div><div class="note">컨테이너 수와 STS 대수가 다르면 계산하지 않습니다. 선박 적층·화물 질량·경로·휴식 및 대기 포함 조건도 맞춰 해석하세요. 여러 장비의 작업 시간을 합산하지 않고 선박 전체 완료 시각을 사용합니다.</div>${baseline.source?kv('기준 자료',baseline.source):''}</div></section></div><div class="vessel-cards">${vessels.map(v=>`<article class="vessel-card"><h3>${v.name}</h3><div class="progress"><span style="width:${v.unloaded/v.initial_count*100}%"></span></div><p>하역 ${v.unloaded} / ${v.initial_count}개 · 야드 ${v.placed}개<br>하역 완료 ${formatDuration(vesselDuration(v,'handover'))}<br>야드 완료 ${formatDuration(vesselDuration(v,'yard'))}</p><button class="inline-link" data-performance="${v.id}">이 선박으로 비교 →</button></article>`).join('')}</div>`;
 }
-function physicsVehicle(){
- const c=current();if(!physicsActor&&c?.type==='agv')physicsActor=c.id;
- let a=actors().find(a=>a.id===physicsActor&&a.type==='agv');
- if(!a){a=actors().find(a=>a.type==='agv'&&a.speed_mps>1)||actors().find(a=>a.type==='agv');physicsActor=a?.id;}
- return a;
-}
-function scenarioPage(){
- const a=physicsVehicle(),target=current();
- const options=actors().filter(a=>['agv','sts','rmg'].includes(a.type));
- return `<div class="scenario-grid"><div class="scenario-controls"><section class="panel"><div class="form-body" data-live-environment>${environmentLive(state,live)}</div></section><section class="panel"><div class="panel-head"><h2>장비 고장 · 작업자 진입</h2></div><div class="form-body"><label>제어할 장비<select id="scenario-target">${options.map(o=>`<option value="${esc(o.id)}" ${target?.id===o.id?'selected':''}>${esc(o.name)}</option>`).join('')}</select></label><div data-scenario-equipment>${controlPanel(target,state,live,pendingCommand,controlMessages.get(target?.id),workerDistance)}</div></div></section></div><div><label class="scenario-watch">관측할 AGV<select id="physics-actor">${options.filter(o=>o.type==='agv').map(o=>`<option value="${esc(o.id)}" ${a?.id===o.id?'selected':''}>${esc(o.name)}</option>`).join('')}</select></label><div data-live-physics>${livePhysicsResults(state,live,a,physicsHistory)}</div></div></div><div data-scenario-map>${map()+impactFeed(state,impactFocus,live)}</div>`;
-}
+const incidentUI=new IncidentUI({snapshot:()=>({state,live}),render:()=>{if(view==='incidents')renderContent();},notify:toast,send:async(command)=>{
+ const response=await fetch('/api/equipment-command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:state.run_id,control_session:state.control_session,...command})});
+ const data=await response.json();if(!response.ok)throw Error(data.message||'명령 전송 실패');return data;
+}});
+function scenarioPage(){return incidentUI.view(state,live)+`<div data-scenario-map>${map()+impactFeed(state,null,live)}</div>`;}
 function updateScenario(){
- const a=physicsVehicle();physicsHistory=recordLiveSample(physicsHistory,state,a);
- if(!$('[data-live-physics]')){renderContent();return;}
- $('[data-live-physics]').innerHTML=livePhysicsResults(state,live,a,physicsHistory);
- $('[data-live-environment]').innerHTML=environmentLive(state,live);
- // Keep draft fields, focus and expanded controls intact while observations update.
- const controls=$('[data-scenario-equipment]');
- if(!pointerHeld&&!controls.contains(document.activeElement)){
-  const mode=controls.querySelector('[data-fault-mode]')?.value;
-  controls.innerHTML=controlPanel(current(),state,live,pendingCommand,controlMessages.get(current()?.id),workerDistance);
-  if(mode&&controls.querySelector('[data-fault-mode]'))controls.querySelector('[data-fault-mode]').value=mode;
+ incidentUI.observe(state);
+ const panel=$('[data-incident-live]');if(!panel){renderContent();return;}
+ if(!pointerHeld)refreshIncidentRuns(panel,state,live);
+ document.querySelectorAll('.incident-composer fieldset,.incident-weather-panel fieldset').forEach(fieldset=>fieldset.disabled=!live||!state?.incident_control_supported||!!state?.fault||incidentUI.busy);
+ const message=$('.incident-composer .control-message');if(message)message.textContent=incidentUI.message;
+ if(!pointerHeld&&!document.activeElement?.closest('[data-scenario-map]')){
+  const container=$('[data-scenario-map]');if(container)container.innerHTML=map()+impactFeed(state,null,live);
  }
- if(!pointerHeld){
-  const container=$('[data-scenario-map]'),open=[...container.querySelectorAll('details')].map((d,i)=>d.open?i:-1);
-  container.innerHTML=map()+impactFeed(state,impactFocus,live);
-  const details=container.querySelectorAll('details');for(const i of open)if(i>=0&&details[i])details[i].open=true;
- }
- if(!live)document.querySelectorAll('.scenario-controls input,.scenario-controls button,.scenario-controls select').forEach(el=>el.disabled=true);
 }
 function renderContent(){
  lastRendered=`${state?.generated_at}|${live}`;
@@ -372,7 +358,14 @@ function renderContent(){
  if(view==='sensors')$('#view-content').innerHTML=sensorsPage();
  else if(view==='environment')$('#view-content').innerHTML=renderEnvironment(state,{live,age});
  else if(view==='performance')$('#view-content').innerHTML=performancePage();
- else if(view==='agv-physics')$('#view-content').innerHTML=scenarioPage();
+ else if(view==='incidents'){
+  const previous=$('[data-incident-live]');
+  $('#view-content').innerHTML=scenarioPage();
+  if(previous){
+   $('[data-incident-live]').replaceWith(previous);
+   refreshIncidentRuns(previous,state,live);
+  }
+ }
  else $('#view-content').innerHTML=`<div class="${view==='equipment'?'full-equipment':''}"><div class="monitor-grid"><div>${view==='overview'?map()+impactFeed(state,impactFocus,live)+stowagePlans():''}${equipmentTable()}</div>${inspector()}</div></div>`;
 }
 function choose(id){selected=id;renderContent();}
@@ -387,9 +380,9 @@ async function poll(){
   }
   observeControls();
   updateFaultDialog();
-  if(!current())selected=(view==='agv-physics'?physicsVehicle()?.id:actors().find(a=>a.type==='sts')?.id)||null;
+  if(!current())selected=actors().find(a=>a.type==='sts')?.id||null;
   renderChrome();
-  if(view==='agv-physics'){if(liveChanged)renderContent();updateScenario();lastRendered=`${state?.generated_at}|${live}`;return;}
+  if(view==='incidents'){if(liveChanged)renderContent();updateScenario();lastRendered=`${state?.generated_at}|${live}`;return;}
   if(lastRendered!==`${state?.generated_at}|${live}`&&!pointerHeld&&(!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName)||(view==='sensors'&&document.activeElement?.id==='sensor-actor'))&&!document.querySelector('details[open]')&&!window.getSelection()?.toString()){
    if(view==='sensors' && $('#sensor-actor')?.options.length===actors().filter(a=>['sts','rmg'].includes(a.type)).length){
     const next=document.createElement('div');next.innerHTML=sensorsPage();
@@ -401,17 +394,18 @@ async function poll(){
   }
  }catch{
   live=false;$('#connection').className='connection';$('#connection').textContent='로컬 서버 연결이 끊겼습니다. Dashboard 실행 창을 확인하세요.';
-  if(view==='agv-physics'&&state)updateScenario();
+  if(view==='incidents'&&state)updateScenario();
   $('#sidebar-status').textContent='서버 연결 끊김';
  }finally{busy=false;}
 }
 document.addEventListener('click',e=>{
  const b=e.target.closest('button,[data-actor],[data-sensor]');if(!b)return;
- if(b.dataset.view){view=b.dataset.view;page=0;if(view==='agv-physics'&&current()?.type!=='agv')selected=physicsVehicle()?.id||selected;renderContent();}
+ if(b.dataset.view){view=b.dataset.view;page=0;if(b.dataset.incidentTarget)incidentUI.draft.target=b.dataset.incidentTarget;renderContent();}
  if(b.dataset.type){filter=b.dataset.type;view='equipment';page=0;query='';selected=actors().find(a=>a.type===filter)?.id||selected;renderContent();}
  if(b.dataset.filter){filter=b.dataset.filter;page=0;renderContent();}
  if(b.dataset.actor)choose(b.dataset.actor);
  if(b.dataset.tab){tab=b.dataset.tab;renderContent();}
+ if(b.dataset.incidentAction)incidentUI.handle(b);
  if(b.dataset.command)sendEquipmentCommand(b.dataset.command);
  if(b.dataset.impact){impactFocus=null;renderContent();}
  if(b.dataset.mapView){mapMode=b.dataset.mapView;renderContent();}
@@ -432,11 +426,12 @@ document.addEventListener('pointerdown',()=>pointerHeld=true);
 document.addEventListener('pointerup',()=>{setTimeout(()=>pointerHeld=false,250);});
 document.addEventListener('pointercancel',()=>pointerHeld=false);
 document.addEventListener('input',e=>{
+ if(e.target.dataset.incidentField||e.target.dataset.incidentWeather)incidentUI.input(e.target);
  if(e.target.hasAttribute('data-worker-distance'))workerDistance=Number(e.target.value);
  if(e.target.id==='actor-search'){query=e.target.value;page=0;const start=e.target.selectionStart;renderContent();const el=$('#actor-search');el.focus();el.setSelectionRange(start,start);}
  if(e.target.dataset.baseline){baseline[e.target.dataset.baseline]=e.target.value;}
 });
-document.addEventListener('change',e=>{if(e.target.id==='scenario-target'){selected=e.target.value;renderContent();}if(e.target.id==='physics-actor'){physicsActor=e.target.value;physicsHistory=[];renderContent();}if(e.target.id==='sensor-actor'){selected=e.target.value;sensor=sensorRefs(current())[0]?.id||sensor;renderContent();}if(e.target.dataset.baseline){baseline[e.target.dataset.baseline]=e.target.value;saveBaseline();if(e.target.tagName==='SELECT')renderContent();}});
+document.addEventListener('change',e=>{if(['target','action','trigger'].includes(e.target.dataset.incidentField)){incidentUI.input(e.target);if(e.target.dataset.incidentField==='target')incidentUI.draft.trigger='immediate';if(e.target.dataset.incidentField==='action')incidentUI.draft.trigger=({fail_pickup:'pickup',fail_placement:'placing',worker_enter:'loaded',misdelivery:'loaded',localization_loss:'moving',fms_disconnect:'moving',fms_delay:'moving',road_block:'moving',fail_release:'release',fail_hoist:'placing',agv_unavailable:'handover',slot_occupied:'placing',height_mismatch:'placing'})[e.target.value]||'immediate';renderContent();}if(e.target.id==='scenario-target'){selected=e.target.value;renderContent();}if(e.target.id==='sensor-actor'){selected=e.target.value;sensor=sensorRefs(current())[0]?.id||sensor;renderContent();}if(e.target.dataset.baseline){baseline[e.target.dataset.baseline]=e.target.value;saveBaseline();if(e.target.tagName==='SELECT')renderContent();}});
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-actor],[data-sensor]')){e.preventDefault();e.target.dispatchEvent(new MouseEvent('click',{bubbles:true}));}});
 async function init(){try{const r=await fetch('/api/reference');if(!r.ok)throw Error();const data=await r.json();reference=data.reference;settings=data.settings;}catch{toast('STS 레퍼런스를 읽지 못했습니다. 프로젝트 경로를 확인하세요.');}await poll();renderContent();setInterval(poll,1000);}
 init();

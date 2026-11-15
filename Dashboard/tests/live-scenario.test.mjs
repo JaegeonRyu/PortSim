@@ -35,7 +35,7 @@ test('live page renders current values and preserves sample identity across paus
  assert.match(environmentLive(s,true),/0.123/);
 });
 
-test('web cannot modify weather even if a client invents the old capability',async t=>{
+test('weather changes require the new engine incident capability; unsupported surface edits remain rejected',async t=>{
  const repo=await mkdtemp(path.join(tmpdir(),'portsim-scenario-')),dir=path.join(repo,'PortSim/Saved/Dashboard');
  await mkdir(dir,{recursive:true});
  const state={schema_version:1,run_id:'live',control_session:'a'.repeat(32),generated_at:new Date().toISOString(),actors:[{id:'agv',type:'agv'}],environment_command_supported:true};
@@ -45,6 +45,6 @@ test('web cannot modify weather even if a client invents the old capability',asy
  t.after(async()=>{server.closeAllConnections();await new Promise(r=>server.close(r));if(!path.resolve(repo).startsWith(path.join(tmpdir(),'portsim-scenario-')))throw Error('Unexpected path');await rm(repo,{recursive:true,force:true});});
  for(const actor_id of ['environment','agv'])for(const action of ['set_environment','set_surface']){
   const response=await fetch(url+'/api/equipment-command',{method:'POST',headers:{Origin:url,'Content-Type':'application/json'},body:JSON.stringify({run_id:state.run_id,control_session:state.control_session,actor_id,action,rain_mm_h:50})});
-  assert.equal(response.status,400);
+  assert.equal(response.status,action==='set_environment'?409:400);
  }
 });

@@ -53,34 +53,57 @@ void APortSiteLogistics::ReassignBlockedParkingVehicles()
             V->bDriveFault || V->Speed>.1f || TrafficRecoveryTargets.Contains(V->VehicleID) ||
             !V->GetActorLocation().Equals(FleetPark(Old),AGVReference::DockingAccuracyCm+1.f)) continue;
         const double* Since=RoadWaitSince.Find(V->VehicleID);
-        if(!Since || TrafficClock-*Since<45. || !V->Sensors.bFMSHold) continue;
+        if(!Since || TrafficClock-*Since<45. || !V->Sensors.bFMSHold || TrafficClock<J.DispatchRetryAfter) continue;
         const int32 S=J.STS;
-        if(J.Stage==7)
+        const bool Standby=J.Stage==7;
+        if(Standby && !CanReleaseParkedStandby(Old)) continue;
+        if(!Standby && (!Equipment.IsValidIndex(YardCraneCount+S) || !CraneAvailable(YardCraneCount+S) ||
+            !STSOwners.IsValidIndex(S) || STSOwners[S]!=Old ||
+            Equipment[YardCraneCount+S]->GetHandoverVehicle()!=V)) continue;
+
+        // Ordinary queues can clear without a swap. Keep the current mission
+        // and its wait age until a replacement has a genuinely usable exit.
+        J.DispatchRetryAfter=TrafficClock+10.;
+        if(bTrafficIndexReady && J.Route.IsValidIndex(J.Waypoint))
         {
-            // No container or crane task belongs to a standby mission yet.
-            if(!CanReleaseParkedStandby(Old))continue;
-            NextVehicles[S]=INDEX_NONE;
+            const FVector Target=J.Route[J.Waypoint];
+            const auto Corridor=BuildRoadCorridor(*V,Target,&J.Route,J.Waypoint,J.Route.Num(),false);
+            if(FindRoadCorridorBlocker(*V,Target,Corridor,&J.Route,J.Waypoint)==INDEX_NONE) continue;
         }
+        const FVector Goal=Standby?QueueQuay(S):TransferQuay(J);
+        TArray<TPair<double,int32>> Candidates;
+        for(int32 I=0;I<Jobs.Num();++I) if(I!=Old && Vehicles[I]->CanAcceptWork())
+        {
+            const bool Warm=!Standby && NextVehicles.IsValidIndex(S) && NextVehicles[S]==I &&
+                Jobs[I].Stage==8 && Vehicles[I]->Speed<=.1f;
+            if(!Warm && (Jobs[I].Stage!=0 || TrafficClock<Jobs[I].DispatchRetryAfter || !ParkingDepartureAvailable(I))) continue;
+            const FVector Position=Vehicles[I]->GetActorLocation();
+            const double Cost=Warm?FVector::Dist2D(Position,Goal)/AGVDispatchPolicy::CruiseSpeedCmPerSecond:
+                AGVDispatchPolicy::Score(Position,Goal,S,Vehicles[I]->CompletedJobs,0,I);
+            Candidates.Emplace(Cost,I);
+        }
+        Candidates.StableSort([](const auto& A,const auto& B) { return A.Key<B.Key; });
+        int32 Best=INDEX_NONE;
+        for(const auto& Candidate:Candidates)
+        {
+            const int32 I=Candidate.Value;
+            auto Saved=MoveTemp(Jobs[I]);
+            const float SavedOffset=Vehicles[I]->ActiveDeckOffsetCm;
+            Jobs[I]=J;
+            Vehicles[I]->ActiveDeckOffsetCm=J.CargoDeckOffsetCm;
+            if(PlanRoadRoute(I,false,true))
+            {
+                Best=I;
+                break;
+            }
+            Jobs[I]=MoveTemp(Saved);
+            Vehicles[I]->ActiveDeckOffsetCm=SavedOffset;
+        }
+        if(Best==INDEX_NONE) continue;
+
+        if(Standby) NextVehicles[S]=Best;
         else
         {
-            if(!Equipment.IsValidIndex(YardCraneCount+S) || !CraneAvailable(YardCraneCount+S) ||
-                !STSOwners.IsValidIndex(S) || STSOwners[S]!=Old ||
-                Equipment[YardCraneCount+S]->GetHandoverVehicle()!=V)continue;
-            int32 Best=INDEX_NONE;double BestCost=TNumericLimits<double>::Max();
-            for(int32 I=0;I<Jobs.Num();++I) if(I!=Old && Vehicles[I]->CanAcceptWork())
-            {
-                const bool Warm=NextVehicles.IsValidIndex(S) && NextVehicles[S]==I && Jobs[I].Stage==8 && Vehicles[I]->Speed<=.1f;
-                if(!Warm && (Jobs[I].Stage!=0 || TrafficClock<Jobs[I].DispatchRetryAfter || !ParkingDepartureAvailable(I)))continue;
-                const double Cost=Warm?FVector::Dist2D(Vehicles[I]->GetActorLocation(),TransferQuay(J))/600.:
-                    AGVDispatchPolicy::Score(Vehicles[I]->GetActorLocation(),TransferQuay(J),S,
-                        Vehicles[I]->CompletedJobs,0,I);
-                if(Cost<BestCost) {BestCost=Cost;Best=I;}
-            }
-            if(Best==INDEX_NONE)continue;
-            const auto Saved=Jobs[Best];const float SavedOffset=Vehicles[Best]->ActiveDeckOffsetCm;
-            Jobs[Best]=J;Vehicles[Best]->ActiveDeckOffsetCm=J.CargoDeckOffsetCm;
-            if(!PlanRoadRoute(Best,false))
-            {Jobs[Best]=Saved;Jobs[Best].DispatchRetryAfter=TrafficClock+60;Vehicles[Best]->ActiveDeckOffsetCm=SavedOffset;continue;}
             if(NextVehicles[S]==Best)NextVehicles[S]=INDEX_NONE;
             STSOwners[S]=Best;
             if(Yard.IsValidIndex(J.Slot))
@@ -96,5 +119,8 @@ void APortSiteLogistics::ReassignBlockedParkingVehicles()
         // The old vehicle never left its verified bay, so clearing an unentered
         // request changes neither its physical pose nor any attached cargo.
         ReleaseUnenteredParkingMission(Old);
+        // Let the selected vehicle request its corridor before checking
+        // another replacement against the same road in the next step.
+        return;
     }
 }

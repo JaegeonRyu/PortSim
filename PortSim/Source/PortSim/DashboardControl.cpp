@@ -40,6 +40,14 @@ bool APortSiteLogistics::ApplyDashboardCommand(const FJsonObject& C,FString& Err
     if(!C.TryGetStringField(TEXT("created_at"),Created) || !FDateTime::ParseIso8601(*Created,Sent) ||
         (FDateTime::UtcNow()-Sent).GetTotalSeconds()>10 || (Sent-FDateTime::UtcNow()).GetTotalSeconds()>2)
     { Error=TEXT("명령 유효 시간이 지났습니다."); return false; }
+    if(C.TryGetStringField(TEXT("action"),Action)&&
+        (PortIncident::Extension(Action)||Action==TEXT("scenario_start")||Action==TEXT("scenario_cancel")||Action==TEXT("set_environment")||Action==TEXT("incident_clear")||
+         Action==TEXT("fail_pickup")||Action==TEXT("fail_placement")||Action==TEXT("misdelivery")||
+         (Action==TEXT("fail_reboot")&&C.TryGetStringField(TEXT("actor_id"),ActorID)&&Vehicles.ContainsByPredicate([&](const auto& V){return V->GetName()==ActorID;}))))
+    {
+        if(!Fault.IsEmpty()){Error=TEXT("전체 안전 정지 원인을 먼저 해결하세요.");return false;}
+        return ApplyIncidentCommand(C,Error);
+    }
     if(!C.TryGetStringField(TEXT("actor_id"),ActorID) || !C.TryGetStringField(TEXT("action"),Action) ||
         (Action!=TEXT("fail") && Action!=TEXT("fail_reboot") && Action!=TEXT("fail_sensor_repair") && Action!=TEXT("fail_gantry") && Action!=TEXT("repair") &&
          Action!=TEXT("replace_loaded_agv") && Action!=TEXT("test_wet_worker") && Action!=TEXT("test_wet_unsecured") && Action!=TEXT("worker_enter") && Action!=TEXT("clear_worker")))
@@ -50,19 +58,20 @@ bool APortSiteLogistics::ApplyDashboardCommand(const FJsonObject& C,FString& Err
         if(Action==TEXT("replace_loaded_agv") || Action.StartsWith(TEXT("test_")) || Action==TEXT("worker_enter") || Action==TEXT("clear_worker")){Error=TEXT("AGV 전용 돌발상황 명령입니다.");return false;}
         if(!Crane->Fault.IsEmpty() && !Crane->IsEquipmentUnavailable())
         { Error=TEXT("센서 수리로 안전 오류를 해제할 수 없습니다."); return false; }
-        if(Action==TEXT("repair")) Crane->RepairEquipment();
+        if(Action==TEXT("repair")) {Crane->bIncidentPickupFailure=Crane->bIncidentPlacementFailure=false;Crane->RepairEquipment();}
         else if(Action==TEXT("fail_gantry")) Crane->SetGantryFailure(true);
         else
         {
             if(Action==TEXT("fail_reboot") || Action==TEXT("fail_sensor_repair"))
             {
-                Crane->bAutoSensorRecovery=true;
+                Crane->bAutoSensorRecovery=Action!=TEXT("fail_reboot");
                 Crane->SensorRepairMethod=Action==TEXT("fail_reboot")?EPortSensorRepairMethod::Reboot:EPortSensorRepairMethod::Technician;
                 // Only the selected automation-camera fault leaves independent
                 // travel safety available. Generic required-sensor failure does not.
                 Crane->bAllowSensorFaultEvacuation=Action==TEXT("fail_reboot");
             }
             Crane->SetSensorFailure(true);
+            if(Action==TEXT("fail_reboot"))Crane->SensorRepairPhase=TEXT("failed");
         }
         // Also coordinate while paused, so the acknowledged assignment state
         // is visible without starting physical motion during a pause.
@@ -106,6 +115,7 @@ bool APortSiteLogistics::ApplyDashboardCommand(const FJsonObject& C,FString& Err
         }
         if(V->Emergency.Active){Error=TEXT("돌발상황 시험을 먼저 종료하세요.");return false;}
         if(Action!=TEXT("fail") && Action!=TEXT("repair")) { Error=TEXT("AGV에는 해당 크레인 고장을 적용할 수 없습니다."); return false; }
+        if(Action==TEXT("repair")){V->bIncidentSensorFault=V->bIncidentDestinationMismatch=false;V->IncidentRebootRemaining=0;V->IncidentSensorPhase=TEXT("healthy");}
         const bool Failed=Action==TEXT("fail"),Changed=V->bDriveFault!=Failed;
         V->SetDriveFailure(Failed);
         if(Changed) { if(Failed) ++EquipmentFaultEvents; RecordRecoveryEvent(Failed?TEXT("fault"):TEXT("repair"),V,V,V); }
@@ -130,7 +140,7 @@ void APortSiteLogistics::ProcessDashboardCommands()
         if(!FGuid::ParseExact(ID,EGuidFormats::Digits,Guid)) continue;
         if(SeenDashboardCommands.Contains(ID)) { IFileManager::Get().Delete(*Path); continue; }
         FString Text;
-        if(IFileManager::Get().FileSize(*Path)>2048 || !FFileHelper::LoadFileToString(Text,*Path))
+        if(IFileManager::Get().FileSize(*Path)>16384 || !FFileHelper::LoadFileToString(Text,*Path))
         { IFileManager::Get().Delete(*Path); continue; }
         TSharedPtr<FJsonObject> C; FString Error; bool Applied=false;
         if(FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text),C) && C.IsValid())

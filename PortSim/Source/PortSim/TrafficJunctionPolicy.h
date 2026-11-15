@@ -72,6 +72,18 @@ namespace TrafficJunctionPolicy
         return IDA<IDB;
     }
 
+    inline bool WaitsFor(const TMap<int32,int32>& Blockers,int32 Waiting,int32 Vehicle)
+    {
+        for(int32 Step=0;Step<Blockers.Num();++Step)
+        {
+            const int32* Next=Blockers.Find(Waiting);
+            if(!Next) return false;
+            if(*Next==Vehicle) return true;
+            Waiting=*Next;
+        }
+        return false;
+    }
+
     // A bounded head start in seconds, not an absolute right of way. Aging
     // always lets a sufficiently older return beat a fresh pickup request.
     inline double MissionBonus(bool Pickup,double SuspendedWaitSeconds,bool ClearingSTS)

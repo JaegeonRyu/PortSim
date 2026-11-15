@@ -65,6 +65,19 @@ public:
     void SetFMSHold(bool Hold);
     void SetDriveFailure(bool Failed) { bDriveFault=Failed; SetFMSHold(Failed); }
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="AGV|Failures") bool bDriveFault=false;
+    bool bIncidentSensorFault=false,bIncidentDestinationMismatch=false;
+    double IncidentRebootRemaining=0;
+    FString IncidentSensorPhase=TEXT("healthy");
+    TSet<FString> IncidentFaults,IncidentResponses;
+    double IncidentNavigationClock=0,IncidentPacketReadyAt=0;
+    double IncidentPositionUncertaintyCm=0,IncidentWheelMarkCm=0;
+    bool bIncidentNeedsPositionFix=false,bIncidentFMSPending=false,bIncidentRoadHold=false;
+    FVector IncidentPendingFMSTarget=FVector::ZeroVector;
+    int32 IncidentPendingFMSNode=INDEX_NONE;
+    bool IncidentNavigationStop() const;
+    void AdvanceNavigationIncidents(double Dt);
+    bool ReacquirePositionAtNode(FVector Node);
+    bool LocalizationObservationValid() const;
     void UpdateLiDARObservation(float FrontDistanceCm,float RearDistanceCm,float SafetyDistanceCm,float DetectionRangeCm,
         bool ControlledStop,int32 BlockingVehicleID=INDEX_NONE);
     float SpeedLimitCmPerSecond() const;
@@ -103,7 +116,7 @@ public:
     static constexpr double LowBatteryPercent=20.;
     static constexpr double ChargeLimitPercent=80.;
     void AdvanceBattery(double Seconds,bool Operating,bool Charging);
-    bool CanAcceptWork() const { return !Emergency.Active && !bDriveFault && BatteryPercent>LowBatteryPercent && !bNeedsCharge && !bCharging; }
+    bool CanAcceptWork() const { return !Emergency.Active && !bDriveFault && !bIncidentSensorFault && !bIncidentDestinationMismatch && !IncidentFaults.Contains(TEXT("localization_loss")) && !IncidentFaults.Contains(TEXT("fms_delay")) && !IncidentFaults.Contains(TEXT("fms_disconnect")) && !bIncidentNeedsPositionFix && BatteryPercent>LowBatteryPercent && !bNeedsCharge && !bCharging; }
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV|Battery") double BatteryPercent=80.;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV|Battery") bool bNeedsCharge=false;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AGV|Battery") bool bCharging=false;

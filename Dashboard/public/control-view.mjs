@@ -1,3 +1,4 @@
+import {incidentActions} from './incident-model.mjs';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const mapPosition=a=>a?.gantry_position_m||a?.position_m;
 import {workerIntrusionControls} from './agv-emergency-view.mjs';
@@ -32,6 +33,7 @@ export function impactModel(state,focus){
    (cargo.planned_rmg==null||target.name===`RMG-${String(cargo.planned_rmg).padStart(2,'0')}`);
  });
  const related=new Set(activeEvents.map(e=>e.to_actor)),cargos=new Set(activeEvents.map(e=>e.cargo)),failed=new Set();
+ for(const a of actors)if(a.incident_pickup_failure||a.incident_placement_failure||a.incident_faults?.length||a.incident_needs_position_fix)related.add(a.id);
  for(const a of actors)if(a.fault_scope==='equipment'){related.add(a.id);failed.add(a.id);}
  for(const a of actors)if(a.fault_evacuating)related.add(a.id);
  for(const a of actors)if(a.type==='agv'&&(failed.has(a.sts)||failed.has(a.rmg)||cargos.has(a.cargo_actor)||
@@ -55,7 +57,10 @@ export function impactFeed(state,focus,live){
  const groups=new Map();
  for(const e of events){const key=`${e.kind}|${e.from_actor}|${e.to_actor}`;const old=groups.get(key);groups.set(key,{...e,count:(old?.count||0)+1});}
  const types={loaded_agv_dispatched:'대체 AGV · R/S 출동',loaded_agv_lift:'R/S 화물 인양',loaded_agv_seated:'대체 AGV 안착',loaded_agv_resumed:'대체 AGV 작업 승계',fault:'고장 격리',repair:'수리',evacuation_started:'고장 STS 대피',sts_reassigned:'STS 작업 재배정',yard_reassigned:'야드 목적지 재배정',agv_reassigned:'주차장 출구 대기 AGV 교체',agv_emergency_started:'AGV 돌발시험 시작',agv_emergency_finished:'AGV 돌발 정지 결과',worker_entered:'작업자 돌발 진입',worker_removed:'작업자 제거 · 운송 재개 허용',worker_impact_started:'작업자 영향 발생',worker_impact_cleared:'작업자 영향 추적 종료'};
+ Object.assign(types,Object.fromEntries(Object.values(incidentActions).flat()));
+ types.road_rerouted='도로 차단 우회';types.incident_repaired='돌발상황 복구';
  types.pickup_retry='STS 체결 후퇴·재접근';
+ Object.assign(types,{weather_changed:'날씨 변경',fail_reboot:'AGV 센서 재부팅',sensor_rebooted:'AGV 센서 복구',misdelivery:'오배송 지시 감지',fail_pickup:'스프레더 체결 실패',fail_placement:'적재 착좌 확인 실패'});
  const road=state?.central_road;
  const roadUsage=road?`<p class="note">중앙도로 실제 주행 · 적재 ${Math.round((road.loaded_east_m||0)+(road.loaded_west_m||0))}m · 빈차 ${Math.round((road.empty_east_m||0)+(road.empty_west_m||0))}m</p>`:'';
  return `<section class="impact-feed"><div class="impact-heading"><strong>고장·돌발상황 영향 · 재배정 기록</strong><span>${live?'엔진 실시간':'최근 실행 기록'} · 영향 대상 ${actors.filter(a=>related.has(a.id)&&['sts','rmg','agv'].includes(a.type)).length}대</span><button class="link" data-impact="all">전체 기록</button></div>${workerImpactList(state,focus)}<div class="impact-events">${[...groups.values()].slice(-12).reverse().map(e=>`<button class="impact-event" data-actor="${esc(e.to_actor)}"><b>${esc(types[e.kind]||e.kind)}${e.count>1?` ${e.count}건`:''}</b><span>${esc(name(e.from_actor))}${e.to_actor!==e.from_actor?` → ${esc(name(e.to_actor))}`:''} · ${Math.floor(e.simulation_seconds)}초${e.reason?` · ${esc(workerImpactReason(e.reason))}`:''}</span></button>`).join('')||'<p>장비 오류 또는 작업자 진입을 실행하면 실제 영향과 이력이 표시됩니다.</p>'}</div>${roadUsage}<small>빨강: 고장·작업자 · 주황: 현재 영향 대상 · 파랑: AGV 잔여 경로 · 주황 점선: 계획 재배정 연결</small></section>`;
@@ -82,10 +87,12 @@ export function impactOverlay(state,focus,X,Y,selected){
  const {activeEvents,related}=impactModel(state,focus),actors=state?.actors||[];
  const points=ps=>ps.filter(p=>Array.isArray(p)&&p.slice(0,2).every(Number.isFinite)).map(p=>`${X(p[0])},${Y(p[1])}`).join(' ');
  let html='';
+ for(const c of state?.incident_road_closures||[]){const p=c.min_m,q=c.max_m;if(!p||!q)continue;html+=`<rect class="incident-road-closure" x="${Math.min(X(p[0]),X(q[0]))}" y="${Math.min(Y(p[1]),Y(q[1]))}" width="${Math.max(4,Math.abs(X(q[0])-X(p[0])))}" height="${Math.max(4,Math.abs(Y(q[1])-Y(p[1])))}" fill="#e9855b" stroke="#b33b25" stroke-width="1.5"><title>돌발상황 · 도로 차단</title></rect>`;}
+ for(const c of state?.incident_yard_blocks||[]){const p=c.position_m;if(p)html+=`<rect x="${X(p[0])-5}" y="${Y(p[1])-5}" width="10" height="10" fill="#e9855b"><title>목적 슬롯 점유</title></rect>`;}
  for(const e of activeEvents.slice(-40))html+=`<polyline class="plan-connection" points="${points([e.from_position_m,e.to_position_m])}"/>`;
  for(const a of actors.filter(a=>['sts','rmg','agv','rs'].includes(a.type))){
   const p=mapPosition(a);if(!p)continue;
-  if(a.fault)html+=`<circle class="fault-halo" cx="${X(p[0])}" cy="${Y(p[1])}" r="9"/>`;
+  if(a.fault||a.incident_pickup_failure||a.incident_placement_failure||a.incident_faults?.length)html+=`<circle class="fault-halo" cx="${X(p[0])}" cy="${Y(p[1])}" r="9"/>`;
   else if(related.has(a.id))html+=`<circle class="impact-halo" cx="${X(p[0])}" cy="${Y(p[1])}" r="7"/>`;
   if(related.has(a.id)||a.id===selected||a.type==='rs'&&a.loaded_recovery_active){
    if(['agv','rs'].includes(a.type)&&a.route?.length)html+=`<polyline class="impact-route" points="${points([p,...a.route.map(n=>n.position_m)])}"/>`;

@@ -258,6 +258,12 @@ void APortWorkingCrane::SampleSTS(bool Force)
     S.HoistAcceleration=PlantAcceleration.Z;
     SamplePickupGeometry();
     if(!bSTS)SampleRMGEnvironment();
+    else
+    {
+        const FVector Destination=Local(Slots[1-SourceSlot]);
+        S.bCraneClear=!bCoordinatedSTSTravel || Stage!=4 || !bCarrying ||
+            STSTransferClear(FVector(Destination.X,Destination.Y,Local(S.SpreaderPosition).Z));
+    }
     for(const auto& Mount:STSProfile.Dynamics.Mounts)
     {
         double Value=0; bool Required=true;

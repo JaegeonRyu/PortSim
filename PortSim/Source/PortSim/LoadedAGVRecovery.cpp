@@ -66,12 +66,12 @@ bool APortSiteLogistics::ValidateLoadedAGVRecoveries(FString& Error) const
     TSet<int32> Assigned; TSet<const APortContainerActor*> Boxes; TSet<const APortSupportVehicle*> Stackers;
     for(const auto& R:LoadedAGVRecoveries)
     {
+        const bool ReplacementInRecovery=R.Phase<=6 || (R.bRepairCancelled && R.Phase<9);
         if(!Vehicles.IsValidIndex(R.Failed) || !Vehicles.IsValidIndex(R.Replacement) ||
             R.Failed==R.Replacement || Assigned.Contains(R.Failed) || Assigned.Contains(R.Replacement) ||
             !R.Stacker.IsValid() || Stackers.Contains(R.Stacker.Get()) || R.Cargo.IsEmpty() ||
             R.Cargo.Num()!=R.DeckTransforms.Num() ||
-            (R.Phase<=6 && Jobs[R.Replacement].Stage!=FSiteTransfer::ToRecovery) ||
-            (R.Phase>=7 && Jobs[R.Replacement].Stage==FSiteTransfer::ToRecovery))
+            ReplacementInRecovery!=(Jobs[R.Replacement].Stage==FSiteTransfer::ToRecovery))
         {Error=TEXT("Invalid/duplicate loaded AGV recovery assignment");return false;}
         Assigned.Add(R.Failed);Assigned.Add(R.Replacement);Stackers.Add(R.Stacker.Get());
         for(int32 I=0;I<R.Cargo.Num();++I)
@@ -113,6 +113,7 @@ bool APortSiteLogistics::CanRecoverLoadedAGV(int32 V,FString& Error) const
 // not an OEM reach-stacker dynamics/load-chart model.
 bool APortSiteLogistics::PlanLoadedRecoveryRoad(FVector Start,FVector Goal,FVector Axis,int32 Depot,TArray<FVector>& Route) const
 {
+    Route.Reset();
     // Road graph edges are axis aligned. Measured headings contain small
     // steering residuals even after a straight-road stop.
     if(FMath::Max(FMath::Abs(Axis.X),FMath::Abs(Axis.Y))<.999f) return false;
@@ -130,11 +131,16 @@ bool APortSiteLogistics::PlanLoadedRecoveryRoad(FVector Start,FVector Goal,FVect
     AGVApronRoads::Add(N);
     N.Add(P(12500,North),P(12500,TerminalLayout::AGVStandbyNorthY));
     N.Add(P(14000,TerminalLayout::AGVStandbyNorthY),P(14000,North));
-    if(Depot!=INDEX_NONE)
+    const FVector Park=Stacker?FVector::ZeroVector:FleetPark(Depot);
+    const bool AtDepot=!Stacker && Start.Equals(Park,AGVReference::DockingAccuracyCm+1.f);
+    if(!Stacker)
     {
-        const FVector Park=FleetPark(Depot);
-        const float Y=TerminalLayout::AGVStandbyExitY(Depot);
-        N.Add(Park,FVector(Park.X,Y,0)); N.Add(P(4800,Y),P(14000,Y));
+        const float EntryY=TerminalLayout::AGVStandbyEntryY(Depot);
+        const float ExitY=TerminalLayout::AGVStandbyExitY(Depot);
+        N.Add(P(12500,EntryY),P(4800,EntryY));
+        N.Add(FVector(Park.X,EntryY,0),Park,true);
+        N.Add(Park,FVector(Park.X,ExitY,0));
+        N.Add(P(4800,ExitY),P(14000,ExitY));
     }
     else
     {
@@ -142,44 +148,83 @@ bool APortSiteLogistics::PlanLoadedRecoveryRoad(FVector Start,FVector Goal,FVect
         // north end; never cut across occupied yard stacks.
         const FVector Access(Start.X,North,0);
         N.Add(Start,Access,true); N.Add(Access,P(TerminalLayout::AGVInlandReturnX,North),true);
+        if(Goal.X>P(TerminalLayout::AGVInlandReturnX,North).X)
+        {
+            const FVector HomeAccess(Goal.X,North,0);
+            N.Add(P(TerminalLayout::AGVInlandReturnX,North),HomeAccess,true);
+            N.Add(HomeAccess,Goal,true);
+        }
     }
-    const FVector Approach=Goal-Axis*2200;
     const auto Roads=N.Roads;
-    bool Connected=false;
-    for(const auto& Road:Roads)
+    constexpr float LocalAccess=2200.f;
+    if(!AtDepot && Vehicles.IsValidIndex(Depot))
     {
-        const FVector D=Road.B-Road.A;
-        const double StartT=FMath::Clamp(FVector::DotProduct(Start-Road.A,D)/D.SizeSquared(),0.,1.);
-        const FVector StartOn=Road.A+D*StartT;
-        if(FVector::Dist2D(Start,StartOn)<3500) N.Add(Start,StartOn);
-        const double T=FMath::Clamp(FVector::DotProduct(Approach-Road.A,D)/D.SizeSquared(),0.,1.);
-        const FVector On=Road.A+D*T;
-        if(FVector::Dist2D(On,Approach)>3500) continue;
-        // A short perpendicular spur cannot fit the corner fillet. Let the
-        // graph use a farther road instead of selecting an unroundable path.
-        const double Spur=FVector::Dist2D(On,Approach);
-        if(Spur>.1 && Spur<AGVReference::MinimumInnerTurnRadiusCm+100) continue;
-        N.Add(On,Approach,true); Connected=true;
+        const FVector Heading=Vehicles[Depot]->GetActorRightVector();
+        const FVector Along=FMath::Abs(Heading.X)>FMath::Abs(Heading.Y)?FVector(1,0,0):FVector(0,1,0);
+        for(const float Sign:{1.f,-1.f})
+        {
+            const FVector Departure=Start+Along*(Sign*LocalAccess);
+            N.Add(Start,Departure);
+            for(const auto& Road:Roads)
+            {
+                const FVector On=FMath::ClosestPointOnSegment(Departure,Road.A,Road.B);
+                if(FVector::Dist2D(Departure,On)<=3500) N.Add(Departure,On);
+            }
+        }
     }
-    if(!Connected) return false;
-    N.Add(Approach,Goal);
-    TArray<FVector> Raw;
     auto ObstacleCost=[&](FVector A,FVector B)
     {
-        double Cost=0;
         for(const auto& V:Vehicles) if(V->bDriveFault && !V->GetActorLocation().Equals(Start,10) &&
-            AGVTrafficGeometry::SweptChassisIntersects(A,B,V->GetActorLocation(),V->GetActorRightVector(),Stacker?450:730,Stacker?170:210,50,730,210)) Cost+=1.e9;
-        return Cost;
+            AGVTrafficGeometry::SweptChassisIntersects(A,B,V->GetActorLocation(),V->GetActorRightVector(),Stacker?450:730,Stacker?170:210,50,730,210))
+            return TNumericLimits<double>::Max();
+        return 0.;
     };
-    if(!N.Find(Start,Goal,Raw,ObstacleCost)) return false;
-    Route=SiteLogistics::RoundRoadCorners(Start,Raw,[](FVector,FVector){return true;});
-    FVector Previous=Start;
-    for(const FVector& Point:Route)
-    {if(ObstacleCost(Previous,Point)>0) return false;Previous=Point;}
-    if(Depot!=INDEX_NONE) for(const FVector& Point:Route)
-        if(!TerminalLayout::AGVEnvelopeInside(Point.X-760,Point.X+760,Point.Y-760,Point.Y+760)) return false;
-    return !Route.IsEmpty() && AGVTrafficGeometry::RoundedRouteHasNoSharpTurns(Start,Route) &&
-        !SiteLogistics::RouteIntersectsContainer(Route,Start,Yard,INDEX_NONE);
+    auto TryRoute=[&](const TArray<FVector>& Raw)
+    {
+        auto Candidate=SiteLogistics::RoundRoadCorners(Start,Raw,[](FVector,FVector){return true;});
+        if(Candidate.IsEmpty() || !AGVTrafficGeometry::RoundedRouteHasNoSharpTurns(Start,Candidate) ||
+            (!Stacker && !AGVTrafficGeometry::RouteEnvelopeInside(Start,Candidate))) return false;
+        const FVector FinalFrom=Candidate.Num()>1?Candidate[Candidate.Num()-2]:Start;
+        const FVector FinalDirection=(Candidate.Last()-FinalFrom).GetSafeNormal2D();
+        if(!FinalDirection.IsNearlyZero() && FMath::Abs(FVector::DotProduct(FinalDirection,Axis))<.999f) return false;
+        FVector Previous=Start;
+        for(const FVector& Point:Candidate)
+        {
+            if(ObstacleCost(Previous,Point)>0) return false;
+            Previous=Point;
+        }
+        if(SiteLogistics::RouteIntersectsContainer(Candidate,Start,Yard,INDEX_NONE)) return false;
+        Route=MoveTemp(Candidate);
+        return true;
+    };
+    // Depot entries and support aprons already have a directed approach to their endpoint.
+    TArray<FVector> Raw;
+    if(Roads.ContainsByPredicate([&](const auto& Road){return FAGVRoadNetwork::Contains(Road,Goal);}) &&
+        N.Find(Start,Goal,Raw,ObstacleCost) && TryRoute(Raw)) return true;
+    for(const float Sign:{1.f,-1.f})
+    {
+        const FVector Approach=Goal-Axis*(Sign*LocalAccess);
+        TArray<FVector> AccessPoints;
+        for(const auto& Road:Roads)
+        {
+            const FVector On=FMath::ClosestPointOnSegment(Approach,Road.A,Road.B);
+            const double Spur=FVector::Dist2D(On,Approach);
+            if(Spur>3500 || (Spur>.1 && Spur<AGVReference::MinimumInnerTurnRadiusCm+100)) continue;
+            if(!FMath::IsNearlyEqual(On.X,Approach.X,.1) && !FMath::IsNearlyEqual(On.Y,Approach.Y,.1)) continue;
+            if(!AccessPoints.ContainsByPredicate([&](const FVector& Point){return Point.Equals(On,.1);}))
+                AccessPoints.Add(On);
+        }
+        AccessPoints.Sort([&](const FVector& A,const FVector& B)
+        {return FVector::Dist2D(Start,A)+FVector::Dist2D(A,Approach)<FVector::Dist2D(Start,B)+FVector::Dist2D(B,Approach);});
+        for(const FVector& On:AccessPoints)
+        {
+            if(!N.Find(Start,On,Raw,ObstacleCost)) continue;
+            if(!On.Equals(Approach,.1)) Raw.Add(Approach);
+            Raw.Add(Goal);
+            if(TryRoute(Raw)) return true;
+        }
+    }
+    return false;
 }
 
 bool APortSiteLogistics::RequestLoadedAGVRecovery(int32 Failed,FString& Error)
@@ -401,7 +446,7 @@ void APortSiteLogistics::AdvanceLoadedAGVRecoveries(float Dt)
                     !PlanLoadedRecoveryRoad(RS->GetActorLocation(),R.StackerHome.GetLocation(),
                         Old->GetActorRightVector(),INDEX_NONE,R.StackerExitRoute))
                 {R.Status=TEXT("붐 정리 완료 · R/S 퇴출 경로 확보 대기");continue;}
-                R.Phase=R.bRepairCancelled?9:8;
+                R.Phase=8;
             }
             if(R.Phase==8)
             {
@@ -409,7 +454,8 @@ void APortSiteLogistics::AdvanceLoadedAGVRecoveries(float Dt)
                 {
                     R.Status=TEXT("인양 전 수리 완료 · 대체 AGV 원위치 복귀");
                     if(R.ReplacementExitRoute.IsValidIndex(R.ReplacementExitWaypoint) &&
-                        MoveVehicle(New,R.ReplacementExitRoute[R.ReplacementExitWaypoint],Dt)) ++R.ReplacementExitWaypoint;
+                        MoveVehicle(New,R.ReplacementExitRoute[R.ReplacementExitWaypoint],Dt))
+                        Arrival.Waypoint=++R.ReplacementExitWaypoint;
                     if(R.ReplacementExitWaypoint<R.ReplacementExitRoute.Num() || New->Speed>.1f ||
                         !New->GetActorLocation().Equals(R.ReplacementHome.GetLocation(),100)) continue;
                     New->SetFMSHold(true);
@@ -420,11 +466,14 @@ void APortSiteLogistics::AdvanceLoadedAGVRecoveries(float Dt)
                 else
                 {
                     R.Status=TEXT("운송 승계 · 새 AGV 안전 퇴출");
-                    if(Arrival.Route.IsValidIndex(Arrival.Waypoint) &&
-                        MoveVehicle(New,Arrival.Route[Arrival.Waypoint],Dt)) ++Arrival.Waypoint;
                     FVector NewOrigin,NewExtent;
                     New->GetActorBounds(true,NewOrigin,NewExtent);
-                    if(New->Speed>.1f || R.WorkZone.Intersect(FBox(NewOrigin-NewExtent,NewOrigin+NewExtent))) continue;
+                    if(R.WorkZone.Intersect(FBox(NewOrigin-NewExtent,NewOrigin+NewExtent)))
+                    {
+                        if(Arrival.Route.IsValidIndex(Arrival.Waypoint) &&
+                            MoveVehicle(New,Arrival.Route[Arrival.Waypoint],Dt)) ++Arrival.Waypoint;
+                        continue;
+                    }
                     New->SetFMSHold(true);
                     RoadReservations.Remove(New->VehicleID); RoadReservationEndWaypoint.Remove(New->VehicleID);
                     ReservationIndex.Remove(New->VehicleID); RoadTargets.Remove(New->VehicleID);
@@ -530,9 +579,11 @@ void APortSiteLogistics::AdvanceLoadedAGVRecoveries(float Dt)
             if(!Saved.Route.IsValidIndex(Next)) Next=Saved.Route.Num()-1;
             if(Next<0 || !PlanLoadedRecoveryRoad(New->GetActorLocation(),Saved.Route[Next],Old->GetActorRightVector(),R.Replacement,Join))
             {R.Status=TEXT("화물 인계 완료 · 원래 운송 경로 재진입 대기");continue;}
-            Arrival=Saved;
             const int32 Added=Join.Num();
             for(int32 N=Next+1;N<Saved.Route.Num();++N) Join.Add(Saved.Route[N]);
+            if(!AGVTrafficGeometry::RoundedRouteHasNoSharpTurns(New->GetActorLocation(),Join))
+            {R.Status=TEXT("화물 인계 완료 · 원래 경로와의 회전 여유 확보 대기");continue;}
+            Arrival=Saved;
             Arrival.Route=MoveTemp(Join); Arrival.Waypoint=0; Arrival.RouteStart=New->GetActorLocation(); Arrival.bRouteStartValid=true;
             Arrival.YardEntryWaypoint=Saved.YardEntryWaypoint>=Next?Added-1+Saved.YardEntryWaypoint-Next:Saved.YardEntryWaypoint;
             if(Arrival.Stage==9) {Arrival.Stage=3;Arrival.YardEntryWaypoint=Added-1;}

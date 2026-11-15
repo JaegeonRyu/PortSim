@@ -1,6 +1,6 @@
 param(
     [string]$Engine = 'C:\Program Files\Epic Games\UE_5.6',
-    [ValidateSet('All','wave','offset','eccentric','heavy45','bias','yaw','seat','pose','lock','sensor','stack','agv','collision')][string]$Case = 'All',
+    [ValidateSet('All','extended_incident','incident','wave','offset','eccentric','heavy45','bias','yaw','seat','pose','lock','sensor','stack','agv','collision')][string]$Case = 'All',
     [ValidateRange(1,120)][int]$FixedFPS = 10,
     [ValidateRange(0,2)][double]$SimulationFrameSeconds = 0,
     [ValidateSet('STS','RMG')][string]$Crane = 'STS'

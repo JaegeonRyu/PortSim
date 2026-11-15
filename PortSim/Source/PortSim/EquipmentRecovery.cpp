@@ -169,7 +169,7 @@ void APortSiteLogistics::ManageEquipmentFailures()
         if(J.bYardAdmissionSuspended)
         {
             auto* Crane=Equipment[YardCraneCount+J.STS].Get();
-            if(CraneAvailable(YardCraneCount+J.STS) && ReserveYardApproach(V))
+            if(CraneAvailable(YardCraneCount+J.STS) && ReserveYardApproach(V,LaneCount==9))
             {
                 J.bYardAdmissionSuspended=false; J.bEquipmentWaiting=false;
                 Crane->SetDestinationReady(J.Stage!=6); Vehicles[V]->SetFMSHold(false);
@@ -395,7 +395,7 @@ bool APortSiteLogistics::ReplanYardGroup(const TSet<int32>& Affected,const TSet<
         for(int32 S=0;S<Yard.Num();++S)
         {
             const auto& Slot=Yard[S];
-            if(!Slot.Reserved || Slot.Central || Slot.Occupied || Occupant[S]!=INDEX_NONE || Slot.LengthFt!=C->LengthFt ||
+            if(!Slot.Reserved || Slot.Central || Slot.Occupied || IsIncidentYardBlocked(S) || Occupant[S]!=INDEX_NONE || Slot.LengthFt!=C->LengthFt ||
                 !CraneAvailable(Slot.Crane) || !YardStackingPolicy::ZoneAccepts(Slot.Block,Info)) continue;
             if(!Equipment[Slot.Crane]->CanReach(YardHandover(Slot)+FVector(0,0,349.5f),Slot.Position)) continue;
             if(Info.HazardGroup==TEXT("none") && Info.HandlingType==TEXT("dry") &&
@@ -465,13 +465,18 @@ bool APortSiteLogistics::ReplanYardGroup(const TSet<int32>& Affected,const TSet<
     for(const auto& Entry:AssignedActiveCrane)
     {
         const int32 V=Entry.Key; auto& J=Jobs[V]; const int32 Old=J.Slot,New=Plan[J.Cargo];
+        const bool STSSide=LaneCount==9 && (J.Stage==6 || J.Stage==1 || J.Stage==10);
         if(Yard.IsValidIndex(Old) && Old!=New)
         {
-            DeferredYardLeases.Add({V,Old}); SlotAssigned[Old]=false;
-            RMGBusy[Yard[Old].Crane]=false;
+            if(!STSSide) DeferredYardLeases.Add({V,Old});
+            else if(YardApproachOwners[YardApproachKey(Yard[Old])]==V)
+                YardApproachOwners[YardApproachKey(Yard[Old])]=INDEX_NONE;
+            SlotAssigned[Old]=false;
+            if(J.bRMGReserved) RMGBusy[Yard[Old].Crane]=false;
         }
-        J.Slot=New; J.RMG=Yard[New].Crane; J.bRMGReserved=false; J.bYardReleased=false; J.bYardAdvanceBooking=false;
-        SlotAssigned[New]=true; YardApproachOwners[YardApproachKey(Yard[New])]=V;
+        J.Slot=New; J.RMG=Yard[New].Crane; J.bRMGReserved=false; J.bYardReleased=false; J.bYardAdvanceBooking=STSSide;
+        SlotAssigned[New]=true;
+        if(!STSSide) YardApproachOwners[YardApproachKey(Yard[New])]=V;
         J.bEquipmentWaiting=false;
         if(J.Stage==9)
         {

@@ -29,7 +29,9 @@ bool FBlockedPickupDispatchTest::RunTest(const FString& Parameters)
     auto* Old=Site->Vehicles[0].Get();auto* Replacement=Site->Vehicles[1].Get();
     const auto OldPose=Old->GetActorTransform(),NewPose=Replacement->GetActorTransform();
     const FVector Gate=Old->GetActorLocation()+FVector(0,1000,0);
-    Site->RoadReservations.Add(999,{FBox(Gate-FVector(200,200,200),Gate+FVector(200,200,200))});
+    // Keep this reservation inside the original bay throat. A wider box also
+    // clips the replacement's turn and leaves two separate blockers in the test.
+    Site->RoadReservations.Add(999,{FBox(Gate-FVector(100,200,200),Gate+FVector(100,200,200))});
     TestFalse(TEXT("Occupied departure cannot receive another idle dispatch"),Site->ParkingDepartureAvailable(0));
     TestTrue(TEXT("Unblocked neighbouring departure is usable"),Site->ParkingDepartureAvailable(1));
     auto Blocked=[&](int Stage)
@@ -49,7 +51,13 @@ bool FBlockedPickupDispatchTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("AGV outside its own bay is never cancelled"),Site->Jobs[0].Stage,7);
     Old->SetActorTransform(OldPose);
     TestTrue(TEXT("Only an unentered parked standby can yield to a nearby return"),Site->CanReleaseParkedStandby(0));
+    Site->Jobs[1].Stage=8;
     Site->ReassignBlockedParkingVehicles();
+    TestTrue(TEXT("Blocked standby keeps its assignment when no replacement can leave"),
+        Site->Jobs[0].Stage==7 && Site->NextVehicles[0]==0 && Site->RoadWaitSince.Contains(100));
+    Site->Jobs[1]=FSiteTransfer();
+    Site->NextVehicles[0]=INDEX_NONE;
+    Site->ReleaseUnenteredParkingMission(0);
     TestTrue(TEXT("Unentered standby releases its queue and receives a retry cooldown"),
         Site->Jobs[0].Stage==0 && Site->NextVehicles[0]==INDEX_NONE && Site->Jobs[0].DispatchRetryAfter>Site->TrafficClock);
     TestTrue(TEXT("Cancellation leaves the physical vehicle in its bay"),Old->GetActorTransform().Equals(OldPose));
@@ -75,6 +83,19 @@ bool FBlockedPickupDispatchTest::RunTest(const FString& Parameters)
         Site->QuayPark(0)+FVector(0,0,349.5),false,false,Old));
     Crane->SetDestinationReady(false);
     const auto CargoPose=Cargo->GetActorTransform();
+    const float ExitY=TerminalLayout::AGVStandbyExitY(1);
+    const FVector ExitObstruction(TerminalLayout::SiteCmX(7800),ExitY,0);
+    Site->RoadReservations.Add(998,{FBox(ExitObstruction-FVector(100,100,250),ExitObstruction+FVector(100,100,250))});
+    TestTrue(TEXT("Replacement has an open bay throat but a blocked exit corridor"),Site->ParkingDepartureAvailable(1));
+    Site->ReassignBlockedParkingVehicles();
+    TestTrue(TEXT("A replacement cannot move a pickup into the same traffic queue"),
+        Site->STSOwners[0]==0 && Site->Jobs[1].Stage==0 && Crane->GetHandoverVehicle()==Old &&
+        Site->RoadWaitSince.Contains(100) && Site->RecoveryEvents.IsEmpty());
+    Site->RoadReservations.Remove(998);
+    Site->ReservationIndex.Remove(998);
+    Site->ReassignBlockedParkingVehicles();
+    TestEqual(TEXT("Waiting pickup is not checked again every frame"),Site->STSOwners[0],0);
+    Site->TrafficClock+=10.;
     Site->ReassignBlockedParkingVehicles();
     TestTrue(TEXT("Replacement retains exact cargo, trip and admission state"),
         Site->Jobs[1].Stage==6 && Site->Jobs[1].Actor.Get()==Cargo && Site->Jobs[1].TripID==77 && Site->Jobs[1].bYardAdvanceBooking);
@@ -87,6 +108,33 @@ bool FBlockedPickupDispatchTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Reassignment never moves or duplicates the container"),Cargo->GetActorTransform().Equals(CargoPose) && Site->Manifest.Num()==1);
     TestTrue(TEXT("Old unentered road request is released"),!Site->RoadWaitSince.Contains(100) && !Old->Sensors.bFMSHold);
     TestEqual(TEXT("One recovery event is retained"),Site->RecoveryEvents.Num(),1);
+
+    // Like V118 in the terminal trace, bay 2 has enough straight aisle
+    // between the two turns to stop clear of the depot's southbound spine.
+    auto* Departing=World->SpawnActor<APortAGVActor>();
+    Departing->InitializeVehicle(102);
+    Site->Vehicles.Add(Departing);
+    Site->TrafficVehicles.Add(Departing);
+    Departing->ResetVehicle(Site->FleetPark(2));
+    auto& Departure=Site->Jobs.AddDefaulted_GetRef();
+    Departure.Stage=7;
+    Departure.STS=0;
+    const FVector SecondTurn(TerminalLayout::SiteCmX(14000),TerminalLayout::AGVStandbyExitY(2),0);
+    const FBox BusySpine(SecondTurn-FVector(300,300,250),SecondTurn+FVector(300,300,250));
+    Site->RoadReservations.Add(997,{BusySpine});
+    Site->ReservationIndex.Set(997,{BusySpine});
+    if(TestTrue(TEXT("Depot route can start while the separate spine turn is occupied"),Site->PlanRoadRoute(2,false,true)))
+    {
+        Site->MoveVehicle(Departing,Departure.Route[0],.05f);
+        const int32* Approved=Site->RoadReservationEndWaypoint.Find(102);
+        const auto* Lease=Site->RoadReservations.Find(102);
+        TestTrue(TEXT("The first lease reaches a straight stop before the spine"),Approved && Lease &&
+            Departure.Route.IsValidIndex(*Approved) &&
+            FMath::IsNearlyEqual(Departure.Route[*Approved].Y,SecondTurn.Y,.1) &&
+            Departure.Route[*Approved].X<SecondTurn.X-1400.);
+        if(Lease) TestFalse(TEXT("The first lease does not claim the occupied spine"),
+            Lease->ContainsByPredicate([&](const FBox& Segment) { return Segment.Intersect(BusySpine); }));
+    }
     World->DestroyWorld(false);return true;
 }
 #endif

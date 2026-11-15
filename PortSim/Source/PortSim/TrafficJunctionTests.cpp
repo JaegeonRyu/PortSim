@@ -36,6 +36,8 @@ bool FTrafficJunctionTest::RunTest(const FString& Parameters)
     const auto Cycle=TrafficJunctionPolicy::WaitCycle(Blockers,110);
     TestEqual(TEXT("Four-vehicle cycle excludes incoming queue"),Cycle.Num(),4);
     TestFalse(TEXT("Upstream waiter is not part of cycle"),Cycle.Contains(110));
+    TestTrue(TEXT("A merge dependency follows the whole blocking chain"),TrafficJunctionPolicy::WaitsFor(Blockers,102,100));
+    TestFalse(TEXT("A closed cycle cannot trap an unrelated dependency query"),TrafficJunctionPolicy::WaitsFor(Blockers,102,999));
     Blockers.Remove(101);
     TestTrue(TEXT("Open wait chain is not a deadlock"),TrafficJunctionPolicy::WaitCycle(Blockers,110).IsEmpty());
     const double Old=10,New=20;
@@ -61,6 +63,20 @@ bool FTrafficJunctionTest::RunTest(const FString& Parameters)
     Site->Jobs[0].Stage=6; Site->Jobs[0].STS=0;
     Site->Jobs[1].Stage=5; Site->Jobs[1].STS=0;
     Site->Jobs[2].Stage=3; Site->Jobs[2].STS=0; Site->STSOwners={2};
+    // The startup inversion used a stage-7 standby with a default timestamp
+    // and lower vehicle ID than the active pickup dispatched in the same tick.
+    Site->Jobs[0].Stage=7;
+    Site->Jobs[1].Stage=6;
+    Site->Jobs[1].StartedAt=.05;
+    Site->STSOwners[0]=1;
+    TestEqual(TEXT("Standby departure receives no active pickup bonus"),Site->RoadPriorityBonus(100),0.);
+    TestTrue(TEXT("New active pickup precedes a standby with an older timestamp"),Site->RoadRequestBefore(101,100));
+    TestFalse(TEXT("Standby cannot take the equal-age departure before the pickup"),Site->RoadRequestBefore(100,101));
+    Site->RoadWaitSince.Add(100,90);
+    TestTrue(TEXT("A long waiting standby eventually receives a departure"),Site->RoadRequestBefore(100,101));
+    Site->Jobs[0].Stage=6;
+    Site->Jobs[1].Stage=5;
+    Site->STSOwners[0]=2;
     Site->RoadWaitSince={{100,115},{101,110},{102,115}};
     TestTrue(TEXT("Actual pickup job beats slightly older parking return"),Site->RoadRequestBefore(100,101));
     TestTrue(TEXT("Loaded handover exit drains before an equal-age pickup"),Site->RoadRequestBefore(102,100));

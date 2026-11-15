@@ -59,8 +59,16 @@ public:
             {
                 const int32 A=On[I-1],B=On[I];
                 const double Length=FVector::Dist2D(Points[A],Points[B]);
-                Edges[A].Add({B,Length+FMath::Max(0.,Penalty(Points[A],Points[B]))});
-                if(S.Both) Edges[B].Add({A,Length+FMath::Max(0.,Penalty(Points[B],Points[A]))});
+                const double ForwardCost=Penalty(Points[A],Points[B]);
+                // A closed road is absent from the graph, never a costly shortcut.
+                if(FMath::IsFinite(ForwardCost)&&ForwardCost<TNumericLimits<double>::Max()*.5)
+                    Edges[A].Add({B,Length+FMath::Max(0.,ForwardCost)});
+                if(S.Both)
+                {
+                    const double ReverseCost=Penalty(Points[B],Points[A]);
+                    if(FMath::IsFinite(ReverseCost)&&ReverseCost<TNumericLimits<double>::Max()*.5)
+                        Edges[B].Add({A,Length+FMath::Max(0.,ReverseCost)});
+                }
             }
         }
         // Remember entry from a narrow crossing until the vehicle clears its

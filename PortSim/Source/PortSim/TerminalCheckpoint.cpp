@@ -149,7 +149,7 @@ void FTerminalCheckpoint::Capture(APortWorkingCrane& O)
     Values(O.Surface,O.Friction,O.SeatingFrictionDemandN,O.SeatingFrictionCapacityN,O.bSeatingFrictionOK,
         O.LastJobSeconds,O.LastPausedSeconds,O.JobStageSeconds,O.LastJobStageSeconds,O.CompletedStageSeconds,
         O.JobAGVWaitSeconds,O.CompletedAGVWaitSeconds,O.Observation);
-    Values(O.bEnabled,O.bSTS,O.bCarrying,O.CraneID,O.CompletedJobs,O.Stage,O.Fault,O.FaultType,O.bSensorFault,O.bGantryFault);
+    Values(O.bEnabled,O.bSTS,O.bCarrying,O.CraneID,O.CompletedJobs,O.Stage,O.Fault,O.FaultType,O.bSensorFault,O.bGantryFault,O.bCoordinatedSTSTravel);
     Values(O.bAutoSensorRecovery,O.SensorRepairMethod,O.SensorRebootSeconds,O.SensorTechnicianRepairSeconds,
         O.SensorSelfCheckSeconds,O.bAllowSensorFaultEvacuation,O.bIndependentTravelSafetyHealthy,O.bFaultEvacuating,
         O.bFaultEvacuationComplete,O.FaultEvacuationTargetY,O.SensorRepairElapsed,O.SensorRepairPhase,O.RecoveryStatus,O.bRailSafetyHold);

@@ -47,8 +47,25 @@ bool FAdvanceYardBookingTest::RunTest(const FString& Parameters)
         FSiteYardSlot S;S.Reserved=true;S.Occupied=false;S.Crane=0;S.Block=0;S.Handover=FVector(16000,0,0);Site->Yard.Add(S);
         Site->Jobs[I].Cargo=I;Site->Jobs[I].Actor=Box;Site->Jobs[I].Stage=6;
     }
+    Site->YardApproachOwners[0]=INDEX_NONE;
+    Site->RMGBusy[0]=false;
+    const FTransform BookedPose=Site->Vehicles[1]->GetActorTransform();
+    TestTrue(TEXT("An STS pickup reserves a supported yard service"),Site->ReserveYardApproach(1,true));
+    TestTrue(TEXT("Booking leaves both the physical approach and RMG free"),
+        Site->Jobs[1].bYardAdvanceBooking && Site->SlotAssigned[1] &&
+        Site->YardApproachOwners[0]==INDEX_NONE && !Site->RMGBusy[0] &&
+        Site->Vehicles[1]->GetActorTransform().Equals(BookedPose));
+    TestFalse(TEXT("An unpromoted pickup cannot create an unlimited service queue"),Site->CanBookNextYardService(2));
+    Site->Jobs[1].Stage=2;
+    TestTrue(TEXT("Loaded departure promotes its own service to approach ownership"),Site->ReserveYardApproach(1));
+    TestTrue(TEXT("Approach promotion does not reserve an idle RMG machine early"),
+        Site->YardApproachOwners[0]==1 && !Site->Jobs[1].bYardAdvanceBooking && !Site->RMGBusy[0]);
+    Site->Jobs[1].Stage=6;
+    Site->SlotAssigned[1]=false;
+    Site->YardApproachOwners[0]=0;
+    Site->RMGBusy[0]=true;
     auto& Prior=Site->Jobs[0];Prior.RMG=0;Prior.Stage=3;Prior.Slot=0;Prior.bRMGReserved=true;
-    TestFalse(TEXT("Cannot pipeline behind an AGV still travelling to the yard"),Site->CanBookNextYardService(1));
+    TestTrue(TEXT("One next STS pickup may overlap the admitted vehicle's yard journey"),Site->CanBookNextYardService(1));
     TestTrue(TEXT("Create active prior crane job"),R->AssignCargo(Site->Manifest[0].Actor.Get(),FVector(-1000,0,349.5),FVector(1000,0,149.5),false,true));
     Prior.Stage=4;R->Stage=2;R->bCarrying=false;
     TestFalse(TEXT("Cannot speculate before the prior pickup is verified"),Site->CanBookNextYardService(1));

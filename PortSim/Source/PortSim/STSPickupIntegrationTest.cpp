@@ -79,6 +79,32 @@ void AQuayCrane::TickPickupTest(float Dt)
     {UE_LOG(LogTemp,Error,TEXT("PORTSIM_PICKUP_FAIL: invalid frame interval"));FPlatformMisc::RequestExitWithStatus(false,1);return;}
     if(PickupTestSeconds==0)UE_LOG(LogTemp,Display,TEXT("PICKUP_TEST_STEP: %.6f simulation seconds per render frame"),Dt);
     PickupTestSeconds+=Dt;auto* C=PickupTestCrane.Get();
+    if(PickupTestCase==TEXT("extended_incident"))
+    {
+        static double HoistAt=-1,LinkAt=-1,StackAt=-1,ReleaseAt=-1,DeviceAt=-1;
+        if(C->bCarrying&&C->Stage>=3&&DeviceAt<0){DeviceAt=PickupTestSeconds;C->SetEquipmentFailure(true);}
+        if(DeviceAt>=0&&PickupTestSeconds-DeviceAt>5)C->SetEquipmentFailure(false);
+        if(HoistAt<0){HoistAt=PickupTestSeconds;C->IncidentFaults.Add(TEXT("fail_hoist"));}
+        if(PickupTestSeconds-HoistAt>5)C->IncidentFaults.Remove(TEXT("fail_hoist"));
+        if(!C->bSTS&&C->IncidentHandoverWindow()&&LinkAt<0){LinkAt=PickupTestSeconds;C->IncidentFaults.Add(TEXT("agv_unavailable"));}
+        if(LinkAt>=0&&PickupTestSeconds-LinkAt>5)C->IncidentFaults.Remove(TEXT("agv_unavailable"));
+        if(!C->bSTS&&C->Stage==5&&StackAt<0){StackAt=PickupTestSeconds;C->IncidentFaults.Add(TEXT("slot_occupied"));C->IncidentFaults.Add(TEXT("height_mismatch"));}
+        if(StackAt>=0&&PickupTestSeconds-StackAt>12){C->IncidentFaults.Remove(TEXT("slot_occupied"));C->IncidentFaults.Remove(TEXT("height_mismatch"));}
+        if(!C->bSTS&&C->IncidentReleaseWindow()&&ReleaseAt<0){ReleaseAt=PickupTestSeconds;C->IncidentFaults.Add(TEXT("fail_release"));}
+        if(ReleaseAt>=0&&PickupTestSeconds-ReleaseAt>12)C->IncidentFaults.Remove(TEXT("fail_release"));
+        if(C->IncidentFaults.Contains(TEXT("fail_release"))&&!C->bCarrying)
+        {UE_LOG(LogTemp,Error,TEXT("PORTSIM_PICKUP_FAIL: release failure dropped its retained load"));FPlatformMisc::RequestExitWithStatus(false,1);return;}
+    }
+    if(PickupTestCase==TEXT("incident"))
+    {
+        static double PickupAt=-1,PlacementAt=-1;
+        if(C->Stage==2&&PickupAt<0){PickupAt=PickupTestSeconds;C->bIncidentPickupFailure=true;}
+        if(PickupAt>=0&&PickupTestSeconds-PickupAt>12)C->bIncidentPickupFailure=false;
+        if(!C->bSTS&&C->Stage==5&&PlacementAt<0){PlacementAt=PickupTestSeconds;C->bIncidentPlacementFailure=true;}
+        if(PlacementAt>=0&&PickupTestSeconds-PlacementAt>12)C->bIncidentPlacementFailure=false;
+        if((C->bIncidentPickupFailure&&C->bCarrying)||(C->bIncidentPlacementFailure&&C->CompletedJobs>0))
+        {UE_LOG(LogTemp,Error,TEXT("PORTSIM_PICKUP_FAIL: injected failure bypassed retention/landing checks"));FPlatformMisc::RequestExitWithStatus(false,1);return;}
+    }
     if(PickupTestCase==TEXT("wave") && !C->bCarrying && C->Stage<=2)
     {
         // Analytic vessel translation: heave reversals plus horizontal surge.
@@ -100,13 +126,15 @@ void AQuayCrane::TickPickupTest(float Dt)
         FPlatformMisc::RequestExitWithStatus(false,Pass?0:1);
     };
     const bool RMG=!C->bSTS;
-    const bool Negative=PickupTestCase!=TEXT("offset")&&PickupTestCase!=TEXT("eccentric")&&PickupTestCase!=TEXT("wave")&&PickupTestCase!=TEXT("heavy45");
+    const bool Negative=PickupTestCase!=TEXT("offset")&&PickupTestCase!=TEXT("eccentric")&&PickupTestCase!=TEXT("wave")&&PickupTestCase!=TEXT("heavy45")&&PickupTestCase!=TEXT("incident")&&PickupTestCase!=TEXT("extended_incident");
     // Attachment's instantaneous position is checked in the runtime. The cargo
     // may legitimately move during later control steps of the same render frame.
     if(!WasAttached&&C->bCarrying && !C->Observation.AllLocked())
     {Finish(false,TEXT("Attachment bypassed lock feedback"));return;}
     if(Negative&&PickupTestCase!=TEXT("stack")&&C->bCarrying){Finish(false,TEXT("Invalid pickup attached cargo"));return;}
     bPickupSawTrial |= C->bCarrying&&C->Stage==2;
+    if(PickupTestCase==TEXT("extended_incident")&&C->FaultType==EPortCraneFault::EquipmentUnavailable)
+    {if(!C->bCarrying)Finish(false,TEXT("Equipment fault lost retained cargo"));return;}
     if(!C->Fault.IsEmpty())
     {
         const FString Expected=PickupTestCase==TEXT("lock")?TEXT("Twist lock alignment failed"):
@@ -122,6 +150,13 @@ void AQuayCrane::TickPickupTest(float Dt)
     }
     if((!RMG && C->Stage>=3) || (RMG && C->CompletedJobs==1))
     {
+        if(PickupTestCase==TEXT("extended_incident"))
+        {
+            if(!C->IncidentResponses.Contains(TEXT("equipment_failure")))return;
+            for(const TCHAR* Kind:{TEXT("equipment_failure"),TEXT("fail_hoist"),TEXT("agv_unavailable"),TEXT("slot_occupied"),TEXT("height_mismatch"),TEXT("fail_release")})
+                if((RMG||FString(Kind)==TEXT("fail_hoist")||FString(Kind)==TEXT("equipment_failure"))&&!C->IncidentResponses.Contains(Kind))
+                {Finish(false,FString(TEXT("Missing actual incident response: "))+Kind);return;}
+        }
         const auto Pick=C->DashboardState()->GetObjectField(TEXT("pickup"));
         const double Estimated=Pick->GetNumberField(TEXT("estimated_mass_kg"));
         const auto CoG=Pick->GetArrayField(TEXT("estimated_cog_m"));
