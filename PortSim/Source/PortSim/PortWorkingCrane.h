@@ -7,6 +7,7 @@
 #include "PortWorkingCrane.generated.h"
 
 class USpotLightComponent;
+class UPortEnvironmentComponent;
 
 class APortContainerActor;
 class UTextRenderComponent;
@@ -34,6 +35,8 @@ public:
     void Configure(int32 Number, bool bQuayside, FVector Source, FVector Destination, bool bCreateCargo=true);
     void AddTerminalWorkLights(TArray<TWeakObjectPtr<USpotLightComponent>>& Lights,
         TArray<TWeakObjectPtr<USpotLightComponent>>& ShadowLights);
+    void SetCameraLightingEnvironment(UPortEnvironmentComponent* Environment, bool bEnableAssist);
+    void UpdateCameraWorkLightsForDraw();
     void Advance(float Dt, bool bGlobalPaused);
     bool AssignCargo(APortContainerActor* Cargo, FVector Source, FVector Destination, bool SourceSupport, bool DestinationSupport, APortAGVActor* HandoverVehicle=nullptr,bool ReverseTransfer=false);
     void UpdateShipLandingTarget(FVector Target);
@@ -119,6 +122,14 @@ private:
     friend class FMovingPickupRecoveryTest;
     friend class FLoggedSeaPickupTest;
     friend class FRMGAGVHandoverTest;
+    friend class FCameraNightLightingTest;
+    bool HasCameraTargetLight(FVector Target) const;
+    float CameraWorkLightIntensity(float AmbientLux) const;
+    FVector CameraWorkLightMount(int32 Index) const;
+    FVector CameraTargetSurface(FVector Target) const;
+    TWeakObjectPtr<UPortEnvironmentComponent> CameraLightingEnvironment;
+    TArray<TWeakObjectPtr<USpotLightComponent>, TInlineAllocator<2>> CameraWorkLights;
+    bool bCameraWorkLightsEnabled = true;
     bool SecureRMGToAGV();
     bool bAGVHandoverComplete=false;
     bool bReverseTransfer=false;

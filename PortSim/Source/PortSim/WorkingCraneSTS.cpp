@@ -559,6 +559,8 @@ bool APortWorkingCrane::STSSensorContains(const FString& Key,FVector Point) cons
 {
     const int32 Index=STSProfile.Dynamics.Mounts.IndexOfByPredicate([&](const FSTSSensorMount& M){return M.Key==Key;});
     if(!SensorMarkers.IsValidIndex(Index)) return false;
+    const bool bCamera=Key.Contains(TEXT("camera"),ESearchCase::IgnoreCase);
+    const bool bLiDAR=Key.Contains(TEXT("lidar"),ESearchCase::IgnoreCase);
     const auto& M=STSProfile.Dynamics.Mounts[Index]; const auto* Marker=SensorMarkers[Index].Get();
     TArray<FVector> Origins;Origins.Add(Marker->GetComponentLocation());
     for(FVector Local:M.AdditionalPositions)
@@ -569,13 +571,12 @@ bool APortWorkingCrane::STSSensorContains(const FString& Key,FVector Point) cons
     for(const FVector& Origin:Origins)
     {
         const FVector Delta=Point-Origin;const double Distance=Delta.Size()*.01;
-        const bool bCamera=Key.Contains(TEXT("camera"),ESearchCase::IgnoreCase);
-        const bool bLiDAR=Key.Contains(TEXT("lidar"),ESearchCase::IgnoreCase);
         const double RainScale=bCamera?RainCameraRangeScale:(bLiDAR?RainLiDARRangeScale:1.f);
         const double RainMaximum=M.Maximum*RainScale;
         const bool bFogSensitive=bCamera||bLiDAR||(!bSTS && Key==TEXT("stack_profile"));
         const double Maximum=bFogSensitive?FMath::Min(RainMaximum,double(FogVisibilityMeters)):M.Maximum;
-        if(Distance>=M.Minimum && Distance<=Maximum && FVector::DotProduct(Delta.GetSafeNormal(),Marker->GetForwardVector())>=FMath::Cos(FMath::DegreesToRadians(M.Fov*.5)))return true;
+        if(Distance>=M.Minimum && Distance<=Maximum && FVector::DotProduct(Delta.GetSafeNormal(),Marker->GetForwardVector())>=FMath::Cos(FMath::DegreesToRadians(M.Fov*.5)))
+            return !bCamera || HasCameraTargetLight(Point);
     }
     return false;
 }

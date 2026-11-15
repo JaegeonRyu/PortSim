@@ -237,6 +237,7 @@ public:
     // Do not multiply speed or delta by SimulationSpeed a second time.
     void AdvanceEnvironment(float SimulationSeconds);
     FDateTime GetLocalDateTime() const { return StartLocalTime+FTimespan::FromSeconds(EnvironmentElapsedSeconds); }
+    float GetDaylightIlluminanceLux() const;
     void ResetEnvironmentClock() { EnvironmentElapsedSeconds=0.0; }
     void ShiftStartTimeByHalfHour(bool bForward);
 
@@ -307,6 +308,8 @@ public:
     UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Environment|Ice",meta=(ClampMin="0",ClampMax="1")) float IceIntensity=1;
 private:
     FDateTime StartLocalTime;
+    mutable int64 DaylightSampleIndex = -1;
+    mutable float DaylightSampleLux = 0.f;
     double EnvironmentElapsedSeconds=0.0;
     void NotifyExternalInput();
     UPROPERTY() TObjectPtr<UPhysicalMaterial> ContactMaterial;

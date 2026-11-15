@@ -1,5 +1,6 @@
 #include "PortEnvironmentComponent.h"
 #include "PortSimulationClock.h"
+#include "PortSolarLighting.h"
 #include "TerminalReplay.h"
 #include "QuayCrane.h"
 #include "Misc/CommandLine.h"
@@ -528,6 +529,18 @@ void UPortEnvironmentComponent::ShiftStartTimeByHalfHour(bool bForward)
     const int64 Ticks=StartLocalTime.GetTimeOfDay().GetTicks()+(bForward?HalfHour:-HalfHour);
     StartLocalTime=StartLocalTime.GetDate()+FTimespan((Ticks+ETimespan::TicksPerDay)%ETimespan::TicksPerDay);
     NotifyExternalInput();
+}
+
+float UPortEnvironmentComponent::GetDaylightIlluminanceLux() const
+{
+    constexpr int64 SampleTicks = 10 * ETimespan::TicksPerSecond;
+    const int64 SampleIndex = GetLocalDateTime().GetTicks() / SampleTicks;
+    if (DaylightSampleIndex != SampleIndex)
+    {
+        DaylightSampleIndex = SampleIndex;
+        DaylightSampleLux = PortSolarLighting::Calculate(FDateTime(SampleIndex * SampleTicks)).EstimateHorizontalIlluminanceLux();
+    }
+    return DaylightSampleLux;
 }
 
 void UPortEnvironmentComponent::AdvanceEnvironment(float SimulationSeconds)

@@ -1,5 +1,8 @@
 #include "QuayCrane.h"
 #include "PortWorkingCrane.h"
+#include "PortContainerActor.h"
+#include "PortEnvironmentComponent.h"
+#include "SpreaderTelescope.h"
 #include "TerminalLayout.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
@@ -10,8 +13,12 @@
 #include "HAL/PlatformTime.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/App.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Misc/AutomationTest.h"
+#include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #endif
 
 namespace
@@ -20,14 +27,55 @@ namespace
     constexpr float ShadowRangeCm = 23000.f; // Includes the built-in 200 m STS camera.
     constexpr float ShadowRetentionCm = 1500.f;
 
-    bool NeedsWorkLights(bool bAlreadyOn, float DaylightLux, float FogMetres, float RainRate, float SnowRate)
+    float WeatherAdjustedDaylight(float DaylightLux, float RainRate, float SnowRate)
     {
         // The environment has no cloud optical-depth model. Use precipitation as a
         // proxy for loss of daylight, and independently respond to low fog visibility.
         const float RainTransmission = FMath::Lerp(1.f, .12f, FMath::Clamp(RainRate / 75.f, 0.f, 1.f));
         const float SnowTransmission = FMath::Lerp(1.f, .22f, FMath::Clamp(SnowRate / 80.f, 0.f, 1.f));
-        const float EstimatedLux = DaylightLux * FMath::Min(RainTransmission, SnowTransmission);
-        return EstimatedLux < (bAlreadyOn ? 750.f : 450.f) || FogMetres < (bAlreadyOn ? 550.f : 400.f);
+        return DaylightLux * FMath::Min(RainTransmission, SnowTransmission);
+    }
+
+    bool NeedsWorkLights(bool bAlreadyOn, float DaylightLux, float FogMetres, float RainRate, float SnowRate)
+    {
+        return WeatherAdjustedDaylight(DaylightLux, RainRate, SnowRate) < (bAlreadyOn ? 750.f : 450.f)
+            || FogMetres < (bAlreadyOn ? 550.f : 400.f);
+    }
+
+    constexpr float CameraMinimumLux = 5.f; // Synthetic pose sensor, pending camera calibration.
+    constexpr float CameraAssistLux = 35.f;
+    constexpr float CameraAssistRangeM = 58.f;
+    constexpr float CameraAssistCone = 70.f;
+    constexpr float MaxCameraAssistCandela = 18000.f;
+    const FVector TrolleyMountM(0, 2.6, -1.05);
+
+    struct FWorkLightBeam { float Candela; float RangeM; float Cone; };
+    FWorkLightBeam TrolleyBeam(bool bSTS)
+    {
+        return bSTS ? FWorkLightBeam{74000.f, 66.f, 29.f} : FWorkLightBeam{39000.f, 43.f, 35.f};
+    }
+
+    float AmbientCameraLux(const UPortEnvironmentComponent& Environment)
+    {
+        return WeatherAdjustedDaylight(Environment.GetDaylightIlluminanceLux(),
+            Environment.IsRainEnabled() ? Environment.GetRainfallMmPerHour() : 0.f,
+            Environment.IsSnowEnabled() ? Environment.GetSnowfallMmPerHour() : 0.f);
+    }
+
+    double SpotIlluminance(FVector Source, FVector Forward, FVector Target, FVector Normal,
+        const FWorkLightBeam& Beam, float FogMetres)
+    {
+        const FVector Ray = Target - Source;
+        const double Metres = Ray.Size() * .01;
+        if (Metres >= Beam.RangeM || Metres < .01) return 0.;
+        const FVector Direction = Ray.GetSafeNormal();
+        const double Outer = FMath::Cos(FMath::DegreesToRadians(double(Beam.Cone)));
+        const double Inner = FMath::Cos(FMath::DegreesToRadians(double(Beam.Cone) * .40));
+        const double Cone = FMath::Clamp((FVector::DotProduct(Forward, Direction) - Outer) / (Inner - Outer), 0., 1.);
+        const double Range = 1. - FMath::Square(FMath::Square(Metres / Beam.RangeM));
+        const double Incidence = FMath::Max(0., FVector::DotProduct(Normal, -Direction));
+        const double Transmission = FogMetres < MAX_flt ? FMath::Exp(-3.912 * Metres / FMath::Max(1.f, FogMetres)) : 1.;
+        return Beam.Candela * FMath::Square(Cone * Range) * Incidence * Transmission / FMath::Square(Metres);
     }
 
     USpotLightComponent* AddSpot(USceneComponent* Parent, const TCHAR* Name, const FVector& MountM,
@@ -104,6 +152,9 @@ void AQuayCrane::UpdateNightAmbientLight(double SolarElevation)
 
 void AQuayCrane::BuildTerminalLighting(USceneComponent* SiteRoot)
 {
+    const bool bEnableCameraAssist = !FParse::Param(FCommandLine::Get(), TEXT("PortSimNoCameraWorkLights"));
+    for (APortWorkingCrane* Crane : WorkingCranes)
+        Crane->SetCameraLightingEnvironment(Environment, bEnableCameraAssist);
     if (!FApp::CanEverRender() || GetNetMode() == NM_DedicatedServer) return;
 
     auto* Poles = AddFixtureMesh(SiteRoot, TEXT("TerminalLightPoles"), TEXT("/Engine/BasicShapes/Cylinder.Cylinder"),
@@ -196,12 +247,98 @@ void APortWorkingCrane::AddTerminalWorkLights(TArray<TWeakObjectPtr<USpotLightCo
     else
         Lights.Add(AddSpot(RootComponent, TEXT("RMGGantryFloodlight"), {15,3,GirderMountZ}, {-4,0,1}, 32000.f, 48.f, 41.f, 3650.f));
 
-    const FVector Mount(0, 2.6, -1.05);
     const FVector Aim(0, 0, -BeamZ / 100.);
-    auto* Task = AddSpot(Trolley, TEXT("TrolleyTaskFloodlight"), Mount, Aim,
-        bSTS ? 74000.f : 39000.f, bSTS ? 66.f : 43.f, bSTS ? 29.f : 35.f, 4400.f);
+    const FWorkLightBeam Beam = TrolleyBeam(bSTS);
+    auto* Task = AddSpot(Trolley, TEXT("TrolleyTaskFloodlight"), TrolleyMountM, Aim,
+        Beam.Candela, Beam.RangeM, Beam.Cone, 4400.f);
     Lights.Add(Task);
     ShadowLights.Add(Task);
+
+    if (bCameraWorkLightsEnabled)
+        for (int32 Index = 0; Index < (bSTS ? 1 : 2); ++Index)
+        {
+            const FVector Mount = CameraWorkLightMount(Index);
+            CameraWorkLights.Add(AddSpot(Spreader, TEXT("SpreaderCameraWorkLight"), Mount, Mount - FVector::UpVector,
+                0.f, CameraAssistRangeM, CameraAssistCone, 4500.f));
+        }
+}
+
+void APortWorkingCrane::SetCameraLightingEnvironment(UPortEnvironmentComponent* Environment, bool bEnableAssist)
+{
+    CameraLightingEnvironment = Environment;
+    bCameraWorkLightsEnabled = bEnableAssist;
+}
+
+FVector APortWorkingCrane::CameraWorkLightMount(int32 Index) const
+{
+    // A lamp above each RMG camera pair maintains side coverage on final seating.
+    const double EndM = bSTS ? 0. : PortSpreaderTelescope::TwistlockHalfLengthCm(TelescopeLengthCm) * .01;
+    return FVector(0., Index == 0 ? -EndM : EndM, .82);
+}
+
+FVector APortWorkingCrane::CameraTargetSurface(FVector Target) const
+{
+    // Pose observations use the cargo centre and corner XYs. Light falls on its roof.
+    return IsValid(CargoActor) ? Target + CargoActor->GetActorUpVector() * 129.5 : Target;
+}
+
+float APortWorkingCrane::CameraWorkLightIntensity(float AmbientLux) const
+{
+    if (!bCameraWorkLightsEnabled || !bJobActive || bCarrying || !IsValid(CargoActor) || AmbientLux >= CameraAssistLux)
+        return 0.f;
+    const FVector Roof = CameraTargetSurface(CargoActor->GetActorLocation());
+    const double DistanceM = FVector::DotProduct(Spreader->GetUpVector(), Spreader->GetComponentLocation() - Roof) * .01 + .82;
+    // Limit glare near the box and avoid frequent light changes during descent.
+    const float Intensity = FMath::Clamp(float((CameraAssistLux - AmbientLux) * FMath::Square(FMath::Max(DistanceM, 1.))), 0.f, MaxCameraAssistCandela);
+    return FMath::CeilToFloat(Intensity / 25.f) * 25.f;
+}
+
+bool APortWorkingCrane::HasCameraTargetLight(FVector Target) const
+{
+    const auto* Environment = CameraLightingEnvironment.Get();
+    if (!Environment) return true;
+    const float AmbientLux = AmbientCameraLux(*Environment);
+    double Lux = AmbientLux;
+    if (Lux >= CameraMinimumLux) return true;
+
+    const FVector Roof = CameraTargetSurface(Target);
+    const FVector Normal = IsValid(CargoActor) ? CargoActor->GetActorUpVector() : FVector::UpVector;
+    const float FogMetres = Environment->IsFogEnabled() ? Environment->GetFogVisibilityMeters() : MAX_flt;
+    const FTransform& TrolleyTransform = Trolley->GetComponentTransform();
+    const FVector TrolleyAim = FVector(0., 0., -BeamZ / 100.) - TrolleyMountM;
+    // At this light level the existing automatic trolley floodlights are on.
+    Lux += SpotIlluminance(TrolleyTransform.TransformPositionNoScale(TrolleyMountM * 100.),
+        TrolleyTransform.TransformVectorNoScale(TrolleyAim.GetSafeNormal()), Roof, Normal, TrolleyBeam(bSTS), FogMetres);
+    if (Lux >= CameraMinimumLux) return true;
+
+    const float Candela = CameraWorkLightIntensity(AmbientLux);
+    if (Candela <= 0.f) return false;
+    const FTransform& SpreaderTransform = Spreader->GetComponentTransform();
+    const FWorkLightBeam Beam{Candela, CameraAssistRangeM, CameraAssistCone};
+    for (int32 Index = 0; Index < (bSTS ? 1 : 2); ++Index)
+    {
+        Lux += SpotIlluminance(SpreaderTransform.TransformPositionNoScale(CameraWorkLightMount(Index) * 100.),
+            -Spreader->GetUpVector(), Roof, Normal, Beam, FogMetres);
+    }
+    return Lux >= CameraMinimumLux;
+}
+
+void APortWorkingCrane::UpdateCameraWorkLightsForDraw()
+{
+    if (CameraWorkLights.IsEmpty()) return;
+    const auto* Environment = CameraLightingEnvironment.Get();
+    const float Candela = bJobActive && !bCarrying && Environment ? CameraWorkLightIntensity(AmbientCameraLux(*Environment)) : 0.f;
+    for (int32 Index = 0; Index < CameraWorkLights.Num(); ++Index)
+    {
+        if (auto* Light = CameraWorkLights[Index].Get())
+        {
+            Light->SetVisibility(Candela > 0.f);
+            if (Candela <= 0.f) continue;
+            const FVector Location = CameraWorkLightMount(Index) * 100.;
+            if (!Light->GetRelativeLocation().Equals(Location, .1)) Light->SetRelativeLocation(Location);
+            if (Light->Intensity != Candela) Light->SetIntensity(Candela);
+        }
+    }
 }
 
 void AQuayCrane::UpdateTerminalLightingForDraw()
@@ -211,7 +348,8 @@ void AQuayCrane::UpdateTerminalLightingForDraw()
         Environment->IsFogEnabled() ? Environment->GetFogVisibilityMeters() : MAX_flt,
         Environment->IsRainEnabled() ? Environment->GetRainfallMmPerHour() : 0.f,
         Environment->IsSnowEnabled() ? Environment->GetSnowfallMmPerHour() : 0.f);
-    if (bOn != bTerminalLightsOn)
+    const bool bLightsChanged = bOn != bTerminalLightsOn;
+    if (bLightsChanged)
     {
         bTerminalLightsOn = bOn;
         NextTerminalShadowUpdate = 0.;
@@ -224,6 +362,8 @@ void AQuayCrane::UpdateTerminalLightingForDraw()
             bOn, TerminalLights.Num(), TerminalDaylightLux,
             Environment->IsFogEnabled() ? Environment->GetFogVisibilityMeters() : 0.f);
     }
+    if (bOn || bLightsChanged)
+        for (APortWorkingCrane* Crane : WorkingCranes) Crane->UpdateCameraWorkLightsForDraw();
 
     const double WallNow = FPlatformTime::Seconds();
     if (!bOn || WallNow < NextTerminalShadowUpdate) return;
@@ -280,6 +420,56 @@ bool FTerminalWorkLightSwitchTest::RunTest(const FString& Parameters)
     TestFalse(TEXT("The same visibility does not turn off lights back on"), NeedsWorkLights(false, 20000.f, 480.f, 0.f, 0.f));
     TestTrue(TEXT("Heavy rain darkens early twilight enough to switch on"), NeedsWorkLights(false, 2000.f, MAX_flt, 75.f, 0.f));
     TestTrue(TEXT("Heavy snow darkens early twilight enough to switch on"), NeedsWorkLights(false, 2000.f, MAX_flt, 0.f, 80.f));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCameraNightLightingTest, "PortSim.Environment.CameraNightLighting",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCameraNightLightingTest::RunTest(const FString& Parameters)
+{
+    const auto Init = UWorld::InitializationValues().AllowAudioPlayback(false).CreatePhysicsScene(true)
+        .RequiresHitProxies(false).CreateNavigation(false).CreateAISystem(false);
+    auto* World = UWorld::CreateWorld(EWorldType::Game, false, NAME_None, nullptr, true, ERHIFeatureLevel::Num, &Init);
+    ON_SCOPE_EXIT { World->DestroyWorld(false); };
+    auto* Environment = NewObject<UPortEnvironmentComponent>();
+    Environment->SetFogEnabled(true);
+    Environment->SetFogVisibilityMeters(30.f);
+    FSTSOperatingProfile Profile;
+    if (!TestTrue(TEXT("Load STS operating profile"), Profile.Load(FPaths::ProjectDir() / TEXT("../Document/STS/STS_ReferenceData.json"),
+        FPaths::ProjectConfigDir() / TEXT("STS_Simulation.json")))) return false;
+
+    for (bool bSTS : {true, false})
+    {
+        const FVector Position(bSTS ? -1600.f : 0.f, bSTS ? 0.f : 10000.f, 149.5f);
+        auto* Crane = World->SpawnActor<APortWorkingCrane>(FVector(0., Position.Y, 0.), FRotator::ZeroRotator);
+        if (bSTS) Crane->SetSTSProfile(Profile);
+        Crane->Configure(bSTS ? 1 : 2, bSTS, Position, Position, false);
+        auto* Cargo = World->SpawnActor<APortContainerActor>(Position, FRotator::ZeroRotator);
+        Cargo->InitializeContainer(bSTS ? 9401 : 9402);
+        Cargo->GetBody()->SetSimulatePhysics(false);
+        Crane->CargoActor = Cargo;
+        Crane->bJobActive = true;
+        Crane->Head = Crane->Local(Position) + FVector(0., 0., 154.5);
+        Crane->UpdateParts();
+        Crane->SetFogVisibilityMeters(30.f);
+
+        Environment->ResetEnvironmentClock();
+        Crane->SetCameraLightingEnvironment(Environment, false);
+        Crane->SampleSTS(true);
+        TestTrue(TEXT("Daylight permits camera observations"), Crane->Observation.bTargetVisible);
+
+        Environment->AdvanceEnvironment(13.f * 3600.f);
+        Crane->SampleSTS(true);
+        TestFalse(TEXT("Fog attenuates distant trolley light and leaves the target dark"), Crane->Observation.bTargetVisible);
+        Crane->SetCameraLightingEnvironment(Environment, true);
+        Crane->SampleSTS(true);
+        TestTrue(TEXT("Local camera work lights restore nighttime pose observation"), Crane->Observation.bTargetVisible);
+
+        Crane->SetFogVisibilityMeters(.1f);
+        Crane->SampleSTS(true);
+        TestFalse(TEXT("Lighting cannot restore a target outside the camera visibility limit"), Crane->Observation.bTargetVisible);
+    }
     return true;
 }
 #endif
