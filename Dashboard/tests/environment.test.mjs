@@ -37,11 +37,11 @@ test('weather hold reason, stable recovery and emergency/manual priorities are s
  s.environment.manual_paused=true;assert.match(renderEnvironment(s,{live:true}),/수동 일시정지/);
  s.environment.emergency_stop=true;assert.match(renderEnvironment(s,{live:true}),/비상 정지/);
 });
-test('HTTP exposes environment assets and places navigation between sensors and performance',async t=>{
+test('HTTP exposes environment assets and places navigation between sensors and incident management',async t=>{
  const server=createDashboardServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>server.close());
  const base='http://127.0.0.1:'+server.address().port;
  for(const file of ['/environment-view.mjs','/environment.css'])assert.equal((await fetch(base+file)).status,200);
- const html=await(await fetch(base)).text();assert.ok(html.indexOf('data-view="sensors"')<html.indexOf('data-view="environment"'));assert.ok(html.indexOf('data-view="environment"')<html.indexOf('data-view="performance"'));
+ const html=await(await fetch(base)).text();assert.ok(html.indexOf('data-view="sensors"')<html.indexOf('data-view="environment"'));assert.ok(html.indexOf('data-view="environment"')<html.indexOf('data-view="incidents"'));assert.doesNotMatch(html,/data-view="performance"/);
 });
 
 test('weather summary distinguishes simultaneous hazards, clear conditions, clouds and unavailable telemetry',()=>{

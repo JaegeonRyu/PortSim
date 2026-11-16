@@ -21,6 +21,7 @@ const files = new Map([
   ['/agv-physics-view.mjs', ['agv-physics-view.mjs', 'text/javascript']],
   ['/incident-model.mjs', ['incident-model.mjs', 'text/javascript']],
   ['/incident-view.mjs', ['incident-view.mjs', 'text/javascript']],
+  ['/incident-timing.mjs', ['incident-timing.mjs', 'text/javascript']],
   ['/incident.css', ['incident.css', 'text/css']],
   ['/scenario-view.mjs', ['scenario-view.mjs', 'text/javascript']],
   ['/agv-emergency-view.mjs', ['agv-emergency-view.mjs', 'text/javascript']],

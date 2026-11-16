@@ -506,6 +506,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
     const auto Incidents=CaptureIncidentScenarios();
     Root->SetNumberField(TEXT("incident_clock_seconds"),IncidentClock);
     Root->SetArrayField(TEXT("incident_scenarios"),Incidents->GetArrayField(TEXT("runs")));
+    Root->SetObjectField(TEXT("incident_timing"),CaptureIncidentTiming());
     Root->SetArrayField(TEXT("recovery_events"),Events);
     Root->SetNumberField(TEXT("simulation_seconds"),SimulationTime);
     if(const auto* Controller=Cast<AQuayCrane>(GetOwner()))

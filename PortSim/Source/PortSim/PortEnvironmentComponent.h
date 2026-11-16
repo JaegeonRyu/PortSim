@@ -312,6 +312,9 @@ private:
     mutable float DaylightSampleLux = 0.f;
     double EnvironmentElapsedSeconds=0.0;
     void NotifyExternalInput();
+public:
+    int32 InitializedSeed=0,InputRevision=0;
+private:
     UPROPERTY() TObjectPtr<UPhysicalMaterial> ContactMaterial;
     FPortSurfaceState MaterialSurface;
     FPortFrictionSettings MaterialSettings;

@@ -310,6 +310,7 @@ UPortEnvironmentComponent::UPortEnvironmentComponent()
 
 void UPortEnvironmentComponent::NotifyExternalInput()
 {
+    ++InputRevision;
     if(auto* Controller=Cast<AQuayCrane>(GetOwner())) Controller->NotifyExternalSimulationInput();
 }
 
@@ -453,6 +454,7 @@ void UPortEnvironmentComponent::BeginPlay()
     }
     int32 Seed=static_cast<int32>(FGuid::NewGuid().A);
     FParse::Value(FCommandLine::Get(),TEXT("PortSimEnvironmentSeed="),Seed);
+    InitializedSeed=Seed;
     Wind.Initialize(Seed);
     Sea.Initialize(Seed);
     float FogVisibility=Fog.VisibilityMeters;

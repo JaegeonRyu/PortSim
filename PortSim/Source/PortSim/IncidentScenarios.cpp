@@ -220,9 +220,15 @@ void APortSiteLogistics::AdvanceIncidentScenarios(float Dt)
             if(V&&Jobs[Vehicles.IndexOfByKey(V)].ExportIndex!=INDEX_NONE)S.ExpectShip=true;
             FJsonObject Command=*S.Command;Command.SetStringField(TEXT("run_id"),FPaths::GetCleanFilename(ReportBase));
             Command.SetStringField(TEXT("control_session"),DashboardControlSession);Command.SetStringField(TEXT("created_at"),FDateTime::UtcNow().ToIso8601());
+            // Isolation may reassign work inside ApplyDashboardCommand itself.
+            // Register provenance before it runs, and discard it on rejection.
+            S.MeasureAppliedAt=IncidentMeasureClock;
+            if(ID!=TEXT("environment"))S.AffectedActors.Add(ID);
+            if(S.Cargo.IsValid())S.AffectedCargo.Add(S.Cargo->GetName());
             FString Error;
             if(!ApplyDashboardCommand(Command,Error))
             {
+                S.MeasureAppliedAt=-1;S.AffectedActors.Reset();S.AffectedCargo.Reset();
                 // A conditional worker event waits for a safely reserved straight,
                 // without changing the route, cargo or clock to force admission.
                 const bool WaitForRoad=(Action==TEXT("worker_enter")||Action==TEXT("road_block"))&&V&&!V->Emergency.Active&&T!=TEXT("immediate")&&
@@ -286,6 +292,13 @@ TSharedPtr<FJsonObject> APortSiteLogistics::CaptureIncidentScenarios() const
         {
             auto Step=MakeShared<FJsonObject>(*S.Command);Step->SetStringField(TEXT("state"),S.State);Step->SetStringField(TEXT("message"),S.Message);
             Step->SetNumberField(TEXT("applied_at"),S.AppliedAt);Step->SetNumberField(TEXT("recovered_at"),S.RecoveredAt);
+            Step->SetNumberField(TEXT("measurement_applied_at"),S.MeasureAppliedAt);
+            Step->SetNumberField(TEXT("fault_cleared_at"),S.MeasureClearedAt);
+            Step->SetNumberField(TEXT("work_resumed_at"),S.MeasureResumedAt);
+            Step->SetNumberField(TEXT("work_completed_at"),S.MeasureCompletedAt);
+            auto AddSet=[&](const TCHAR* Key,const TSet<FString>& Set)
+            {auto Sorted=Set.Array();Sorted.Sort();TArray<TSharedPtr<FJsonValue>> Values;for(const auto& V:Sorted)Values.Add(MakeShared<FJsonValueString>(V));Step->SetArrayField(Key,Values);};
+            AddSet(TEXT("affected_actors"),S.AffectedActors);AddSet(TEXT("affected_cargo"),S.AffectedCargo);
             Step->SetBoolField(TEXT("response_observed"),S.Observed);Step->SetStringField(TEXT("cargo"),GetNameSafe(S.Cargo.Get()));
             Steps.Add(MakeShared<FJsonValueObject>(Step));
         }

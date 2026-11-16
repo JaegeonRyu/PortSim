@@ -110,6 +110,7 @@ bool FTerminalCheckpoint::Restore() const
 
 void FTerminalCheckpoint::Capture(UPortEnvironmentComponent& O)
 {
+    Values(O.InitializedSeed,O.InputRevision);
     Objects.Add(&O);
     Values(O.OperatingLimits,O.FrictionSettings,O.Surface,O.bSnowEnabled,O.SnowIntensity,O.bIceEnabled,O.IceIntensity);
     Values(O.EnvironmentElapsedSeconds,O.MaterialSurface,O.MaterialSettings,O.Accumulation,O.PublishedSurface,O.bSurfaceInitialized,
@@ -166,6 +167,8 @@ void FTerminalCheckpoint::Capture(APortWorkingCrane& O)
 
 void FTerminalCheckpoint::Capture(APortSiteLogistics& O)
 {
+    Values(O.IncidentMeasureClock,O.IncidentHaltSeconds,O.IncidentCompletionTimes,O.bIncidentReferenceClean,
+        O.IncidentEnvironmentRevision,O.IncidentComparisonKey,O.IncidentRuns,O.IncidentClock,O.bIncidentInputUsed);
     Values(O.FreeCargo,O.MovingCargo,O.FixedCargo,O.CargoBays,O.CargoBayIndex,O.CargoSources,
         O.CargoMotionVersions,O.PreviousCargoMotions,O.CurrentCargoMotions,O.CargoMotionVersion,
         O.CargoMotionDuration,O.IndexedCargoCount);

@@ -2796,6 +2796,7 @@ void APortSiteLogistics::Stop(const FString& Reason)
 void APortSiteLogistics::Advance(float Dt,bool Paused)
 {
     if(bReady && !FTerminalReplay::IsPredicting() && !FTerminalReplay::IsAdvancingPhysics()) ProcessDashboardCommands();
+    if(bReady) AdvanceIncidentMeasurement(Dt,Paused);
     if(bReady&&!FTerminalReplay::IsPredicting()) AdvanceIncidentScenarios(Dt);
     if(!FTerminalReplay::IsPredicting() && !FTerminalReplay::IsAdvancingPhysics()) PortSimPerformance::Report(SimulationTime,Delivered,GetWorld());
     PortSimPerformance::FScope Profile(TEXT("site_advance"));
@@ -3264,6 +3265,7 @@ void APortSiteLogistics::AdvanceStep(float Dt,bool Paused)
             PlacedContainers.Add(Cargo);
             Manifest[Job.Cargo].HandoverMask|=4;
             Manifest[Job.Cargo].State=2; ++Delivered; ++Vehicle->CompletedJobs;
+            IncidentCompletionTimes.Add(FString::Printf(TEXT("C%d"),Manifest[Job.Cargo].ID),IncidentMeasureClock);
             Vehicle->SetPayload(0);
             RecordVesselEvent(Job.Cargo,true);
             const int32 BelowSlot=Yard[Job.Slot].Below;
@@ -3847,6 +3849,7 @@ TArray<FVector> APortSiteLogistics::Snapshot() const
 void APortSiteLogistics::BeginReport()
 {
     SimulationTime=0;
+    BeginIncidentMeasurement();
     NextDashboardWall=0;
     for(int32 I=0;I<3;++I) VesselStarted[I]=VesselUnloaded[I]=VesselPlaced[I]=-1;
     ReportBase=FPaths::ProjectSavedDir()/TEXT("Results")/TEXT("Site_")+FGuid::NewGuid().ToString(EGuidFormats::Digits);
