@@ -14,7 +14,9 @@ void APortSiteLogistics::RecordRecoveryEvent(const FString& Kind,AActor* Cause,A
     AActor* Cargo,const FVector& OldPosition,const FVector& NewPosition)
 {
     auto E=MakeShared<FJsonObject>();
+    TrackIncidentImpact(Cause,From,To,Cargo);
     E->SetNumberField(TEXT("sequence"),++RecoverySequence);
+    E->SetNumberField(TEXT("measurement_seconds"),IncidentMeasureClock);
     E->SetNumberField(TEXT("simulation_seconds"),SimulationTime);
     E->SetStringField(TEXT("kind"),Kind);
     E->SetStringField(TEXT("cause_actor"),GetNameSafe(Cause));

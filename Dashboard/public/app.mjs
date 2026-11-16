@@ -1,4 +1,4 @@
-import {compareOperation, vesselDuration, formatDuration} from './metrics.mjs';
+import {formatDuration} from './metrics.mjs';
 import {renderFrictionDetails} from './friction-view.mjs';
 import {renderRSPhysics} from './rs-physics-view.mjs';
 import {renderAGVPhysics,renderAGVSensors} from './agv-physics-view.mjs';
@@ -25,9 +25,6 @@ Object.assign(labels,{emergency_hold:'작업자 안전정지 유지',emergency_b
 function icon(name){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name]||paths.grid}"/></svg>`;}
 document.querySelectorAll('[data-icon]').forEach(e=>e.innerHTML=icon(e.dataset.icon));
 let state=null, reference=null, settings=null, live=false, age=null, view='overview', filter='sts', query='', page=0, selected=null, tab='overview', sensor='S05', lastRendered='', busy=false, pointerHeld=false;
-const emptyBaseline={hours:'',count:'',cranes:'3',source:'',vessel:'vessel-1',boundary:'handover',mode:'engine',manualHours:'',manualCount:'',manualCranes:'3'};
-let baseline={...emptyBaseline};
-try{baseline={...baseline,...JSON.parse(localStorage.getItem('portsim-baseline-v1')||'{}')};}catch{}
 const actors=()=>state?.actors||[];
 let pendingCommand=null,impactFocus=null,controlRun='',controlMessages=new Map(),workerDistance=20;
 async function sendEquipmentCommand(action){
@@ -98,7 +95,7 @@ function heading(){
   $('#page-description').textContent='날씨·장비 오류·작업자 진입을 조합하고 실제 대응·재배정·복구 결과를 확인합니다.';
   document.querySelectorAll('[data-view]').forEach(e=>e.classList.toggle('active',e.dataset.view===view));return;
  }
- const info={overview:['항만 모니터링','항만의 움직임을, 한눈에.','선박에서 야드까지. 장비와 화물, 자동 운반의 모든 연결을 살펴보세요.'],equipment:['장비 탐색기','장비 하나하나, 더 깊이.','실행 중인 액터의 변수와 구성 부품, 연결된 화물을 찾아보세요.'],sensors:['센서 레퍼런스','작은 관측이 만드는 자동화.','STS·AGV·RMG 센서의 부착 부위와 관측값, 제어 판단의 연결을 확인하세요.'],environment:['환경 변수','항만의 환경을 살펴보세요.','날씨 · 기온 · 가시거리 · 풍향 · 풍속 · 파도 · 너울'],performance:['시간 절감 분석','자동화로 확보한 시간.','같은 선박 물량·STS 대수·완료 기준으로 기존 작업과 비교합니다.']}[view];
+ const info={overview:['항만 모니터링','항만의 움직임을, 한눈에.','선박에서 야드까지. 장비와 화물, 자동 운반의 모든 연결을 살펴보세요.'],equipment:['장비 탐색기','장비 하나하나, 더 깊이.','실행 중인 액터의 변수와 구성 부품, 연결된 화물을 찾아보세요.'],sensors:['센서 레퍼런스','작은 관측이 만드는 자동화.','STS·AGV·RMG 센서의 부착 부위와 관측값, 제어 판단의 연결을 확인하세요.'],environment:['환경 변수','항만의 환경을 살펴보세요.','날씨 · 기온 · 가시거리 · 풍향 · 풍속 · 파도 · 너울']}[view];
  $('#breadcrumb').textContent=info[0];$('#page-title').textContent=info[1];$('#page-description').textContent=info[2];
  document.querySelectorAll('[data-view]').forEach(e=>e.classList.toggle('active',e.dataset.view===view));
 }
@@ -266,7 +263,7 @@ function overviewDetails(a){
    `<details><summary>Bay / Row / Tier 배치 ${num(s.placements?.length,0)}개 보기</summary><div class="table-scroll"><table><thead><tr><th>화물</th><th>Bay</th><th>Row</th><th>Tier</th><th>20ft 자리</th><th>아래 받침</th><th>스택 t</th><th>고박 kN</th></tr></thead><tbody>${(s.placements||[]).map(p=>`<tr><td>${esc(p.cargo)}</td><td>${num(p.bay,0)}</td><td>${num(p.row,0)}</td><td>${num(p.tier,0)}</td><td>${p.subslot?num(p.subslot,0):'—'}</td><td>${esc(p.below_container||'갑판')}</td><td>${num(p.stack_kg/1000)}</td><td>${num(p.lashing_n/1000)}</td></tr>`).join('')}</tbody></table></div></details>`;
  }
  if(a.type==='container')html+=kv('무게중심 편차',`${vector(a.cog_m)} m`)+kv('물리 계산',a.simulating_physics?'활성':'부착 또는 고정 상태');
- if(a.type==='vessel')html+=kv('초기 화물',`${a.initial_count}개`)+kv('STS 인계 완료',`${a.unloaded}개`)+kv('야드 배치 완료',`${a.placed}개`)+`<button class="button primary" data-performance="${esc(a.id)}" style="margin-top:14px;width:100%">이 선박의 시간 절감 분석 →</button>`;
+ if(a.type==='vessel')html+=kv('초기 화물',`${a.initial_count}개`)+kv('STS 인계 완료',`${a.unloaded}개`)+kv('야드 배치 완료',`${a.placed}개`);
  if(a.type==='yard')html+=kv('슬롯',num(a.slots,0))+kv('점유',num(a.occupied,0))+`<div class="note">야드의 고정 컨테이너는 개별 Actor가 아닌 인스턴스로 구성되어 블록 단위로 집계합니다.</div>`;
  return html;
 }
@@ -327,25 +324,15 @@ function sensorsPage(){
  return `<div class="sensor-layout"><section class="panel"><div class="panel-head"><div><h2>${a?.type?.toUpperCase()||'크레인'} 센서 배치와 탐지</h2><p>엔진 좌표 투영 · 목록에서 겹친 센서를 각각 선택할 수 있습니다.</p></div></div><label class="sensor-picker">조회 장비<select id="sensor-actor">${actors().filter(a=>['sts','rmg','agv'].includes(a.type)).map(v=>`<option value="${esc(v.id)}" ${v.id===a?.id?'selected':''}>${esc(v.name)}</option>`).join('')}</select></label><div class="sensor-diagram">${mountedLayout(a)}</div><div class="sensor-list">${refs.map(s=>`<button class="sensor-row ${s.id===sensor?'selected':''}" data-sensor="${s.id}"><span class="sensor-id">${s.id}</span><span><strong>${esc(s.name)}</strong><small>${a?.mounted_sensors?.some(m=>m.key===s.key)?'장착 좌표 · 범위 연결':'실행 데이터 대기'}</small></span></button>`).join('')}</div></section><aside class="panel sensor-info">${s?`<span class="sensor-id">${s.id}</span><h3>${esc(s.name)}</h3><p>${esc(s.typical_location)}</p><div class="note amber">공개 제품 사양과 설치 가정을 구분하여 적용했습니다. ${a?.type==='rmg'?'Konecranes PDF의 장착 부위를 참고했으며 정확한 좌표·범위는 가정입니다. RTG 자기유도 조향은 적용하지 않습니다.':'DGT 실기기의 절대 XYZ와 실장 모델은 미확인입니다.'}</div>${m?`${sensorSourceDetails(m)}${kv('기준 부품',m.frame)}${kv('부품 기준 XYZ',`${vector(m.mount_position_m,4)} m`)}${kv('세계 XYZ',`${vector(m.world_position_m,3)} m`)}${(m.instances||[]).slice(1).map((instance,i)=>kv(`추가 ${i+2}번 세계 XYZ`,`${vector(instance.world_position_m,3)} m`)).join('')}${kv('세계 측정 방향',vector(m.forward))}${kv('설정 측정 범위',`${num(m.minimum,2)} ~ ${num(m.maximum,2)} ${m.unit}`)}${kv('시야각',`${num(m.fov_deg)}°`)}${'value'in m?kv('관측값',`${a?.observation?.active?(typeof m.value==='number'?num(m.value,5):showValue(m.value)):'작업 대기'} ${a?.observation?.active&&typeof m.value==='number'?m.unit:''}`):''}${m.values?kv('코너 1~4 관측',m.values.map(v=>showValue(v)).join(' / ')):''}${'agv_in_range'in m?kv('AGV 범위 판정',m.agv_in_range?'범위 안':'범위 밖 / 대상 없음'):''}${m.scan?(m.instances?.length?m.instances:[m]).map((instance,i)=>`<div class="section-label">탐지 ${i+1}</div>${sensorGeometry(instance)}`).join('')+`<div class="note">9개 가시성 충돌 광선 · 실제 시간 1 Hz. 녹색 선 끝은 충돌점, 연한 선은 최대 거리입니다. 3D 원뿔 전체 스캔이나 카메라 영상 인식은 아닙니다.</div>${kv('충돌 거리',m.rays.filter(r=>r.distance_m!==null).map(r=>num(r.distance_m,2)+' m').join(' / ')||'감지 없음')}`:`<div class="note">${m.key==='ttds'?'설치만 모델링하며 트윈 리프트 판별은 미구현입니다.':m.key==='telescope_encoder'?'20/40/45ft 목표에 따라 엔드빔이 이동하며 현재 길이를 절대 위치 엔코더 값으로 표시합니다.':'거리 스캔 대신 해당 단위의 합성 관측값을 표시합니다.'}</div>`}`:'<div class="empty">새 빌드의 시뮬레이션 실행 데이터가 필요합니다.</div>'}<div class="section-label">관측 항목</div><div class="note">${(s.observations||[]).map(esc).join('<br>')}</div><div class="section-label">자동화 판단 레퍼런스</div><div class="note">${(s.controller_decisions||[]).map(esc).join('<br>')}</div><div class="note">엔코더 분해능·속도 유효성·하중 범위와 AGV 시야각은 관측·인터록에 반영됩니다. ${a?.type==='rmg'?'RMG는 별도의 적재면 4점 측정과 보기 레이저를 적재·충돌 인터록에 사용합니다. 아래 9개 광선은 진단용입니다.':'나머지 탐지 광선은 현재 시각화·진단용입니다.'}</div>`:'레퍼런스 불러오는 중'}</aside></div>`;
 }
 
-function performancePage(){
- const vessels=state?.vessels||[],v=vessels.find(x=>x.id===baseline.vessel)||vessels[0];
- const seconds=baseline.mode==='manual'?(Number(baseline.manualHours)*3600||null):vesselDuration(v,baseline.boundary);
- const count=baseline.mode==='manual'?baseline.manualCount:v?.initial_count;
- const result=compareOperation({baselineHours:baseline.hours,baselineCount:baseline.count,baselineCranes:baseline.cranes,automatedSeconds:seconds,automatedCount:count,automatedCranes:baseline.mode==='manual'?baseline.manualCranes:3});
- const noBaseline=!baseline.hours||!baseline.count;
- const reason=noBaseline?'기존 사람 운전 방식의 시간과 물량을 입력하세요.':seconds===null&&baseline.mode==='engine'?'선박 전체 작업이 완료되면 절감률을 계산합니다. 부분 작업 시간은 외삽하지 않습니다.':result.reason;
- const input=(key,label,placeholder,type='number')=>`<label>${label}<input data-baseline="${key}" type="${type}" ${type==='number'?'min="0" step="any"':''} value="${esc(baseline[key])}" placeholder="${esc(placeholder)}"></label>`;
- return `<div class="analysis-grid"><section class="panel"><div class="panel-head"><h2>비교 조건</h2><span class="badge">동일 작업 기준</span></div><div class="form-body"><label>비교할 선박<select data-baseline="vessel">${vessels.map(x=>`<option value="${x.id}" ${baseline.vessel===x.id?'selected':''}>${x.name} · ${x.initial_count}개</option>`).join('')||'<option>엔진 데이터 대기</option>'}</select></label><label>작업 완료 기준<select data-baseline="boundary"><option value="handover" ${baseline.boundary==='handover'?'selected':''}>선박 하역 · 마지막 STS→AGV 인계</option><option value="yard" ${baseline.boundary==='yard'?'selected':''}>야드 완료 · 마지막 RMG 적재</option></select><small>기준 시간도 동일한 시작·종료 조건이어야 합니다. 선박별 첫 자동 작업 시작부터 측정합니다.</small></label><div class="section-label">기존 사람 운전 방식</div>${input('hours','선박 1척 작업 시간 (시간)','기존 측정 시간 입력')}<div class="input-pair">${input('count','컨테이너 수 (개)','물량 입력')}${input('cranes','STS 투입 대수','3')}</div>${input('source','기준 자료 / 작업 조건','예: 작업일지, 정지·휴식 포함 여부','text')}<div class="section-label">자동화 방식</div><label>결과 출처<select data-baseline="mode"><option value="engine" ${baseline.mode==='engine'?'selected':''}>선택 선박의 엔진 완료 기록</option><option value="manual" ${baseline.mode==='manual'?'selected':''}>직접 입력 · 계산 시나리오</option></select></label>${baseline.mode==='manual'?`${input('manualHours','자동화 시간 (시간)','비교할 시간 입력')}<div class="input-pair">${input('manualCount','자동화 물량 (개)','동일 물량')}${input('manualCranes','자동화 STS 대수','3')}</div><div class="note amber">직접 입력한 결과는 엔진 검증 결과가 아닙니다.</div>`:kv('자동화 투입',`${count??'—'}개 · STS 3대`)}<button id="calculate" class="button primary" style="width:100%;margin-top:15px">절감률 계산</button><small>입력 기준은 이 브라우저에 저장됩니다.</small><button id="reset-baseline" class="inline-link">비교 입력 초기화</button></div></section><section class="panel"><div class="panel-head"><div><h2>시간 절감 비교</h2><p>${baseline.boundary==='yard'?'선박 → 야드 최종 적재':'선박 → AGV 최종 인계'} · 시뮬레이션 시간</p></div><span class="badge ${baseline.mode==='manual'?'recorded':''}">${baseline.mode==='manual'?'직접 입력 시나리오':'엔진 기록'}</span></div><div class="result-body"><div class="result-hero"><div class="result-label">기준 운용 대비 시간 절감률</div><strong>${result.ok?`${num(result.percent,1)}<small>%</small>`:'—'}</strong><p>${result.ok?`${result.savedSeconds>=0?'절감':'증가'} 시간 ${formatDuration(Math.abs(result.savedSeconds))}${baseline.mode==='manual'?' · 사용자 입력값으로 계산':''}`:esc(reason)}</p></div>${result.ok?`<div class="bar-row"><div class="bar-label"><span>기존 사람 운전</span><span class="mono">${formatDuration(result.baselineSeconds)}</span></div><div class="bar-track"><div class="bar" style="width:${result.baselineSeconds/Math.max(result.baselineSeconds,result.automatedSeconds)*100}%"></div></div></div><div class="bar-row"><div class="bar-label"><span>자동화 운전</span><span class="mono">${formatDuration(result.automatedSeconds)}</span></div><div class="bar-track auto"><div class="bar" style="width:${result.automatedSeconds/Math.max(result.baselineSeconds,result.automatedSeconds)*100}%"></div></div></div>`:`<div class="empty"><strong>${v?`${v.name} · ${v.initial_count}개`:'완료 기록 대기'}</strong>STS 인계 ${v?.unloaded??0}개 · 야드 적재 ${v?.placed??0}개<br>현재까지의 경과 ${formatDuration(v?.started_at>=0?(state?.simulation_seconds-v.started_at):null)}</div>`}<div class="formula">절감률 = (기준 작업 시간 − 자동화 작업 시간) ÷ 기준 작업 시간 × 100<br>음수는 시간 증가입니다. 배속으로 줄어든 실제 실행 시간은 계산에 사용하지 않습니다.</div><div class="note">컨테이너 수와 STS 대수가 다르면 계산하지 않습니다. 선박 적층·화물 질량·경로·휴식 및 대기 포함 조건도 맞춰 해석하세요. 여러 장비의 작업 시간을 합산하지 않고 선박 전체 완료 시각을 사용합니다.</div>${baseline.source?kv('기준 자료',baseline.source):''}</div></section></div><div class="vessel-cards">${vessels.map(v=>`<article class="vessel-card"><h3>${v.name}</h3><div class="progress"><span style="width:${v.unloaded/v.initial_count*100}%"></span></div><p>하역 ${v.unloaded} / ${v.initial_count}개 · 야드 ${v.placed}개<br>하역 완료 ${formatDuration(vesselDuration(v,'handover'))}<br>야드 완료 ${formatDuration(vesselDuration(v,'yard'))}</p><button class="inline-link" data-performance="${v.id}">이 선박으로 비교 →</button></article>`).join('')}</div>`;
-}
 const incidentUI=new IncidentUI({snapshot:()=>({state,live}),render:()=>{if(view==='incidents')renderContent();},notify:toast,send:async(command)=>{
  const response=await fetch('/api/equipment-command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:state.run_id,control_session:state.control_session,...command})});
  const data=await response.json();if(!response.ok)throw Error(data.message||'명령 전송 실패');return data;
 }});
-function scenarioPage(){return incidentUI.view(state,live)+`<div data-scenario-map>${map()+impactFeed(state,null,live)}</div>`;}
+function scenarioPage(){return incidentUI.view(state,live)+`<div data-scenario-map>${map()+impactFeed(state,null,live)}</div>`+incidentUI.records(state,live);}
 function updateScenario(){
  incidentUI.observe(state);
  const panel=$('[data-incident-live]');if(!panel){renderContent();return;}
- if(!pointerHeld)refreshIncidentRuns(panel,state,live);
+ if(!pointerHeld)document.querySelectorAll('[data-incident-live],[data-incident-records]').forEach(p=>refreshIncidentRuns(p,state,live));
  document.querySelectorAll('.incident-composer fieldset,.incident-weather-panel fieldset').forEach(fieldset=>fieldset.disabled=!live||!state?.incident_control_supported||!!state?.fault||incidentUI.busy);
  const message=$('.incident-composer .control-message');if(message)message.textContent=incidentUI.message;
  if(!pointerHeld&&!document.activeElement?.closest('[data-scenario-map]')){
@@ -357,13 +344,12 @@ function renderContent(){
  heading();
  if(view==='sensors')$('#view-content').innerHTML=sensorsPage();
  else if(view==='environment')$('#view-content').innerHTML=renderEnvironment(state,{live,age});
- else if(view==='performance')$('#view-content').innerHTML=performancePage();
  else if(view==='incidents'){
-  const previous=$('[data-incident-live]');
+  const previous=[...document.querySelectorAll('[data-incident-live],[data-incident-records]')];
   $('#view-content').innerHTML=scenarioPage();
-  if(previous){
-   $('[data-incident-live]').replaceWith(previous);
-   refreshIncidentRuns(previous,state,live);
+  for(const panel of previous){
+   const selector=panel.hasAttribute('data-incident-records')?'[data-incident-records]':'[data-incident-live]';
+   $(selector).replaceWith(panel);refreshIncidentRuns(panel,state,live);
   }
  }
  else $('#view-content').innerHTML=`<div class="${view==='equipment'?'full-equipment':''}"><div class="monitor-grid"><div>${view==='overview'?map()+impactFeed(state,impactFocus,live)+stowagePlans():''}${equipmentTable()}</div>${inspector()}</div></div>`;
@@ -412,16 +398,12 @@ document.addEventListener('click',e=>{
  if(b.dataset.page){page+=Number(b.dataset.page);renderContent();}
  if(b.dataset.sensor){sensor=b.dataset.sensor;renderContent();}
  if(b.dataset.openSensor){sensor=b.dataset.openSensor;view='sensors';renderContent();}
- if(b.dataset.performance){baseline.vessel=b.dataset.performance;view='performance';renderContent();}
- if(b.id==='calculate'){document.querySelectorAll('[data-baseline]').forEach(el=>baseline[el.dataset.baseline]=el.value);saveBaseline();renderContent();}
- if(b.id==='reset-baseline'){baseline={...emptyBaseline};saveBaseline();renderContent();}
  if(b.id==='refresh'){poll();toast('최신 기록을 확인합니다.');}
  if(b.id==='export'){
   if(!state){toast('내보낼 실행 기록이 없습니다.');return;}
-  const blob=new Blob([JSON.stringify({exported_at:new Date().toISOString(),live_at_export:live,state,comparison_inputs:baseline},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`PortSim-${state.run_id}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('실행 스냅샷을 저장했습니다.');
+  const blob=new Blob([JSON.stringify({exported_at:new Date().toISOString(),live_at_export:live,state,incident_timing:state.incident_timing},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`PortSim-${state.run_id}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('실행 스냅샷을 저장했습니다.');
  }
 });
-function saveBaseline(){try{localStorage.setItem('portsim-baseline-v1',JSON.stringify(baseline));}catch{toast('브라우저에 저장하지 못했습니다. 현재 입력으로 계산합니다.');}}
 document.addEventListener('pointerdown',()=>pointerHeld=true);
 document.addEventListener('pointerup',()=>{setTimeout(()=>pointerHeld=false,250);});
 document.addEventListener('pointercancel',()=>pointerHeld=false);
@@ -429,9 +411,8 @@ document.addEventListener('input',e=>{
  if(e.target.dataset.incidentField||e.target.dataset.incidentWeather)incidentUI.input(e.target);
  if(e.target.hasAttribute('data-worker-distance'))workerDistance=Number(e.target.value);
  if(e.target.id==='actor-search'){query=e.target.value;page=0;const start=e.target.selectionStart;renderContent();const el=$('#actor-search');el.focus();el.setSelectionRange(start,start);}
- if(e.target.dataset.baseline){baseline[e.target.dataset.baseline]=e.target.value;}
 });
-document.addEventListener('change',e=>{if(['target','action','trigger'].includes(e.target.dataset.incidentField)){incidentUI.input(e.target);if(e.target.dataset.incidentField==='target')incidentUI.draft.trigger='immediate';if(e.target.dataset.incidentField==='action')incidentUI.draft.trigger=({fail_pickup:'pickup',fail_placement:'placing',worker_enter:'loaded',misdelivery:'loaded',localization_loss:'moving',fms_disconnect:'moving',fms_delay:'moving',road_block:'moving',fail_release:'release',fail_hoist:'placing',agv_unavailable:'handover',slot_occupied:'placing',height_mismatch:'placing'})[e.target.value]||'immediate';renderContent();}if(e.target.id==='scenario-target'){selected=e.target.value;renderContent();}if(e.target.id==='sensor-actor'){selected=e.target.value;sensor=sensorRefs(current())[0]?.id||sensor;renderContent();}if(e.target.dataset.baseline){baseline[e.target.dataset.baseline]=e.target.value;saveBaseline();if(e.target.tagName==='SELECT')renderContent();}});
+document.addEventListener('change',e=>{if(['target','action','trigger'].includes(e.target.dataset.incidentField)){incidentUI.input(e.target);if(e.target.dataset.incidentField==='target')incidentUI.draft.trigger='immediate';if(e.target.dataset.incidentField==='action')incidentUI.draft.trigger=({fail_pickup:'pickup',fail_placement:'placing',worker_enter:'loaded',misdelivery:'loaded',localization_loss:'moving',fms_disconnect:'moving',fms_delay:'moving',road_block:'moving',fail_release:'release',fail_hoist:'placing',agv_unavailable:'handover',slot_occupied:'placing',height_mismatch:'placing'})[e.target.value]||'immediate';renderContent();}if(e.target.id==='scenario-target'){selected=e.target.value;renderContent();}if(e.target.id==='sensor-actor'){selected=e.target.value;sensor=sensorRefs(current())[0]?.id||sensor;renderContent();}});
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-actor],[data-sensor]')){e.preventDefault();e.target.dispatchEvent(new MouseEvent('click',{bubbles:true}));}});
 async function init(){try{const r=await fetch('/api/reference');if(!r.ok)throw Error();const data=await r.json();reference=data.reference;settings=data.settings;}catch{toast('STS 레퍼런스를 읽지 못했습니다. 프로젝트 경로를 확인하세요.');}await poll();renderContent();setInterval(poll,1000);}
 init();

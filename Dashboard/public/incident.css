@@ -58,6 +58,12 @@
 .incident-empty { text-align: center; padding: 26px 10px; color: #506b68; }
 .incident-empty strong { font-size: 14px; color: #385b51; }
 .incident-empty p { margin-top: 6px; line-height: 1.6; font-size: 12px; }
+.incident-records{margin-top:26px}.incident-records>.form-body{padding:24px}.incident-records .incident-history{max-block-size:560px}.incident-records .incident-run-detail{max-block-size:340px}
+.incident-timing{margin-bottom:22px;padding-bottom:20px;border-bottom:1px solid #e0e9e4}.incident-timing-head{display:flex;gap:16px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}.incident-timing h3{margin:0 0 8px;font-size:17px;color:#21473e}.incident-timing p{font-size:12px;line-height:1.7;color:#60776f}.incident-timing .control-actions{display:flex;gap:8px;flex-wrap:wrap}.incident-timing .control-actions button{font-size:12px;min-height:36px}
+.incident-timing-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:18px 0}.incident-timing-cards>div{padding:16px;background:#f3f8f5;border:1px solid #dee8e2;border-radius:10px}.incident-timing-cards small{display:block;font-size:12px;color:#567268;margin-bottom:10px}.incident-timing-cards strong{font-size:20px;color:#1b4439;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.incident-step-times{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:12px 0 3px 28px}.incident-step-times>div{border-left:2px solid #dce9e1;padding-left:10px}.incident-step-times dt{font-size:11px;color:#597267;line-height:1.5}.incident-step-times dd{margin:4px 0 0;font-size:12px;color:#234e40;font-weight:600;font-variant-numeric:tabular-nums}
+@media(max-width:1100px){.incident-timing-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.incident-step-times{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:550px){.incident-step-times{grid-template-columns:repeat(2,minmax(0,1fr));margin-left:0}.incident-timing-cards strong{font-size:16px}.incident-records>.form-body{padding:16px}}
 @media(min-width:1500px){.incident-grid{grid-template-columns:minmax(420px,.75fr) minmax(560px,1.4fr)}}
 @media(max-width:1050px){.incident-grid{grid-template-columns:1fr}.incident-intro{align-items:flex-start}.incident-summary strong{font-size:20px}}
 @media(max-width:550px){.incident-fields{grid-template-columns:1fr}.incident-intro{display:block}.incident-intro .live-label{display:inline-block;margin-top:12px}.incident-step>div{flex-wrap:wrap}.incident-step div>strong{margin-left:33px}.incident-grid .form-body{padding:18px}}

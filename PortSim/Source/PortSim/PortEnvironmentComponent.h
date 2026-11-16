@@ -304,6 +304,9 @@ public:
     UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Environment|Ice",meta=(ClampMin="0",ClampMax="1")) float IceIntensity=1;
 private:
     void NotifyExternalInput();
+public:
+    int32 InitializedSeed=0,InputRevision=0;
+private:
     UPROPERTY() TObjectPtr<UPhysicalMaterial> ContactMaterial;
     FPortSurfaceState MaterialSurface;
     FPortFrictionSettings MaterialSettings;

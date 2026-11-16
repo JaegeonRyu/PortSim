@@ -230,8 +230,18 @@ private:
     friend class FMovingPickupRecoveryTest;
     friend class FIncidentScenarioTest;
     friend class FIncidentExtensionTest;
+    friend class FIncidentTimingTest;
     TArray<FPortIncidentRun> IncidentRuns;
     double IncidentClock=0;
+    double IncidentMeasureClock=0,IncidentHaltSeconds=0;
+    FString IncidentComparisonKey;
+    int32 IncidentEnvironmentRevision=0;
+    bool bIncidentReferenceClean=true;
+    TMap<FString,double> IncidentCompletionTimes;
+    void BeginIncidentMeasurement();
+    void AdvanceIncidentMeasurement(float Dt,bool Paused);
+    TSharedPtr<FJsonObject> CaptureIncidentTiming() const;
+    void TrackIncidentImpact(AActor* Cause,AActor* From,AActor* To,AActor* Cargo);
     bool bIncidentInputUsed=false;
     bool ApplyIncidentCommand(const FJsonObject& Command,FString& Error);
     TMap<FString,FPortIncidentRoadClosure> IncidentRoadClosures;
