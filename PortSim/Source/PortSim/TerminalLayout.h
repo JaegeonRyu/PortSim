@@ -13,7 +13,10 @@ namespace TerminalLayout
     constexpr float VesselOriginXM=-18.f, VesselCenterXM=-32.f; // ShipHull is -14m from the actor origin.
     constexpr float VesselOriginZM=2.5f, VesselDeckTopM=4.5f; // ShipDeck centre +1.9m, half thickness 0.1m.
     constexpr float VesselCenterY(int Index) { return -390.f+Index*230.f; }
-    constexpr float STSCenterY(int Index) { return VesselCenterY(Index/3)+(Index%3-1)*70.f; }
+    constexpr float STSSpacingM=70.f;
+    constexpr float STSCenterY(int Index) { return VesselCenterY(Index/3)+(Index%3-1)*STSSpacingM; }
+    inline int32 VesselDischargeZone(double LongitudinalM)
+    { return FMath::Clamp(FMath::RoundToInt(LongitudinalM/STSSpacingM)+1,0,2); }
     static_assert(VesselCenterY(2)+VesselLengthM*.5f+7.f<247.f,"Ships must stop before worker rest");
     static_assert(VesselCenterY(0)-VesselLengthM*.5f>-525.f,"Ships must stay inside quay extent");
     constexpr float YardScale = 1.f;

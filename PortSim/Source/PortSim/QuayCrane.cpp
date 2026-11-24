@@ -172,6 +172,7 @@ void AQuayCrane::BuildYard()
     SunLight=NewObject<UDirectionalLightComponent>(this,TEXT("Sun"));
     SunLight->SetMobility(EComponentMobility::Movable);
     SunLight->SetAtmosphereSunLight(true);
+    SunLight->SetForwardShadingPriority(1);
     SunLight->SetLightSourceAngle(0.545f);
     SunLight->SetIntensity(0.f);
     AddInstanceComponent(SunLight);

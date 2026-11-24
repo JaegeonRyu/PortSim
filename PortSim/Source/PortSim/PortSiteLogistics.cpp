@@ -572,7 +572,7 @@ void APortSiteLogistics::PrepareExecutableCargo(int32 Lane)
         if(C.STS!=Lane || (C.State!=0 && I!=Current) || !SourceAccessible(I) || !CanSTSService(Lane,I)) continue;
         if(C.DispatchEligibleAt<0) C.DispatchEligibleAt=SimulationTime;
         Requests.Add({I,C.PlanningOrder,C.DispatchEligibleAt,true,YardDispatchReady(I),
-            C.DispatchCriticalPath,C.DispatchUnlocks});
+            C.DispatchCriticalPath,C.DispatchUnlocks,C.Actor->CargoInformation.HazardGroup!=TEXT("none")});
     }
     const int32 Best=AGVDispatchPolicy::SelectExecutable(Requests);
     // A returning vehicle owns its physical bay, not an irrevocable cargo
@@ -899,8 +899,10 @@ void APortSiteLogistics::ScheduleFleet()
         if(ReadyA)
         {
             const auto& CA=Manifest[CargoA]; const auto& CB=Manifest[CargoB];
-            const double PA=AGVDispatchPolicy::ReadyPriority(CA.DispatchEligibleAt,CA.DispatchCriticalPath);
-            const double PB=AGVDispatchPolicy::ReadyPriority(CB.DispatchEligibleAt,CB.DispatchCriticalPath);
+            const double PA=AGVDispatchPolicy::ReadyPriority(CA.DispatchEligibleAt,CA.DispatchCriticalPath,
+                CA.Actor->CargoInformation.HazardGroup!=TEXT("none"));
+            const double PB=AGVDispatchPolicy::ReadyPriority(CB.DispatchEligibleAt,CB.DispatchCriticalPath,
+                CB.Actor->CargoInformation.HazardGroup!=TEXT("none"));
             if(PA!=PB) return PA>PB;
             if(CA.DispatchUnlocks!=CB.DispatchUnlocks) return CA.DispatchUnlocks>CB.DispatchUnlocks;
         }
