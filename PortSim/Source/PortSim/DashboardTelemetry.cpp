@@ -760,7 +760,7 @@ TUniquePtr<FJsonObject> APortSiteLogistics::CaptureDashboard(bool Paused)
             O->SetNumberField(TEXT("reference_curve_speed_max_mps"),AGVReference::ReferenceCurveSpeedCmPerSecond*.01f);
             O->SetNumberField(TEXT("source_crab_speed_not_applied_mps"),AGVReference::SourceCrabSpeedNotAppliedCmPerSecond*.01f);
             O->SetBoolField(TEXT("lateral_motion_enabled"),AGVReference::LateralMotionEnabled);
-            O->SetStringField(TEXT("motion_model"),TEXT("six_contact_planar_tire_roll_pitch"));
+            O->SetStringField(TEXT("motion_model"),TEXT("four_contact_planar_tire_roll_pitch"));
             O->SetObjectField(TEXT("agv_physics"),V->DynamicsSnapshot());
             Vector(O,TEXT("estimated_position_m"),V->Sensors.EstimatedPosition,.01f);
             Vector(O,TEXT("transponder_position_m"),V->Sensors.LastAbsolutePosition,.01f);

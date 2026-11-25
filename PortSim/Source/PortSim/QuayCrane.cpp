@@ -240,6 +240,8 @@ void AQuayCrane::ApplyAppearance()
     for(const auto& Vessel:VesselActors) AddEquipmentMeshes(Vessel);
     for (auto* Mesh : Meshes)
     {
+        // Preserve authored multi-material AGV exteriors, tires and alloy rims.
+        if(Mesh->ComponentHasTag(TEXT("PortSim.AuthoredExterior"))) continue;
         const FString Name = Mesh->GetName();
         auto* Mat = Yellow;
         if (Name.StartsWith(TEXT("Rope")) || Name.StartsWith(TEXT("Rail")) || Name.StartsWith(TEXT("Bogie"))) Mat = Steel;
